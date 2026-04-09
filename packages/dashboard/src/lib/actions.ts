@@ -10,7 +10,13 @@ import {
   getMemoryById,
   getMemories,
 } from "./db";
-import { analyzeCleanup, type CleanupSuggestion } from "./cleanup";
+import {
+  scanForSuggestions,
+  expandMergeSuggestion,
+  expandSplitSuggestion,
+  expandContradictionSuggestion,
+  type CleanupSuggestion,
+} from "./cleanup";
 import { revalidatePath } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "fs";
@@ -175,23 +181,49 @@ export async function clearAllMemoriesAction() {
 
 // --- Cleanup actions ---
 
-export async function analyzeCleanupAction(): Promise<
+/** Scan: algorithmic only, zero API cost. Returns suggestions instantly. */
+export async function scanCleanupAction(): Promise<
   { suggestions: CleanupSuggestion[] } | { error: string }
 > {
+  try {
+    const suggestions = scanForSuggestions();
+    return { suggestions };
+  } catch (e) {
+    console.error("[engrams] Cleanup scan failed:", e);
+    return { error: "Cleanup scan failed" };
+  }
+}
+
+/** Expand: on-demand LLM call for a single suggestion. Requires API key. */
+export async function expandSuggestionAction(
+  suggestion: CleanupSuggestion,
+): Promise<{ suggestion: CleanupSuggestion } | { error: string }> {
   const apiKey = getApiKey();
   if (!apiKey) {
     return {
-      error:
-        "API key required for cleanup analysis. Add ANTHROPIC_API_KEY to packages/dashboard/.env.local",
+      error: "API key required. Add ANTHROPIC_API_KEY to packages/dashboard/.env.local",
     };
   }
 
   try {
-    const suggestions = await analyzeCleanup(apiKey);
-    return { suggestions };
+    let expanded: CleanupSuggestion;
+    switch (suggestion.type) {
+      case "merge":
+        expanded = await expandMergeSuggestion(suggestion, apiKey);
+        break;
+      case "split":
+        expanded = await expandSplitSuggestion(suggestion, apiKey);
+        break;
+      case "contradiction":
+        expanded = await expandContradictionSuggestion(suggestion, apiKey);
+        break;
+      default:
+        expanded = { ...suggestion, expanded: true };
+    }
+    return { suggestion: expanded };
   } catch (e) {
-    console.error("[engrams] Cleanup analysis failed:", e);
-    return { error: "Cleanup analysis failed. Check your API key and try again." };
+    console.error("[engrams] Expand suggestion failed:", e);
+    return { error: "Failed to analyze this suggestion" };
   }
 }
 

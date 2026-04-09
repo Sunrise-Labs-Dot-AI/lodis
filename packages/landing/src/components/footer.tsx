@@ -3,7 +3,7 @@ export function Footer() {
     <footer className="py-12 px-6 text-center">
       <div className="section-divider" />
       <p className="text-text-dim text-sm mt-8">
-        Built by{" "}
+        &copy; 2026{" "}
         <a
           href="https://sunrise-labs.ai"
           target="_blank"

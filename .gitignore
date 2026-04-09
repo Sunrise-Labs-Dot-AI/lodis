@@ -7,3 +7,8 @@ dist/
 .turbo/
 .next/
 packages/dashboard/.env.local
+packages/mcp-server/.env.local
+*.env.local
+handoff-*.md
+.claude/worktrees/
+packages/landing/.vercel/

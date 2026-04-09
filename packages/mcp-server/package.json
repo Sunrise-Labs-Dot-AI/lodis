@@ -1,6 +1,6 @@
 {
   "name": "engrams",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Universal AI memory layer — MCP server with persistent, cross-tool memory for Claude Code, Cursor, Windsurf, and more",
   "type": "module",
   "bin": {

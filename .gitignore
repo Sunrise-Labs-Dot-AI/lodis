@@ -10,5 +10,6 @@ packages/dashboard/.env.local
 packages/mcp-server/.env.local
 *.env.local
 handoff-*.md
-.claude/worktrees/
+SESSION_LOG.md
+.claude/
 packages/landing/.vercel/

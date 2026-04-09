@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/card";
 import { SettingsActions } from "./actions";
 import { SyncSettings } from "./sync-settings";
 import { getSyncStatus } from "./sync-actions";
+import { getLLMStatus } from "./llm-actions";
+import { LLMProviderForm } from "@/components/llm-provider-form";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,7 @@ export default async function SettingsPage() {
   const stats = getDbStats();
   const dbPath = resolve(homedir(), ".engrams", "engrams.db");
   const syncStatus = await getSyncStatus();
+  const llmStatus = await getLLMStatus();
 
   return (
     <div className="space-y-6">
@@ -40,6 +43,14 @@ export default async function SettingsPage() {
             <span>{stats.totalDomains}</span>
           </div>
         </div>
+      </Card>
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold mb-1">LLM Provider</h3>
+        <p className="text-xs text-[var(--color-text-muted)] mb-3">
+          Powers entity extraction, memory correction, and splitting. Bring your own API key.
+        </p>
+        <LLMProviderForm initialStatus={llmStatus} />
       </Card>
 
       <SyncSettings syncStatus={syncStatus} />

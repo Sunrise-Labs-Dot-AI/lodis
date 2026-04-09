@@ -1,4 +1,6 @@
 import type { EntityType } from "./types.js";
+import type { LLMProvider } from "./llm.js";
+import { parseLLMJson } from "./llm-utils.js";
 
 export interface ExtractionResult {
   entity_type: EntityType;
@@ -12,24 +14,16 @@ export interface ExtractionResult {
 }
 
 export async function extractEntity(
+  provider: LLMProvider,
   content: string,
   detail: string | null,
   existingEntityNames?: string[],
 ): Promise<ExtractionResult> {
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic();
-
   const existingNamesHint = existingEntityNames && existingEntityNames.length > 0
     ? `\n\nExisting entity names in the system (prefer matching these over creating new ones):\n${existingEntityNames.slice(0, 50).map((n) => `- ${n}`).join("\n")}`
     : "";
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-5-20250514",
-    max_tokens: 500,
-    messages: [
-      {
-        role: "user",
-        content: `Classify this memory and extract structured data.
+  const prompt = `Classify this memory and extract structured data.
 
 Memory: ${content}${detail ? `\nDetail: ${detail}` : ""}${existingNamesHint}
 
@@ -63,15 +57,8 @@ For structured_data, include relevant fields:
 - preference: category, strength (strong/mild/contextual)
 - event: what, when, who
 - goal: what, timeline, status (active/achieved/abandoned)
-- fact: category`,
-      },
-    ],
-  });
+- fact: category`;
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const cleaned = text
-    .replace(/^```(?:json)?\s*\n?/i, "")
-    .replace(/\n?```\s*$/i, "")
-    .trim();
-  return JSON.parse(cleaned);
+  const text = await provider.complete(prompt, { maxTokens: 500, json: true });
+  return parseLLMJson<ExtractionResult>(text);
 }

@@ -3,7 +3,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { eq, and, isNull, desc, sql, gte } from "drizzle-orm";
 import { randomBytes } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
 import {
   createDatabase,
   searchFTS,
@@ -29,8 +28,13 @@ import {
   deriveKeys,
   loadCredentials,
   sync,
+  resolveLLMProvider,
+  parseLLMJson,
+  validateExtraction,
+  loadConfig,
+  saveConfig,
 } from "@engrams/core";
-import type { SourceType, Relationship, EntityType, EncryptionKeys } from "@engrams/core";
+import type { SourceType, Relationship, EntityType, EncryptionKeys, LLMProvider } from "@engrams/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -64,6 +68,10 @@ export async function startServer() {
       lastDecayRun = now;
     }
   }
+
+  // Resolve LLM providers — separate tiers for extraction (cheap) vs analysis (capable)
+  let extractionProvider: LLMProvider | null = resolveLLMProvider("extraction");
+  let analysisProvider: LLMProvider | null = resolveLLMProvider("analysis");
 
   // Backfill embeddings for existing memories (async, best-effort)
   if (vecAvailable) {
@@ -481,7 +489,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         .run();
 
       // Background entity extraction (fire-and-forget) when entityType not provided
-      if (!params.entityType && process.env.ANTHROPIC_API_KEY) {
+      if (!params.entityType && extractionProvider) {
         (async () => {
           try {
             // Gather existing entity names for normalization
@@ -490,10 +498,17 @@ Organize memories by life domain: general, work, health, finance, relationships,
               .all() as { entity_name: string }[];
 
             const extraction = await extractEntity(
+              extractionProvider!,
               params.content,
               params.detail ?? null,
               existingNames.map((r) => r.entity_name),
             );
+
+            const validation = validateExtraction(extraction);
+            if (!validation.valid) {
+              process.stderr.write(`[engrams] Entity extraction failed validation: ${validation.error}\n`);
+              return;
+            }
 
             // Race condition guard: only update if entity_type hasn't been set yet
             const current = sqlite
@@ -539,16 +554,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
       const sentences = fullText.split(/(?<=[.!?])\s+/).filter((s) => s.length > 10);
       let splitSuggestion: { should_split: boolean; parts?: { content: string; detail?: string }[] } | null = null;
 
-      if (sentences.length >= 3 && process.env.ANTHROPIC_API_KEY) {
+      if (sentences.length >= 3 && extractionProvider) {
         try {
-          const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-          const resp = await client.messages.create({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 512,
-            messages: [
-              {
-                role: "user",
-                content: `Analyze this memory and determine if it contains multiple distinct topics that should be stored separately. Only suggest splitting if the topics are genuinely independent (would be searched for separately).
+          const splitPrompt = `Analyze this memory and determine if it contains multiple distinct topics that should be stored separately. Only suggest splitting if the topics are genuinely independent (would be searched for separately).
 
 Memory content: ${JSON.stringify(params.content)}
 Memory detail: ${JSON.stringify(params.detail ?? null)}
@@ -557,12 +565,9 @@ Respond with ONLY valid JSON:
 - If it should NOT be split: {"should_split": false}
 - If it SHOULD be split: {"should_split": true, "parts": [{"content": "...", "detail": "..."}, ...]}
 
-Each part should have a concise "content" (one sentence) and optional "detail". Do not split if the content is a single coherent topic.`,
-              },
-            ],
-          });
-          const text = resp.content[0].type === "text" ? resp.content[0].text : "";
-          splitSuggestion = JSON.parse(text);
+Each part should have a concise "content" (one sentence) and optional "detail". Do not split if the content is a single coherent topic.`;
+          const text = await extractionProvider.complete(splitPrompt, { maxTokens: 512, json: true });
+          splitSuggestion = parseLLMJson(text);
         } catch {
           // LLM call failed — skip split suggestion
         }
@@ -578,7 +583,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         entityType: params.entityType ?? null,
         entityName: params.entityName ?? null,
       };
-      if (!params.entityType && process.env.ANTHROPIC_API_KEY) {
+      if (!params.entityType && extractionProvider) {
         result._background_classification = "running";
       }
       if (hasPii) {
@@ -1304,8 +1309,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       domain: z.string().optional().describe("Only classify memories in this domain"),
     },
     async (params) => {
-      if (!process.env.ANTHROPIC_API_KEY) {
-        return textResult({ error: "ANTHROPIC_API_KEY not set — entity extraction requires an API key" });
+      if (!extractionProvider) {
+        return textResult({ error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure ~/.engrams/config.json" });
       }
 
       const classifyLimit = params.limit ?? 50;
@@ -1336,7 +1341,13 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       for (const mem of untyped) {
         try {
-          const extraction = await extractEntity(mem.content, mem.detail, nameList);
+          const extraction = await extractEntity(extractionProvider!, mem.content, mem.detail, nameList);
+
+          const validation = validateExtraction(extraction);
+          if (!validation.valid) {
+            errors++;
+            continue;
+          }
 
           sqlite.transaction(() => {
             sqlite.prepare(
@@ -1473,6 +1484,56 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         canWrite: !!canWrite,
         updated: true,
       });
+    },
+  );
+
+  // --- LLM Configuration ---
+
+  server.tool(
+    "memory_configure",
+    "Configure Engrams settings. Currently supports LLM provider setup for entity extraction, correction, and splitting.",
+    {
+      llm_provider: z.enum(["anthropic", "openai", "ollama"]).describe("LLM provider to use"),
+      llm_api_key: z.string().optional().describe("API key for the provider. Not needed for Ollama."),
+      llm_base_url: z.string().optional().describe("Custom base URL for OpenAI-compatible endpoints or Ollama."),
+      llm_extraction_model: z.string().optional().describe("Model for entity extraction (high-volume, cheap). Defaults: anthropic=claude-haiku-4-5, openai=gpt-4o-mini, ollama=llama3.2"),
+      llm_analysis_model: z.string().optional().describe("Model for correction/splitting (user-initiated, capable). Defaults: anthropic=claude-sonnet-4-5, openai=gpt-4o, ollama=llama3.2"),
+    },
+    async (params) => {
+      const config = loadConfig();
+      config.llm = {
+        provider: params.llm_provider,
+        apiKey: params.llm_api_key || undefined,
+        baseUrl: params.llm_base_url || undefined,
+        models: {
+          extraction: params.llm_extraction_model || undefined,
+          analysis: params.llm_analysis_model || undefined,
+        },
+      };
+      saveConfig(config);
+
+      // Re-resolve providers with new config
+      extractionProvider = resolveLLMProvider("extraction");
+      analysisProvider = resolveLLMProvider("analysis");
+
+      // Test connection
+      try {
+        if (extractionProvider) {
+          await extractionProvider.complete("Say ok", { maxTokens: 10 });
+        }
+        return textResult({
+          status: "configured",
+          provider: params.llm_provider,
+          extraction_model: params.llm_extraction_model || "(default)",
+          analysis_model: params.llm_analysis_model || "(default)",
+        });
+      } catch (err) {
+        return textResult({
+          status: "configured_with_error",
+          provider: params.llm_provider,
+          error: `Config saved but connection test failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        });
+      }
     },
   );
 

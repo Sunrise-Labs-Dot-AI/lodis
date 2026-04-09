@@ -18,26 +18,8 @@ import {
   type CleanupSuggestion,
 } from "./cleanup";
 import { revalidatePath } from "next/cache";
-import Anthropic from "@anthropic-ai/sdk";
-import { readFileSync } from "fs";
-import { resolve } from "path";
-
-function getApiKey(): string | undefined {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
-  // Next.js may not load .env.local from the right dir — try manual fallback
-  const candidates = [
-    resolve(process.cwd(), ".env.local"),
-    resolve(process.cwd(), "packages/dashboard/.env.local"),
-  ];
-  for (const envPath of candidates) {
-    try {
-      const content = readFileSync(envPath, "utf8");
-      const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
-      if (match) return match[1].trim();
-    } catch {}
-  }
-  return undefined;
-}
+import { resolveLLMProvider, parseLLMJson, validateCorrection, validateSplit } from "@engrams/core";
+import type { LLMProvider } from "@engrams/core";
 
 export async function deleteMemoryAction(id: string) {
   deleteMemoryById(id);
@@ -63,22 +45,15 @@ export async function correctMemoryAction(id: string, feedback: string) {
   const memory = getMemoryById(id);
   if (!memory) return null;
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
+  const provider = resolveLLMProvider("analysis");
+  if (!provider) {
     const result = correctMemoryById(id, feedback);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
   }
 
-  const client = new Anthropic({ apiKey });
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 512,
-    messages: [
-      {
-        role: "user",
-        content: `You are updating a stored memory based on user feedback. Return ONLY valid JSON with "content" and "detail" fields.
+  const prompt = `You are updating a stored memory based on user feedback. Return ONLY valid JSON with "content" and "detail" fields.
 
 Current memory:
 - Content: ${JSON.stringify(memory.content)}
@@ -88,16 +63,22 @@ User's correction: ${JSON.stringify(feedback)}
 
 Apply the user's correction to produce updated content and detail. The "content" field is a short summary (one sentence). The "detail" field is optional additional context. If the correction only applies to one field, keep the other unchanged. If detail should be empty, set it to null.
 
-Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`,
-      },
-    ],
-  });
+Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
   try {
-    const parsed = JSON.parse(text);
+    const text = await provider.complete(prompt, { maxTokens: 512, json: true });
+    const parsed = parseLLMJson<{ content: string; detail: string | null }>(text);
     const newContent = typeof parsed.content === "string" ? parsed.content : memory.content;
     const newDetail = parsed.detail === null ? null : (typeof parsed.detail === "string" ? parsed.detail : memory.detail);
+
+    const validation = validateCorrection(memory.content, newContent, feedback);
+    if (!validation.valid) {
+      const result = correctMemoryById(id, feedback);
+      revalidatePath("/");
+      revalidatePath(`/memory/${id}`);
+      return result;
+    }
+
     const result = correctMemoryById(id, newContent, newDetail);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
@@ -119,19 +100,12 @@ export async function proposeSplitAction(
   const memory = getMemoryById(id);
   if (!memory) return { error: "Memory not found" };
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    return { error: "ANTHROPIC_API_KEY is required. Add it to packages/dashboard/.env.local" };
+  const provider = resolveLLMProvider("analysis");
+  if (!provider) {
+    return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
   }
 
-  const client = new Anthropic({ apiKey });
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `You are managing a memory system that stores facts about a user. This memory contains multiple distinct topics that should be stored separately so they can be independently searched, confirmed, corrected, or removed.
+  const prompt = `You are managing a memory system that stores facts about a user. This memory contains multiple distinct topics that should be stored separately so they can be independently searched, confirmed, corrected, or removed.
 
 Current memory:
 - Content: ${JSON.stringify(memory.content)}
@@ -143,22 +117,19 @@ Split this into the minimum number of independent memories. Each memory should:
 - Have an optional "detail" field for supporting context that aids retrieval
 - Be independently useful — searchable on its own without the other parts
 
-Return ONLY a JSON array: [{"content": "...", "detail": "..." or null}, ...]`,
-      },
-    ],
-  });
+Return ONLY a JSON array: [{"content": "...", "detail": "..." or null}, ...]`;
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
   try {
-    // Strip markdown code fences if present
-    const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-    const parts = JSON.parse(cleaned) as SplitPart[];
-    if (!Array.isArray(parts) || parts.length < 2) {
-      return { error: "This memory doesn't appear to need splitting" };
+    const text = await provider.complete(prompt, { maxTokens: 1024, json: true });
+    const parts = parseLLMJson<SplitPart[]>(text);
+
+    const validation = validateSplit(memory.content, parts);
+    if (!validation.valid) {
+      return { error: validation.error || "Split analysis failed" };
     }
+
     return { parts };
   } catch (e) {
-    console.error("[engrams] Split parse error. Raw LLM response:", JSON.stringify(text));
     return { error: "Failed to analyze memory for splitting" };
   }
 }
@@ -194,14 +165,14 @@ export async function scanCleanupAction(): Promise<
   }
 }
 
-/** Expand: on-demand LLM call for a single suggestion. Requires API key. */
+/** Expand: on-demand LLM call for a single suggestion. Requires LLM provider. */
 export async function expandSuggestionAction(
   suggestion: CleanupSuggestion,
 ): Promise<{ suggestion: CleanupSuggestion } | { error: string }> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
+  const provider = resolveLLMProvider("analysis");
+  if (!provider) {
     return {
-      error: "API key required. Add ANTHROPIC_API_KEY to packages/dashboard/.env.local",
+      error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings.",
     };
   }
 
@@ -209,13 +180,13 @@ export async function expandSuggestionAction(
     let expanded: CleanupSuggestion;
     switch (suggestion.type) {
       case "merge":
-        expanded = await expandMergeSuggestion(suggestion, apiKey);
+        expanded = await expandMergeSuggestion(suggestion, provider);
         break;
       case "split":
-        expanded = await expandSplitSuggestion(suggestion, apiKey);
+        expanded = await expandSplitSuggestion(suggestion, provider);
         break;
       case "contradiction":
-        expanded = await expandContradictionSuggestion(suggestion, apiKey);
+        expanded = await expandContradictionSuggestion(suggestion, provider);
         break;
       default:
         expanded = { ...suggestion, expanded: true };

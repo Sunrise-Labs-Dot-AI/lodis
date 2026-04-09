@@ -118,13 +118,54 @@ Features:
 }
 ```
 
-### Dashboard LLM features
+### LLM Provider (optional)
 
-For LLM-powered correction, splitting, and entity extraction, set your Anthropic API key:
+Entity extraction, correction, and splitting use an LLM. Bring your own API key:
 
+**Anthropic (auto-detected)**
 ```bash
-echo "ANTHROPIC_API_KEY=sk-ant-..." > packages/dashboard/.env.local
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+**OpenAI**
+```bash
+export OPENAI_API_KEY=sk-...
+export ENGRAMS_LLM_PROVIDER=openai
+```
+
+**Ollama (local, free)**
+```bash
+ollama pull llama3.2
+export ENGRAMS_LLM_PROVIDER=ollama
+```
+
+**Custom OpenAI-compatible endpoint**
+```bash
+export ENGRAMS_LLM_PROVIDER=openai
+export ENGRAMS_LLM_MODEL=mixtral-8x7b
+export ENGRAMS_LLM_BASE_URL=https://api.together.xyz/v1
+export ENGRAMS_API_KEY=...
+```
+
+Or configure via `~/.engrams/config.json`:
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "apiKey": "sk-ant-...",
+    "models": {
+      "extraction": "claude-haiku-4-5-20251001",
+      "analysis": "claude-sonnet-4-5-20250514"
+    }
+  }
+}
+```
+
+Engrams uses two model tiers:
+- **Extraction** (runs on every write): entity classification, proactive split detection. A fast, cheap model is fine.
+- **Analysis** (user-initiated): correction, splitting, cleanup. Use a capable model for quality results.
+
+No LLM? No problem. Core features (search, store, connect, sync) work without one.
 
 ## Data
 

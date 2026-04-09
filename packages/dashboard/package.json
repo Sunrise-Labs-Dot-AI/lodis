@@ -10,7 +10,6 @@
     "start": "next start"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.86.1",
     "@clerk/nextjs": "^7.0.12",
     "@engrams/core": "workspace:*",
     "@libsql/client": "^0.17.2",

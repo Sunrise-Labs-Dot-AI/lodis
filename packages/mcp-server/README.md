@@ -24,6 +24,20 @@ Add to your MCP config and you're done:
 
 That's it. Your AI agent now has persistent memory.
 
+## Getting Started
+
+After installing, tell your AI assistant:
+
+> "Help me set up Engrams"
+
+The assistant will scan your connected tools (calendar, email, GitHub), ask a few targeted questions, and seed 30-50 memories with entity types and connections. Review at `localhost:3838`.
+
+### Importing Existing Memories
+
+- **Claude Code auto-memory:** "Import my Claude memories into Engrams"
+- **ChatGPT memory export:** "Import this ChatGPT memory export into Engrams"
+- **Cursor rules:** "Import my .cursorrules as Engrams preferences"
+
 ## What You Get
 
 Engrams provides 20 MCP tools:
@@ -50,6 +64,16 @@ Engrams provides 20 MCP tools:
 | `memory_onboard` | Get a personalized onboarding plan to seed your memory |
 | `memory_import` | Import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
 | `memory_sync` | Sync memories with cloud (Pro tier) |
+
+### Key features
+
+- **Hybrid search** — FTS5 full-text + vector embeddings (all-MiniLM-L6-v2, local) merged via Reciprocal Rank Fusion
+- **Entity types** — Memories auto-classified as person, organization, place, project, preference, event, goal, or fact
+- **Knowledge graph** — Typed relationships between memories, auto-connected entities
+- **Confidence scoring** — 0-1 scale based on confirmations, corrections, mistakes, usage, and time decay
+- **Dedup on write** — Similar memories detected and surfaced to the agent for resolution
+- **PII detection** — Regex-based pattern detection with `memory_scrub` for redaction
+- **Source attribution** — Every memory tracks which agent learned it and how
 
 ## MCP Config Examples
 
@@ -100,7 +124,7 @@ In `.cursor/mcp.json` in your project root:
 
 ### Windsurf
 
-In your Windsurf MCP config:
+In `~/.windsurf/mcp.json`:
 
 ```json
 {
@@ -115,12 +139,37 @@ In your Windsurf MCP config:
 
 ## How It Works
 
-- **Local-first**: All data stored in `~/.engrams/engrams.db` (SQLite). No accounts, no cloud, no API keys.
-- **FTS5 search**: Full-text search across all your memories using SQLite's FTS5 engine.
-- **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost confidence, corrections reset it, mistakes degrade it.
+- **Local-first**: All data stored in `~/.engrams/engrams.db` (SQLite). No accounts, no cloud, no API keys for core functionality.
+- **Hybrid search**: FTS5 keyword search + sqlite-vec vector embeddings, merged with Reciprocal Rank Fusion (k=60). Confidence-weighted scoring and recency boost.
+- **Embeddings**: all-MiniLM-L6-v2 via Transformers.js — runs locally, no API calls, no cost. ~22MB model cached on first search.
+- **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost to 99%, corrections reset, mistakes degrade. Unused memories decay over time.
+- **Entity extraction**: Memories auto-classified into 8 entity types with structured data. Connections auto-created between related entities.
 - **Source attribution**: Every memory tracks which agent wrote it and how it was acquired.
-- **Audit trail**: All changes are logged in an event timeline.
+- **Audit trail**: All changes logged in an event timeline.
 - **Cross-tool**: Every MCP-compatible tool shares the same memory database.
+
+## LLM Provider (optional)
+
+Entity extraction, correction, and splitting use an LLM. Bring your own API key:
+
+**Anthropic (auto-detected)**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**OpenAI**
+```bash
+export OPENAI_API_KEY=sk-...
+export ENGRAMS_LLM_PROVIDER=openai
+```
+
+**Ollama (local, free)**
+```bash
+ollama pull llama3.2
+export ENGRAMS_LLM_PROVIDER=ollama
+```
+
+Or configure via `~/.engrams/config.json` for per-task model routing. No LLM? Core features (search, store, connect) work without one.
 
 ## Web Dashboard
 
@@ -130,14 +179,11 @@ Engrams includes a web dashboard for browsing and managing your memories visuall
 git clone https://github.com/Sunrise-Labs-Dot-AI/engrams.git
 cd engrams && pnpm install && pnpm build
 
-# Start the MCP server with HTTP API
-node packages/mcp-server/dist/cli.js --http
-
-# In another terminal, start the dashboard
+# Start the dashboard
 cd packages/dashboard && pnpm dev
 ```
 
-Open `http://localhost:3000` to browse memories, search, confirm, correct, and manage agent permissions.
+Open [localhost:3838](http://localhost:3838) to browse memories, search, confirm, correct, manage agent permissions, explore the knowledge graph, and run cleanup operations.
 
 ## Contributing
 

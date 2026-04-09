@@ -2,42 +2,43 @@
 
 ## Product Identity
 
-- **Name:** Engrams
-- **npm:** `engrams` (unscoped); `@engrams/core`, `@engrams/dashboard` (workspace packages)
+- **Name:** Engrams (from neuroscience: a physical trace of memory in the brain)
+- **npm:** `engrams` (unscoped, published); `@engrams/core`, `@engrams/dashboard`, `@engrams/landing` (workspace packages)
 - **Domain:** getengrams.com
 - **GitHub:** Sunrise-Labs-Dot-AI/engrams
+- **License:** MIT — Copyright (c) 2026 Sunrise Labs
 - **Tagline:** Universal, portable memory layer for AI agents with a consumer-grade control surface
 
 ## What Engrams Is
 
 An open-source MCP server + localhost web dashboard that gives AI agents persistent, cross-tool memory with full user control. Any MCP-compatible tool (Claude Code, Cursor, Windsurf, Claude Desktop, Cline) connects to the same memory. Users browse, search, confirm, correct, and manage what their agents know through a real dashboard — not just chat commands.
 
-## V1 Scope
+## Current State (April 2026)
 
-**Ships:**
-- MCP server (stdio transport) with ~12 tools (CRUD, search, confirm/correct/flag, connections, permissions)
-- SQLite storage via better-sqlite3 + Drizzle ORM
-- FTS5 full-text search
-- Counter-based confidence (confirmed_count, corrected_count, mistake_count, used_count)
-- Next.js localhost dashboard (memory browser, detail view, agent permissions, settings/export)
-- npm distribution (`npx -y engrams`)
+V1 and V2 are feature complete. 18 MCP tools, 75 tests, hybrid search, entity types, knowledge graph, confidence decay, dedup, PII detection, and a full Next.js dashboard.
 
-**Deferred to V2 (build only after V1 validates):**
-- Embedding pipeline (Transformers.js + all-MiniLM-L6-v2)
-- Vector search (sqlite-vec)
-- Encryption (AES-256-GCM + scrypt KDF)
-- Cloud sync (Turso embedded replicas)
-- Hosted dashboard (Vercel + Clerk auth)
-- Confidence decay formula (ship counters, derive formula from usage data)
+**In progress (handoffs dispatched):**
+- Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
+- Model abstraction + BYOK (`LLMProvider` interface, per-task routing, `memory_configure`)
+- Permission enforcement (checkPermission on all read/write paths, interactive dashboard agents page)
+- Landing page (`packages/landing`) + dashboard restyle (Pensieve design system)
+- Copyright cleanup (MIT license + metadata on all packages)
+
+**Deferred (handoffs written, not dispatched):**
+- Pro tier: encryption (AES-256-GCM + scrypt), cloud sync (Turso), Clerk auth, hosted dashboard, Vercel deployment (`handoff-pro-tier.md`)
+- npm publish (account created, needs to run publish)
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | MCP Server | `@modelcontextprotocol/sdk`, TypeScript, Node.js, stdio transport |
-| Database | `better-sqlite3`, Drizzle ORM (SQLite dialect), FTS5 |
-| Dashboard | Next.js 15 (App Router), React 18, Tailwind v4, custom UI components |
-| Testing | Vitest |
+| Database | `better-sqlite3`, Drizzle ORM (SQLite dialect), FTS5, sqlite-vec |
+| Embeddings | `all-MiniLM-L6-v2` via Transformers.js (local, no API calls), 384 dims |
+| LLM | Abstracted `LLMProvider` interface — Anthropic (lazy import), OpenAI, Ollama (raw fetch). Per-task model routing: extraction (cheap) vs analysis (capable) |
+| Dashboard | Next.js 15 (App Router), React 19, Tailwind v4, custom UI components |
+| Landing | Next.js 15, Tailwind v4, Pensieve design system |
+| Testing | Vitest (75 tests across 7 files) |
 | Build | pnpm workspaces + Turborepo |
 | Distribution | npm (`engrams` package), npx one-liner install |
 
@@ -46,13 +47,15 @@ An open-source MCP server + localhost web dashboard that gives AI agents persist
 ```
 engrams/
 ├── packages/
-│   ├── core/             # @engrams/core — schema, types, confidence engine
+│   ├── core/             # @engrams/core — schema, types, confidence engine, LLM abstraction, crypto
 │   ├── mcp-server/       # engrams (npm) — MCP server + CLI entry point
-│   └── dashboard/        # @engrams/dashboard — Next.js localhost app
+│   ├── dashboard/        # @engrams/dashboard — Next.js localhost app (port 3838)
+│   └── landing/          # @engrams/landing — getengrams.com landing page
+├── handoff-*.md          # Build handoff documents
+├── LICENSE               # MIT
 ├── package.json          # pnpm workspace root
 ├── pnpm-workspace.yaml
 ├── turbo.json
-├── tsconfig.json         # Base TypeScript config
 └── CLAUDE.md             # This file
 ```
 
@@ -63,94 +66,136 @@ All runtime data lives in `~/.engrams/`:
 ```
 ~/.engrams/
 ├── engrams.db           # SQLite database (auto-created on first run)
-├── config.json          # User preferences
-└── credentials.json     # Device ID (mode 0600) — V2: + API key
+├── config.json          # LLM provider config, user preferences
+├── credentials.json     # Device ID, salt (mode 0600) — Pro: + Turso creds
+└── models/              # Cached embedding model (~22MB)
+    └── all-MiniLM-L6-v2/
 ```
 
-## Database Schema (V1)
+## Database Schema
 
-Five tables + one FTS5 virtual table:
+Six tables + two virtual tables:
 
-- **memories** — core storage (id, content, detail, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at)
-- **memory_connections** — relationship graph (source_memory_id, target_memory_id, relationship)
-- **memory_events** — audit trail (memory_id, event_type, agent_id, old_value, new_value, timestamp)
+- **memories** — core storage (id, content, detail, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at)
+- **memory_connections** — relationship graph (source_memory_id, target_memory_id, relationship, updated_at)
+- **memory_events** — audit trail (id, memory_id, event_type, agent_id, agent_name, old_value, new_value, timestamp)
 - **agent_permissions** — per-agent read/write by domain (agent_id, domain, can_read, can_write)
-- **memory_fts** — FTS5 virtual table over content, detail, source_agent_name
+- **engrams_meta** — key-value metadata (key, value) — tracks last_modified for cache invalidation
+- **memory_fts** — FTS5 virtual table over content, detail, entity_name, source_agent_name
+- **memory_embeddings** — sqlite-vec virtual table (float[384])
 
 IDs are `hex(randomblob(16))`. Timestamps are ISO 8601 TEXT. Confidence is REAL 0-1. Soft deletes via deleted_at.
 
-## MCP Tools (V1)
+## Entity Types
+
+Memories are classified into 8 entity types: `person`, `organization`, `place`, `project`, `preference`, `event`, `goal`, `fact`. Each has:
+- `entity_type` — the classification
+- `entity_name` — canonical name for dedup (e.g., "Sarah Chen")
+- `structured_data` — JSON with type-specific fields (role, org, category, etc.)
+
+Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about).
+
+## MCP Tools (18)
 
 | Tool | Description |
 |------|-------------|
-| `memory_search` | FTS5 keyword search with domain/confidence filters |
-| `memory_write` | Create memory with content, domain, source attribution |
-| `memory_update` | Modify content, detail, or domain |
+| `memory_search` | Hybrid semantic + keyword search with domain/confidence/entity filters |
+| `memory_write` | Create memory with dedup detection (similar_found → 5 resolution options) |
+| `memory_update` | Modify content, detail, or metadata |
+| `memory_confirm` | Mark verified (confidence → 0.99) |
+| `memory_correct` | LLM-powered semantic diff correction |
+| `memory_flag_mistake` | Degrade confidence (-0.15) |
 | `memory_remove` | Soft-delete with reason |
-| `memory_confirm` | Increment confirmed_count, boost confidence |
-| `memory_correct` | Replace content, increment corrected_count, reset confidence |
-| `memory_flag_mistake` | Increment mistake_count, degrade confidence |
-| `memory_connect` | Create typed relationship between memories |
-| `memory_get_connections` | Get relationship graph for a memory |
+| `memory_connect` | Link memories with typed relationships |
+| `memory_get_connections` | Traverse the relationship graph |
+| `memory_split` | LLM-powered compound memory splitting (two-phase: propose → confirm) |
+| `memory_classify` | Auto-classify memories with entity types via LLM |
+| `memory_list_entities` | Discover known entities by type |
+| `memory_list` | Browse by domain, type, or confidence |
 | `memory_list_domains` | List all domains with counts |
-| `memory_list` | Browse memories by domain, sorted by confidence or recency |
-| `memory_set_permissions` | Configure per-agent read/write access by domain |
+| `memory_set_permissions` | Per-agent read/write access control by domain |
+| `memory_scrub` | Detect and redact PII patterns |
+| `memory_onboard` | Guided onboarding: scan connected tools → informed interview → seed |
+| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
 
-## Confidence Engine (V1 — Counter-Based)
+## Confidence Engine
 
-Store counters on each memory: `confirmed_count`, `corrected_count`, `mistake_count`, `used_count`.
+### Initial confidence by source type
+- stated: 0.90, observed: 0.75, inferred: 0.65, cross-agent: 0.70
 
-**Initial confidence by source type:**
-- stated: 0.90
-- observed: 0.75
-- inferred: 0.65
-- cross-agent: 0.70
+### Updates
+- confirm: confidence → 0.99
+- correct: confidence → min(max(existing, 0.85), 0.99)
+- mistake: max(confidence - 0.15, 0.10)
+- used: min(confidence + 0.02, 0.99)
+- decay: -0.01 per 30 days since last activity, min 0.10, throttled to once per hour on read paths
 
-**Updates:**
-- confirm: `min(confidence + 0.05, 0.99)`
-- correct: reset to 0.50
-- mistake: `max(confidence - 0.15, 0.10)`
-- used: `min(confidence + 0.02, 0.99)`
+### Dedup + Contradiction Resolution
+On `memory_write`: hybrid search (RRF > 0.7) + entity name/type match. If similar found, returns `similar_found` with 5 resolution options: update, correct, add_detail, keep_both, skip. Agent-in-the-loop, resolved in real-time.
 
-No decay in V1. Counters accumulate data to inform V2 formula.
+## Search Architecture
 
-## Sitter Reference Patterns
+Hybrid search via Reciprocal Rank Fusion (k=60):
+1. FTS5 keyword search → ranked results
+2. sqlite-vec cosine similarity → ranked results
+3. Merge with RRF: `score = Σ 1/(k + rank_i)`
+4. Confidence-weighted scoring + recency boost
+5. Graph expansion (cosine threshold, max 3 hops)
+6. Embedding LRU cache (5-min TTL), result cache (invalidated on writes via engrams_meta.last_modified)
 
-The Sitter codebase (`/Users/jamesheath/Desktop/sitter/`) provides proven patterns to reuse:
+## LLM Provider Abstraction
 
-| Pattern | Sitter Source | How to Adapt |
-|---------|--------------|-------------|
-| Drizzle schema | `lib/db/schema.ts` | SQLite dialect (text IDs, no uuid type, integer booleans) |
-| Encryption | `lib/crypto.ts` | V2 only — adapt for scrypt KDF instead of env var key |
-| Tailwind v4 config | `tailwind.config.ts` + `app/globals.css` | Reuse color system, semantic tokens, dark mode |
-| UI components | `components/ui/` (button, card, modal, toggle) | Copy and restyle — same variant/size pattern with clsx |
-| Security headers | `next.config.mjs` | Copy CSP, HSTS, X-Frame-Options for dashboard |
-| Testing | Vitest config | Same framework and patterns |
+`LLMProvider` interface with two implementations:
+- `AnthropicProvider` — lazy dynamic import of `@anthropic-ai/sdk`
+- `OpenAICompatibleProvider` — raw fetch against `/v1/chat/completions` (no dependency). Works with OpenAI, Groq, Together, Azure, Ollama, LMStudio.
 
-**Key conventions from Sitter:**
-- `clsx` for conditional class merging (not `cn` or `classnames`)
-- Variant + size lookup tables (`Record<Variant, string>`)
-- CSS custom properties for all colors (never hardcoded hex in components)
-- Extend native HTML attributes on component props
-- Soft deletes with `deleted_at` timestamps
+Per-task model routing (`LLMTask = "extraction" | "analysis"`):
+- **Extraction** (every write): entity classification, proactive split detection → cheap model (Haiku, GPT-4o-mini)
+- **Analysis** (user-initiated): correction, splitting, cleanup → capable model (Sonnet, GPT-4o)
+
+Config priority: `~/.engrams/config.json` → `ENGRAMS_*` env vars → `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` → null (LLM features disabled gracefully).
+
+Output validation: `validateExtraction()`, `validateSplit()`, `validateCorrection()` check structural validity. `checkSemanticPreservation()` uses embeddings for split quality.
+
+## Dashboard
+
+Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (no HTTP API layer). Server actions handle mutations.
+
+### Routes
+| Route | Purpose |
+|-------|---------|
+| `/` | Memory browser (search, filter by domain/entity/confidence, inline edit) |
+| `/memory/[id]` | Detail view (provenance, connections, events, edit) |
+| `/agents` | Agent permission management |
+| `/cleanup` | Dedup, merge, split, contradiction detection + LLM expansion |
+| `/graph` | Knowledge graph visualization (D3 force-directed, entity clusters) |
+| `/settings` | DB stats, export, LLM provider config, sync config (Pro) |
+
+## Design System (Pensieve)
+
+Dashboard and landing page share the Pensieve design system:
+- **Background:** Deep indigo-black (`#0a0e1a`)
+- **Cards:** Glassmorphic (`backdrop-blur-xl`, semi-transparent bg, glow borders on hover)
+- **Accent:** Silver-blue (`#7dd3fc` to `#bae6fd`)
+- **Secondary:** Warm violet (`#a78bfa`)
+- **Typography:** Inter (body), JetBrains Mono (code)
+- **Effects:** Floating orb CSS animations, gradient glow buttons, blurred modal overlays
+- All colors via CSS custom properties — never hardcoded hex in components
+- `clsx` for conditional class merging
 
 ## Coding Standards
 
 - TypeScript strict mode
 - No `any` types — use proper generics or `unknown` + type guards
-- All database queries through Drizzle ORM (no raw SQL except FTS5 setup)
+- All database queries through Drizzle ORM (no raw SQL except FTS5/sqlite-vec setup)
 - All timestamps as ISO 8601 strings in SQLite
 - All IDs as `hex(randomblob(16))` — 32-char hex strings
-- Error messages should be actionable ("ENCRYPTION_KEY not set" not "key error")
-- No console.log in production paths — use structured logging if needed
-
-## Key Constraints
-
-- **No embeddings or sqlite-vec in V1.** FTS5 handles search until memory volume justifies the complexity.
-- **No cloud sync in V1.** Local SQLite only. No Turso, no API keys, no accounts.
-- **No encryption in V1.** Data is local; OS file permissions (0600) are sufficient.
-- **No Clerk auth in V1.** Dashboard is localhost-only, no login required.
-- **Dashboard reads from MCP server's HTTP API.** The MCP server exposes a lightweight HTTP endpoint alongside stdio for the dashboard to consume.
+- Error messages should be actionable ("No LLM provider configured. Set ANTHROPIC_API_KEY..." not "key error")
+- No console.log in production paths
+- Variant + size lookup tables (`Record<Variant, string>`) for UI components
+- CSS custom properties for all colors
+- Extend native HTML attributes on component props
+- Soft deletes with `deleted_at` timestamps
 
 ## Notion References
 

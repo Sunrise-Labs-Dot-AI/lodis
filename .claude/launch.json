@@ -7,6 +7,14 @@
       "runtimeArgs": ["next", "dev", "--port", "3838"],
       "port": 3838,
       "cwd": "packages/dashboard"
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev"],
+      "port": 3000,
+      "autoPort": true,
+      "cwd": "packages/landing"
     }
   ]
 }

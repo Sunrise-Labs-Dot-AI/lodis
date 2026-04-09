@@ -104,9 +104,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   // --- Tools ---
 
+  // Similarity threshold for dedup (cosine similarity, 0-1). 0.7 catches near-duplicates
+  // and contradictions but won't fire on merely topically related memories.
+  const WRITE_SIMILARITY_THRESHOLD = 0.7;
+
   server.tool(
     "memory_write",
-    "Save something you learned about the user to persistent cross-tool memory. Call this when the user states a preference, corrects an assumption, shares personal context, or reveals information useful across future conversations. Do NOT save ephemeral task details.",
+    "Store a new memory. If a similar memory already exists, returns the existing memory and resolution options instead of writing immediately. Call again with 'resolution' and 'existing_memory_id' to resolve. Pass resolution: 'keep_both' to skip dedup check and force a new memory.",
     {
       content: z.string().describe("The memory content"),
       domain: z.string().optional().describe("Life domain (default: general)"),
@@ -115,44 +119,213 @@ Organize memories by life domain: general, work, health, finance, relationships,
       sourceAgentName: z.string().describe("Your agent name"),
       sourceType: z.enum(["stated", "inferred", "observed", "cross-agent"]).describe("How this memory was acquired"),
       sourceDescription: z.string().optional().describe("Description of source"),
-      force: z.boolean().optional().describe("Skip duplicate detection and save anyway"),
+      force: z.boolean().optional().describe("Deprecated — use resolution: 'keep_both' instead"),
+      resolution: z.enum(["update", "correct", "add_detail", "keep_both", "skip"]).optional().describe("How to resolve a similarity match"),
+      existingMemoryId: z.string().optional().describe("ID of existing memory to act on (required for update/correct/add_detail)"),
     },
     async (params) => {
-      // --- Dedup check ---
+      // --- Phase 2: Resolution of a previous similar_found response ---
+      if (params.resolution && params.resolution !== "keep_both") {
+        if (params.resolution === "skip") {
+          return textResult({ status: "skipped", message: "No changes made" });
+        }
+
+        if (!params.existingMemoryId) {
+          return textResult({ error: "existing_memory_id is required for resolution: " + params.resolution });
+        }
+
+        const existing = db
+          .select()
+          .from(memories)
+          .where(and(eq(memories.id, params.existingMemoryId), isNull(memories.deletedAt)))
+          .get();
+
+        if (!existing) {
+          return textResult({ error: "Existing memory not found or deleted" });
+        }
+
+        const timestamp = now();
+
+        if (params.resolution === "update") {
+          const newConfidence = Math.min(existing.confidence + 0.02, 0.99);
+          db.update(memories)
+            .set({
+              content: params.content,
+              detail: params.detail ?? existing.detail,
+              confidence: newConfidence,
+            })
+            .where(eq(memories.id, params.existingMemoryId))
+            .run();
+
+          // Re-embed
+          if (vecAvailable) {
+            try {
+              const detail = params.detail ?? existing.detail;
+              const embeddingText = params.content + (detail ? " " + detail : "");
+              const embedding = await generateEmbedding(embeddingText);
+              insertEmbedding(sqlite, params.existingMemoryId, embedding);
+            } catch { /* non-fatal */ }
+          }
+
+          db.insert(memoryEvents).values({
+            id: generateId(),
+            memoryId: params.existingMemoryId,
+            eventType: "updated",
+            agentId: params.sourceAgentId,
+            agentName: params.sourceAgentName,
+            oldValue: JSON.stringify({ content: existing.content, detail: existing.detail }),
+            newValue: JSON.stringify({ content: params.content, detail: params.detail ?? existing.detail }),
+            timestamp,
+          }).run();
+
+          bumpLastModified(sqlite);
+
+          return textResult({
+            status: "updated",
+            id: params.existingMemoryId,
+            previousConfidence: existing.confidence,
+            newConfidence,
+          });
+        }
+
+        if (params.resolution === "correct") {
+          const newConfidence = Math.min(Math.max(existing.confidence, 0.85), 0.99);
+          db.update(memories)
+            .set({
+              content: params.content,
+              detail: params.detail ?? existing.detail,
+              confidence: newConfidence,
+              correctedCount: existing.correctedCount + 1,
+            })
+            .where(eq(memories.id, params.existingMemoryId))
+            .run();
+
+          // Re-embed
+          if (vecAvailable) {
+            try {
+              const detail = params.detail ?? existing.detail;
+              const embeddingText = params.content + (detail ? " " + detail : "");
+              const embedding = await generateEmbedding(embeddingText);
+              insertEmbedding(sqlite, params.existingMemoryId, embedding);
+            } catch { /* non-fatal */ }
+          }
+
+          db.insert(memoryEvents).values({
+            id: generateId(),
+            memoryId: params.existingMemoryId,
+            eventType: "corrected",
+            agentId: params.sourceAgentId,
+            agentName: params.sourceAgentName,
+            oldValue: JSON.stringify({ content: existing.content, confidence: existing.confidence }),
+            newValue: JSON.stringify({ content: params.content, confidence: newConfidence }),
+            timestamp,
+          }).run();
+
+          bumpLastModified(sqlite);
+
+          return textResult({
+            status: "corrected",
+            id: params.existingMemoryId,
+            previousConfidence: existing.confidence,
+            newConfidence,
+            correctedCount: existing.correctedCount + 1,
+          });
+        }
+
+        if (params.resolution === "add_detail") {
+          const separator = existing.detail ? "\n" : "";
+          const newDetail = (existing.detail ?? "") + separator + params.content;
+          db.update(memories)
+            .set({ detail: newDetail })
+            .where(eq(memories.id, params.existingMemoryId))
+            .run();
+
+          // Re-embed
+          if (vecAvailable) {
+            try {
+              const embeddingText = existing.content + " " + newDetail;
+              const embedding = await generateEmbedding(embeddingText);
+              insertEmbedding(sqlite, params.existingMemoryId, embedding);
+            } catch { /* non-fatal */ }
+          }
+
+          db.insert(memoryEvents).values({
+            id: generateId(),
+            memoryId: params.existingMemoryId,
+            eventType: "updated",
+            agentId: params.sourceAgentId,
+            agentName: params.sourceAgentName,
+            oldValue: JSON.stringify({ detail: existing.detail }),
+            newValue: JSON.stringify({ detail: newDetail }),
+            timestamp,
+          }).run();
+
+          bumpLastModified(sqlite);
+
+          return textResult({
+            status: "detail_appended",
+            id: params.existingMemoryId,
+            newDetail,
+          });
+        }
+      }
+
+      // --- Phase 1: Similarity check (unless keep_both or force) ---
+      const skipDedup = params.resolution === "keep_both" || params.force;
       let embedding: Float32Array | null = null;
 
-      if (!params.force) {
+      if (!skipDedup) {
         const embeddingText = params.content + (params.detail ? " " + params.detail : "");
 
         if (vecAvailable) {
-          // Semantic dedup via cosine similarity
           try {
             embedding = await generateEmbedding(embeddingText);
             const similar = searchVec(sqlite, embedding, 3);
-            const closeMatches = similar.filter((s) => s.distance < 0.3);
+            const closeMatches = similar.filter((s) => (1 - s.distance) >= WRITE_SIMILARITY_THRESHOLD);
+
             if (closeMatches.length > 0) {
-              const existing = sqlite
-                .prepare(`SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`)
-                .get(closeMatches[0].memory_id) as Record<string, unknown> | undefined;
-              if (existing) {
+              const matchedMemories = closeMatches
+                .map((m) => {
+                  const row = sqlite
+                    .prepare(`SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`)
+                    .get(m.memory_id) as Record<string, unknown> | undefined;
+                  if (!row) return null;
+                  return {
+                    id: row.id as string,
+                    content: row.content as string,
+                    detail: row.detail as string | null,
+                    confidence: row.confidence as number,
+                    similarity: Math.round((1 - m.distance) * 100) / 100,
+                  };
+                })
+                .filter(Boolean);
+
+              if (matchedMemories.length > 0) {
                 return textResult({
-                  duplicate_detected: true,
-                  existing_memory: existing,
-                  similarity: 1 - closeMatches[0].distance,
-                  message:
-                    "A semantically similar memory already exists. Use memory_update to modify it, memory_confirm to reinforce it, or add force: true to save anyway.",
-                  all_matches: closeMatches.length,
+                  status: "similar_found",
+                  proposed: {
+                    content: params.content,
+                    detail: params.detail ?? null,
+                    domain: params.domain ?? "general",
+                  },
+                  similar: matchedMemories,
+                  options: [
+                    "update — replace the existing memory's content with the new content",
+                    "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                    "add_detail — append new content to the existing memory's detail field",
+                    "keep_both — store as a new memory (not a duplicate)",
+                    "skip — existing memory is already accurate, don't write anything",
+                  ],
+                  message: "Similar memory found. Respond with memory_write again including resolution and existingMemoryId to proceed.",
                 });
               }
             }
           } catch {
-            // Vector dedup failed — fall through to FTS5 dedup
+            // Vector search failed — fall through to insert
           }
-        }
-
-        // FTS5 fallback dedup (when vec unavailable or vec found no match)
-        if (!vecAvailable) {
-          const dedupResults = searchFTS(sqlite, params.content, 5);
+        } else {
+          // FTS5 fallback dedup
+          const dedupResults = searchFTS(sqlite, params.content, 3);
           if (dedupResults.length > 0) {
             const rowids = dedupResults.map((r) => r.rowid);
             const placeholders = rowids.map(() => "?").join(",");
@@ -164,22 +337,39 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
             if (existing.length > 0) {
               return textResult({
-                duplicate_detected: true,
-                existing_memory: existing[0],
-                message:
-                  "A similar memory already exists. Use memory_update to modify it, memory_confirm to reinforce it, or add force: true to save anyway.",
-                all_matches: existing.length,
+                status: "similar_found",
+                proposed: {
+                  content: params.content,
+                  detail: params.detail ?? null,
+                  domain: params.domain ?? "general",
+                },
+                similar: existing.map((e) => ({
+                  id: e.id as string,
+                  content: e.content as string,
+                  detail: e.detail as string | null,
+                  confidence: e.confidence as number,
+                  similarity: null, // FTS5 doesn't provide cosine similarity
+                })),
+                options: [
+                  "update — replace the existing memory's content with the new content",
+                  "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                  "add_detail — append new content to the existing memory's detail field",
+                  "keep_both — store as a new memory (not a duplicate)",
+                  "skip — existing memory is already accurate, don't write anything",
+                ],
+                message: "Similar memory found. Respond with memory_write again including resolution and existingMemoryId to proceed.",
               });
             }
           }
         }
       }
 
+      // --- Insert new memory ---
       const id = generateId();
       const confidence = getInitialConfidence(params.sourceType as SourceType);
       const timestamp = now();
 
-      // --- PII detection ---
+      // PII detection
       const piiText = params.content + (params.detail ? " " + params.detail : "");
       const piiMatches = detectSensitiveData(piiText);
       const hasPii = piiMatches.length > 0;
@@ -209,14 +399,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
           }
           insertEmbedding(sqlite, id, embedding);
         } catch {
-          // Embedding failure is non-fatal — memory is saved without vector
+          // Embedding failure is non-fatal
         }
       }
 
-      const eventId = generateId();
       db.insert(memoryEvents)
         .values({
-          id: eventId,
+          id: generateId(),
           memoryId: id,
           eventType: "created",
           agentId: params.sourceAgentId,
@@ -226,7 +415,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         })
         .run();
 
-      // --- Proactive split detection ---
+      // Proactive split detection
       const fullText = params.content + (params.detail ? " " + params.detail : "");
       const sentences = fullText.split(/(?<=[.!?])\s+/).filter((s) => s.length > 10);
       let splitSuggestion: { should_split: boolean; parts?: { content: string; detail?: string }[] } | null = null;

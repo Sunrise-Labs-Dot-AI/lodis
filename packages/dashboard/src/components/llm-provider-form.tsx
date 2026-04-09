@@ -129,13 +129,13 @@ export function LLMProviderForm({ initialStatus }: Props) {
       <button
         type="submit"
         disabled={saving}
-        className="w-full rounded bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+        className="w-full rounded bg-gradient-to-r from-[rgba(125,211,252,0.15)] to-[rgba(167,139,250,0.15)] border border-[var(--color-border-hover)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-text)] hover:from-[rgba(125,211,252,0.25)] hover:to-[rgba(167,139,250,0.25)] hover:shadow-[0_0_20px_rgba(125,211,252,0.12)] disabled:opacity-50"
       >
         {saving ? "Testing..." : "Save & Test Connection"}
       </button>
 
       {status && (
-        <p className={`text-xs ${status.type === "success" ? "text-green-600" : "text-red-500"}`}>
+        <p className={`text-xs ${status.type === "success" ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}>
           {status.message}
         </p>
       )}

@@ -31,8 +31,8 @@ export function Nav() {
               className={clsx(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
                 active
-                  ? "bg-[var(--color-card)] text-[var(--color-accent-text)] shadow-sm"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+                  ? "text-[var(--color-accent-text)] bg-[var(--color-accent-soft)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[rgba(125,211,252,0.05)]",
               )}
             >
               <Icon size={16} />

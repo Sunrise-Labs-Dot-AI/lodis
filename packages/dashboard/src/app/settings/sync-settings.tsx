@@ -69,7 +69,7 @@ export function SyncSettings({ syncStatus }: { syncStatus: SyncStatus }) {
   return (
     <>
       {message && (
-        <div className={`text-sm px-3 py-2 rounded ${message.type === "success" ? "bg-green-900/30 text-green-300" : "bg-red-900/30 text-red-300"}`}>
+        <div className={`text-sm px-3 py-2 rounded ${message.type === "success" ? "bg-[var(--color-success-bg)] text-[var(--color-success)]" : "bg-[var(--color-danger-bg)] text-[var(--color-danger)]"}`}>
           {message.text}
         </div>
       )}
@@ -84,8 +84,8 @@ export function SyncSettings({ syncStatus }: { syncStatus: SyncStatus }) {
         </p>
         {status.hasPassphrase ? (
           <div className="flex items-center gap-2 text-sm">
-            <Key size={14} className="text-green-400" />
-            <span className="text-green-400">Passphrase configured</span>
+            <Key size={14} className="text-[var(--color-success)]" />
+            <span className="text-[var(--color-success)]">Passphrase configured</span>
           </div>
         ) : (
           <div className="space-y-2">
@@ -120,8 +120,8 @@ export function SyncSettings({ syncStatus }: { syncStatus: SyncStatus }) {
         {status.hasTursoConfig ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm">
-              <Cloud size={14} className="text-green-400" />
-              <span className="text-green-400">Turso connected</span>
+              <Cloud size={14} className="text-[var(--color-success)]" />
+              <span className="text-[var(--color-success)]">Turso connected</span>
             </div>
             <div className="space-y-2">
               <input

@@ -81,7 +81,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
       <button
         type="submit"
         disabled={isPending || !agentId || !domain}
-        className="flex items-center gap-1 px-2 py-1.5 text-xs bg-[var(--color-accent-solid)] text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+        className="flex items-center gap-1 px-2 py-1.5 text-xs bg-gradient-to-r from-[rgba(125,211,252,0.15)] to-[rgba(167,139,250,0.15)] border border-[var(--color-border-hover)] text-[var(--color-accent-text)] rounded-md hover:from-[rgba(125,211,252,0.25)] hover:to-[rgba(167,139,250,0.25)] transition-all disabled:opacity-50 cursor-pointer"
       >
         <Plus size={12} />
         Add rule

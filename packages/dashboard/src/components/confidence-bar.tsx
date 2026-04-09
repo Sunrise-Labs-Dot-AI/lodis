@@ -14,10 +14,10 @@ export function ConfidenceBar({
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 bg-[var(--color-bg-soft)] rounded-full overflow-hidden">
+      <div className="flex-1 h-1.5 bg-[rgba(125,211,252,0.05)] rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all"
-          style={{ width: `${pct}%`, backgroundColor: color }}
+          style={{ width: `${pct}%`, backgroundColor: color, boxShadow: `0 0 8px ${color}40` }}
         />
       </div>
       {showLabel && (

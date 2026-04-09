@@ -8,13 +8,13 @@ type Size = "sm" | "md" | "lg";
 
 const variantStyles: Record<Variant, string> = {
   primary:
-    "bg-[var(--color-accent-solid)] text-white hover:opacity-90",
+    "bg-gradient-to-r from-[rgba(125,211,252,0.15)] to-[rgba(167,139,250,0.15)] border border-[var(--color-border-hover)] text-[var(--color-accent-text)] hover:from-[rgba(125,211,252,0.25)] hover:to-[rgba(167,139,250,0.25)] hover:shadow-[0_0_20px_rgba(125,211,252,0.12)] hover:border-[var(--color-glow)]",
   secondary:
-    "bg-[var(--color-bg-soft)] text-[var(--color-text)] border border-[var(--color-border)] hover:bg-[var(--color-card-hover)]",
+    "bg-[var(--color-bg-soft)] text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-hover)] hover:bg-[var(--color-card-hover)]",
   danger:
-    "bg-[var(--color-danger)] text-white hover:opacity-90",
+    "bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[rgba(239,68,68,0.2)] hover:border-[rgba(239,68,68,0.4)] hover:shadow-[0_0_15px_rgba(239,68,68,0.1)]",
   ghost:
-    "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-soft)]",
+    "text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[rgba(125,211,252,0.05)]",
 };
 
 const sizeStyles: Record<Size, string> = {

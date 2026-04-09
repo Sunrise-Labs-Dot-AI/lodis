@@ -31,7 +31,7 @@ export function Toggle({ checked, onChange, label, disabled }: ToggleProps) {
       >
         <span
           className={clsx(
-            "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform",
+            "absolute top-0.5 left-0.5 w-4 h-4 bg-[var(--color-text)] rounded-full transition-transform",
             checked && "translate-x-4",
           )}
         />

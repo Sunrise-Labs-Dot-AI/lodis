@@ -18,10 +18,10 @@ export default function RootLayout({
   const content = (
     <html lang="en" className="dark">
       <body className="min-h-screen">
-        <header className="border-b border-[var(--color-border)] bg-[var(--color-card)]">
+        <header className="border-b border-[var(--color-border)] bg-[rgba(17,24,39,0.8)] backdrop-blur-xl">
           <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold text-[var(--color-accent-text)]">
+              <h1 className="text-lg font-bold text-[var(--color-glow)]">
                 Engrams
               </h1>
             </div>

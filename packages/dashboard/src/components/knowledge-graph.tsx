@@ -7,7 +7,7 @@ import clsx from "clsx";
 import type { GraphNode, GraphEdge, EntityNode, EntityEdge } from "@/lib/db";
 
 const ENTITY_COLORS: Record<string, string> = {
-  person: "#60a5fa",
+  person: "#7dd3fc",
   organization: "#a78bfa",
   place: "#34d399",
   project: "#fbbf24",
@@ -20,10 +20,10 @@ const DEFAULT_NODE_COLOR = "#64748b";
 
 const EDGE_COLORS: Record<string, string> = {
   contradicts: "#ef4444",
-  supports: "#22c55e",
-  works_at: "#60a5fa",
-  part_of: "#60a5fa",
-  involves: "#60a5fa",
+  supports: "#34d399",
+  works_at: "#7dd3fc",
+  part_of: "#7dd3fc",
+  involves: "#7dd3fc",
   about: "#a78bfa",
   located_at: "#a78bfa",
   related: "#64748b",

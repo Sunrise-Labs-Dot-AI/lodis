@@ -70,19 +70,37 @@ const MIGRATIONS_SQL = `
   INSERT OR IGNORE INTO _migrations (name) VALUES ('add_has_pii_flag');
 `;
 
+function runMigration(sqlite: Database.Database, name: string, fn: () => void): void {
+  const exists = sqlite.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).get(name);
+  if (!exists) {
+    try { fn(); } catch { /* Column/index may already exist */ }
+    sqlite.prepare(`INSERT OR IGNORE INTO _migrations (name) VALUES (?)`).run(name);
+  }
+}
+
 function runMigrations(sqlite: Database.Database): void {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`);
-  const hasPiiMigration = sqlite
-    .prepare(`SELECT 1 FROM _migrations WHERE name = 'add_has_pii_flag'`)
-    .get();
-  if (!hasPiiMigration) {
-    try {
-      sqlite.exec(`ALTER TABLE memories ADD COLUMN has_pii_flag INTEGER NOT NULL DEFAULT 0`);
-    } catch {
-      // Column may already exist from a previous partial migration
-    }
-    sqlite.prepare(`INSERT OR IGNORE INTO _migrations (name) VALUES ('add_has_pii_flag')`).run();
-  }
+
+  runMigration(sqlite, "add_has_pii_flag", () => {
+    sqlite.exec(`ALTER TABLE memories ADD COLUMN has_pii_flag INTEGER NOT NULL DEFAULT 0`);
+  });
+
+  runMigration(sqlite, "add_entity_columns", () => {
+    sqlite.exec(`ALTER TABLE memories ADD COLUMN entity_type TEXT`);
+    sqlite.exec(`ALTER TABLE memories ADD COLUMN entity_name TEXT`);
+    sqlite.exec(`ALTER TABLE memories ADD COLUMN structured_data TEXT`);
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_memories_entity_type ON memories(entity_type) WHERE deleted_at IS NULL`);
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_memories_entity_name ON memories(entity_name) WHERE deleted_at IS NULL`);
+  });
+
+  runMigration(sqlite, "fts_add_entity_name", () => {
+    // Drop old FTS table and triggers, then recreate with entity_name column
+    sqlite.exec(`DROP TRIGGER IF EXISTS memory_fts_insert`);
+    sqlite.exec(`DROP TRIGGER IF EXISTS memory_fts_delete`);
+    sqlite.exec(`DROP TRIGGER IF EXISTS memory_fts_update`);
+    sqlite.exec(`DROP TABLE IF EXISTS memory_fts`);
+    // setupFTS() will recreate the table and triggers with entity_name included
+  });
 }
 
 export function createDatabase(dbPath?: string): { db: EngramsDatabase; sqlite: Database.Database; vecAvailable: boolean } {
@@ -97,6 +115,13 @@ export function createDatabase(dbPath?: string): { db: EngramsDatabase; sqlite: 
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
   setupFTS(sqlite);
+
+  // Rebuild FTS index content (needed after migration drops and recreates the FTS table)
+  try {
+    sqlite.exec(`INSERT INTO memory_fts(memory_fts) VALUES('rebuild')`);
+  } catch {
+    // Non-fatal — FTS rebuild may fail if table is already populated
+  }
 
   let vecAvailable = false;
   try {

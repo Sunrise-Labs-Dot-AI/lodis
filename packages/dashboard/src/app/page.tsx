@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { getMemories, getDomains, getSourceTypes } from "@/lib/db";
+import { getMemories, getDomains, getSourceTypes, getEntityTypes } from "@/lib/db";
 import { MemoryList } from "@/components/memory-list";
 import { SearchBar } from "@/components/search-bar";
 import { DomainFilter } from "@/components/domain-filter";
@@ -13,6 +13,7 @@ interface PageProps {
     domain?: string;
     sort?: string;
     source?: string;
+    entity?: string;
     minConf?: string;
     maxConf?: string;
     unused?: string;
@@ -23,6 +24,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams;
   const domains = getDomains();
   const sourceTypes = getSourceTypes();
+  const entityTypes = getEntityTypes();
 
   const sortBy = (["confidence", "recency", "used", "learned"] as const).includes(
     params.sort as "confidence" | "recency" | "used" | "learned",
@@ -35,6 +37,7 @@ export default async function HomePage({ searchParams }: PageProps) {
     domain: params.domain,
     sortBy,
     sourceType: params.source,
+    entityType: params.entity,
     minConfidence: params.minConf ? parseFloat(params.minConf) : undefined,
     maxConfidence: params.maxConf ? parseFloat(params.maxConf) : undefined,
     unused: params.unused === "1",
@@ -52,7 +55,7 @@ export default async function HomePage({ searchParams }: PageProps) {
       </div>
 
       <Suspense>
-        <MemoryFilters sourceTypes={sourceTypes} />
+        <MemoryFilters sourceTypes={sourceTypes} entityTypes={entityTypes} />
       </Suspense>
 
       <div className="flex items-center justify-between">

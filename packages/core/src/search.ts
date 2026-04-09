@@ -134,6 +134,8 @@ export async function hybridSearch(
   query: string,
   options: {
     domain?: string;
+    entityType?: string;
+    entityName?: string;
     minConfidence?: number;
     limit?: number;
     expand?: boolean;
@@ -230,6 +232,14 @@ export async function hybridSearch(
   if (options.domain) {
     sql += ` AND domain = ?`;
     params.push(options.domain);
+  }
+  if (options.entityType) {
+    sql += ` AND entity_type = ?`;
+    params.push(options.entityType);
+  }
+  if (options.entityName) {
+    sql += ` AND entity_name = ? COLLATE NOCASE`;
+    params.push(options.entityName);
   }
   if (options.minConfidence !== undefined) {
     sql += ` AND confidence >= ?`;

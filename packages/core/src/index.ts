@@ -10,3 +10,5 @@ export type { SearchResult, ExpandedResult } from "./search.js";
 export { bumpLastModified } from "./db.js";
 export { detectSensitiveData, redactSensitiveData } from "./pii.js";
 export type { PiiMatch } from "./pii.js";
+export { extractEntity } from "./entity-extraction.js";
+export type { ExtractionResult } from "./entity-extraction.js";

@@ -24,8 +24,10 @@ import {
   bumpLastModified,
   detectSensitiveData,
   redactSensitiveData,
+  extractEntity,
+  applyConfidenceDecay,
 } from "@engrams/core";
-import type { SourceType, Relationship } from "@engrams/core";
+import type { SourceType, Relationship, EntityType } from "@engrams/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -48,6 +50,17 @@ export async function startServer() {
   });
 
   const { db, sqlite, vecAvailable } = createDatabase();
+
+  // Throttled confidence decay — runs at most once per hour
+  let lastDecayRun = 0;
+  const DECAY_THROTTLE_MS = 60 * 60 * 1000;
+  function maybeRunDecay() {
+    const now = Date.now();
+    if (now - lastDecayRun > DECAY_THROTTLE_MS) {
+      applyConfidenceDecay(sqlite);
+      lastDecayRun = now;
+    }
+  }
 
   // Backfill embeddings for existing memories (async, best-effort)
   if (vecAvailable) {
@@ -119,6 +132,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
       sourceAgentName: z.string().describe("Your agent name"),
       sourceType: z.enum(["stated", "inferred", "observed", "cross-agent"]).describe("How this memory was acquired"),
       sourceDescription: z.string().optional().describe("Description of source"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Entity classification. If omitted, auto-classification runs in background."),
+      entityName: z.string().optional().describe("Canonical entity name (e.g. 'Sarah Chen', not 'my manager Sarah'). Helps with dedup."),
+      structuredData: z.record(z.unknown()).optional().describe("Type-specific structured fields (schema depends on entityType)"),
       force: z.boolean().optional().describe("Deprecated — use resolution: 'keep_both' instead"),
       resolution: z.enum(["update", "correct", "add_detail", "keep_both", "skip"]).optional().describe("How to resolve a similarity match"),
       existingMemoryId: z.string().optional().describe("ID of existing memory to act on (required for update/correct/add_detail)"),
@@ -362,9 +378,52 @@ Organize memories by life domain: general, work, health, finance, relationships,
             }
           }
         }
+
+        // Entity-aware dedup: check by entity_name + entity_type
+        if (params.entityName && params.entityType) {
+          const entityMatches = sqlite
+            .prepare(
+              `SELECT * FROM memories
+               WHERE entity_type = ? AND entity_name = ? COLLATE NOCASE
+               AND deleted_at IS NULL`,
+            )
+            .all(params.entityType, params.entityName) as Record<string, unknown>[];
+
+          if (entityMatches.length > 0) {
+            return textResult({
+              status: "similar_found",
+              proposed: {
+                content: params.content,
+                detail: params.detail ?? null,
+                domain: params.domain ?? "general",
+              },
+              similar: entityMatches.map((e) => ({
+                id: e.id as string,
+                content: e.content as string,
+                detail: e.detail as string | null,
+                confidence: e.confidence as number,
+                similarity: null,
+                entity_match: true,
+              })),
+              options: [
+                "update — replace the existing memory's content with the new content",
+                "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                "add_detail — append new content to the existing memory's detail field",
+                "keep_both — store as a new memory (not a duplicate)",
+                "skip — existing memory is already accurate, don't write anything",
+              ],
+              message: `Existing memory found for ${params.entityType} "${params.entityName}". Respond with memory_write again including resolution and existingMemoryId to proceed.`,
+            });
+          }
+        }
       }
 
       // --- Insert new memory ---
+      const VALID_ENTITY_TYPES = ["person", "organization", "place", "project", "preference", "event", "goal", "fact"];
+      if (params.entityType && !VALID_ENTITY_TYPES.includes(params.entityType)) {
+        return textResult({ error: `Invalid entity_type: "${params.entityType}". Must be one of: ${VALID_ENTITY_TYPES.join(", ")}` });
+      }
+
       const id = generateId();
       const confidence = getInitialConfidence(params.sourceType as SourceType);
       const timestamp = now();
@@ -387,6 +446,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
           confidence,
           learnedAt: timestamp,
           hasPiiFlag: hasPii ? 1 : 0,
+          entityType: params.entityType ?? null,
+          entityName: params.entityName ?? null,
+          structuredData: params.structuredData ? JSON.stringify(params.structuredData) : null,
         })
         .run();
 
@@ -414,6 +476,60 @@ Organize memories by life domain: general, work, health, finance, relationships,
           timestamp,
         })
         .run();
+
+      // Background entity extraction (fire-and-forget) when entityType not provided
+      if (!params.entityType && process.env.ANTHROPIC_API_KEY) {
+        (async () => {
+          try {
+            // Gather existing entity names for normalization
+            const existingNames = sqlite
+              .prepare(`SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`)
+              .all() as { entity_name: string }[];
+
+            const extraction = await extractEntity(
+              params.content,
+              params.detail ?? null,
+              existingNames.map((r) => r.entity_name),
+            );
+
+            // Race condition guard: only update if entity_type hasn't been set yet
+            const current = sqlite
+              .prepare(`SELECT entity_type FROM memories WHERE id = ? AND deleted_at IS NULL`)
+              .get(id) as { entity_type: string | null } | undefined;
+
+            if (!current || current.entity_type) return;
+
+            // Update in a transaction for safety
+            sqlite.transaction(() => {
+              sqlite.prepare(
+                `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
+              ).run(
+                extraction.entity_type,
+                extraction.entity_name,
+                JSON.stringify(extraction.structured_data),
+                id,
+              );
+
+              // Auto-create suggested connections
+              for (const conn of extraction.suggested_connections) {
+                const target = sqlite
+                  .prepare(`SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`)
+                  .get(conn.target_entity_name) as { id: string } | undefined;
+
+                if (target && target.id !== id) {
+                  sqlite.prepare(
+                    `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
+                  ).run(id, target.id, conn.relationship);
+                }
+              }
+            })();
+
+            bumpLastModified(sqlite);
+          } catch {
+            // Background extraction failure is non-fatal
+          }
+        })();
+      }
 
       // Proactive split detection
       const fullText = params.content + (params.detail ? " " + params.detail : "");
@@ -451,7 +567,17 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       bumpLastModified(sqlite);
 
-      const result: Record<string, unknown> = { id, confidence, domain: params.domain ?? "general", created: true };
+      const result: Record<string, unknown> = {
+        id,
+        confidence,
+        domain: params.domain ?? "general",
+        created: true,
+        entityType: params.entityType ?? null,
+        entityName: params.entityName ?? null,
+      };
+      if (!params.entityType && process.env.ANTHROPIC_API_KEY) {
+        result._background_classification = "running";
+      }
       if (hasPii) {
         result._pii_detected = [...new Set(piiMatches.map((m) => m.type))];
       }
@@ -471,6 +597,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     {
       query: z.string().describe("Search query"),
       domain: z.string().optional().describe("Filter by domain"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Filter by entity type"),
+      entityName: z.string().optional().describe("Filter by entity name (case-insensitive)"),
       minConfidence: z.number().optional().describe("Minimum confidence threshold"),
       limit: z.number().optional().describe("Max results (default 20)"),
       expand: z.boolean().optional().describe("Include connected memories (default true)"),
@@ -478,10 +606,13 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       similarityThreshold: z.number().optional().describe("Min similarity for connected memories (default 0.5)"),
     },
     async (params) => {
+      maybeRunDecay();
       const limit = params.limit ?? 20;
 
       const { results: searchResults, cached: wasCached } = await hybridSearch(sqlite, params.query, {
         domain: params.domain,
+        entityType: params.entityType,
+        entityName: params.entityName,
         minConfidence: params.minConfidence,
         limit,
         expand: params.expand,
@@ -824,10 +955,14 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       sourceMemoryId: z.string().describe("Source memory ID"),
       targetMemoryId: z.string().describe("Target memory ID"),
       relationship: z
-        .enum(["influences", "supports", "contradicts", "related", "learned-together"])
+        .enum(["influences", "supports", "contradicts", "related", "learned-together", "works_at", "involves", "located_at", "part_of", "about"])
         .describe("Type of relationship"),
     },
     async (params) => {
+      if (params.sourceMemoryId === params.targetMemoryId) {
+        return textResult({ error: "Cannot connect a memory to itself" });
+      }
+
       const source = db.select().from(memories).where(eq(memories.id, params.sourceMemoryId)).get();
       const target = db.select().from(memories).where(eq(memories.id, params.targetMemoryId)).get();
 
@@ -1099,11 +1234,14 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     "Browse the user's memories by domain. Use this to show the user what you know about them in a specific area, or to review memories before a task.",
     {
       domain: z.string().optional().describe("Filter by domain"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Filter by entity type"),
+      entityName: z.string().optional().describe("Filter by entity name (case-insensitive)"),
       sortBy: z.enum(["confidence", "recency"]).optional().describe("Sort order (default: confidence)"),
       limit: z.number().optional().describe("Max results (default 20)"),
       offset: z.number().optional().describe("Offset for pagination"),
     },
     async (params) => {
+      maybeRunDecay();
       const limit = params.limit ?? 20;
       const offset = params.offset ?? 0;
       const sortBy = params.sortBy ?? "confidence";
@@ -1114,6 +1252,16 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       if (params.domain) {
         query += ` AND domain = ?`;
         queryParams.push(params.domain);
+      }
+
+      if (params.entityType) {
+        query += ` AND entity_type = ?`;
+        queryParams.push(params.entityType);
+      }
+
+      if (params.entityName) {
+        query += ` AND entity_name = ? COLLATE NOCASE`;
+        queryParams.push(params.entityName);
       }
 
       if (sortBy === "confidence") {
@@ -1141,6 +1289,131 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         total: countQuery.total,
         offset,
         limit,
+      });
+    },
+  );
+
+  server.tool(
+    "memory_classify",
+    "Batch-classify untyped memories using entity extraction. Runs in the background and returns progress. Use this to backfill entity types on existing memories.",
+    {
+      limit: z.number().optional().describe("Max memories to classify (default 50)"),
+      domain: z.string().optional().describe("Only classify memories in this domain"),
+    },
+    async (params) => {
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return textResult({ error: "ANTHROPIC_API_KEY not set — entity extraction requires an API key" });
+      }
+
+      const classifyLimit = params.limit ?? 50;
+      let query = `SELECT id, content, detail FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`;
+      const queryParams: unknown[] = [];
+
+      if (params.domain) {
+        query += ` AND domain = ?`;
+        queryParams.push(params.domain);
+      }
+      query += ` LIMIT ?`;
+      queryParams.push(classifyLimit);
+
+      const untyped = sqlite.prepare(query).all(...queryParams) as { id: string; content: string; detail: string | null }[];
+
+      if (untyped.length === 0) {
+        return textResult({ status: "complete", classified: 0, message: "No untyped memories found" });
+      }
+
+      // Gather existing entity names for normalization
+      const existingNames = sqlite
+        .prepare(`SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`)
+        .all() as { entity_name: string }[];
+      const nameList = existingNames.map((r) => r.entity_name);
+
+      let classified = 0;
+      let errors = 0;
+
+      for (const mem of untyped) {
+        try {
+          const extraction = await extractEntity(mem.content, mem.detail, nameList);
+
+          sqlite.transaction(() => {
+            sqlite.prepare(
+              `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
+            ).run(
+              extraction.entity_type,
+              extraction.entity_name,
+              JSON.stringify(extraction.structured_data),
+              mem.id,
+            );
+
+            // Auto-create connections
+            for (const conn of extraction.suggested_connections) {
+              const target = sqlite
+                .prepare(`SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`)
+                .get(conn.target_entity_name) as { id: string } | undefined;
+
+              if (target && target.id !== mem.id) {
+                sqlite.prepare(
+                  `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
+                ).run(mem.id, target.id, conn.relationship);
+              }
+            }
+          })();
+
+          classified++;
+          if (extraction.entity_name) nameList.push(extraction.entity_name);
+        } catch {
+          errors++;
+        }
+
+        // Rate limiting: 200ms delay between API calls
+        if (classified + errors < untyped.length) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+      }
+
+      if (classified > 0) bumpLastModified(sqlite);
+
+      return textResult({
+        status: "complete",
+        classified,
+        errors,
+        remaining: Math.max(0, (sqlite.prepare(`SELECT COUNT(*) as c FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`).get() as { c: number }).c),
+      });
+    },
+  );
+
+  server.tool(
+    "memory_list_entities",
+    "List all known entities grouped by type. Useful for discovering what the system knows about people, organizations, projects, etc.",
+    {
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Filter to a specific entity type"),
+    },
+    async (params) => {
+      let query = `SELECT entity_type, entity_name, COUNT(*) as memory_count
+        FROM memories
+        WHERE entity_type IS NOT NULL AND entity_name IS NOT NULL AND deleted_at IS NULL`;
+      const queryParams: unknown[] = [];
+
+      if (params.entityType) {
+        query += ` AND entity_type = ?`;
+        queryParams.push(params.entityType);
+      }
+
+      query += ` GROUP BY entity_type, entity_name ORDER BY entity_type, memory_count DESC`;
+
+      const rows = sqlite.prepare(query).all(...queryParams) as { entity_type: string; entity_name: string; memory_count: number }[];
+
+      // Group by type
+      const grouped: Record<string, { name: string; count: number }[]> = {};
+      for (const row of rows) {
+        if (!grouped[row.entity_type]) grouped[row.entity_type] = [];
+        grouped[row.entity_type].push({ name: row.entity_name, count: row.memory_count });
+      }
+
+      return textResult({
+        entities: grouped,
+        totalEntities: rows.length,
+        totalMemoriesWithEntities: rows.reduce((sum, r) => sum + r.memory_count, 0),
       });
     },
   );

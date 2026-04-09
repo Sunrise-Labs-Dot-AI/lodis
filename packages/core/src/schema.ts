@@ -21,6 +21,9 @@ export const memories = sqliteTable("memories", {
   lastUsedAt: text("last_used_at"),
   deletedAt: text("deleted_at"),
   hasPiiFlag: integer("has_pii_flag").notNull().default(0),
+  entityType: text("entity_type"),
+  entityName: text("entity_name"),
+  structuredData: text("structured_data"),
 });
 
 export const memoryConnections = sqliteTable("memory_connections", {

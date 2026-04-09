@@ -6,6 +6,7 @@ export function setupFTS(sqlite: Database.Database): void {
       content,
       detail,
       source_agent_name,
+      entity_name,
       content='memories',
       content_rowid='rowid'
     );
@@ -13,24 +14,24 @@ export function setupFTS(sqlite: Database.Database): void {
 
   sqlite.exec(`
     CREATE TRIGGER IF NOT EXISTS memory_fts_insert AFTER INSERT ON memories BEGIN
-      INSERT INTO memory_fts(rowid, content, detail, source_agent_name)
-      VALUES (new.rowid, new.content, new.detail, new.source_agent_name);
+      INSERT INTO memory_fts(rowid, content, detail, source_agent_name, entity_name)
+      VALUES (new.rowid, new.content, new.detail, new.source_agent_name, new.entity_name);
     END;
   `);
 
   sqlite.exec(`
     CREATE TRIGGER IF NOT EXISTS memory_fts_delete AFTER DELETE ON memories BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, content, detail, source_agent_name)
-      VALUES ('delete', old.rowid, old.content, old.detail, old.source_agent_name);
+      INSERT INTO memory_fts(memory_fts, rowid, content, detail, source_agent_name, entity_name)
+      VALUES ('delete', old.rowid, old.content, old.detail, old.source_agent_name, old.entity_name);
     END;
   `);
 
   sqlite.exec(`
     CREATE TRIGGER IF NOT EXISTS memory_fts_update AFTER UPDATE ON memories BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, content, detail, source_agent_name)
-      VALUES ('delete', old.rowid, old.content, old.detail, old.source_agent_name);
-      INSERT INTO memory_fts(rowid, content, detail, source_agent_name)
-      VALUES (new.rowid, new.content, new.detail, new.source_agent_name);
+      INSERT INTO memory_fts(memory_fts, rowid, content, detail, source_agent_name, entity_name)
+      VALUES ('delete', old.rowid, old.content, old.detail, old.source_agent_name, old.entity_name);
+      INSERT INTO memory_fts(rowid, content, detail, source_agent_name, entity_name)
+      VALUES (new.rowid, new.content, new.detail, new.source_agent_name, new.entity_name);
     END;
   `);
 }

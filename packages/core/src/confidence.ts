@@ -1,4 +1,47 @@
+import type Database from "better-sqlite3";
 import type { SourceType } from "./types.js";
+
+export const DECAY_RATE = 0.01; // per 30 days
+export const MIN_CONFIDENCE = 0.10;
+export const DECAY_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export function applyConfidenceDecay(sqlite: Database.Database): number {
+  const now = new Date();
+
+  const candidates = sqlite.prepare(`
+    SELECT id, confidence, last_used_at, confirmed_at, learned_at
+    FROM memories
+    WHERE deleted_at IS NULL AND confidence > ?
+  `).all(MIN_CONFIDENCE) as {
+    id: string;
+    confidence: number;
+    last_used_at: string | null;
+    confirmed_at: string | null;
+    learned_at: string | null;
+  }[];
+
+  let decayed = 0;
+
+  for (const mem of candidates) {
+    const lastActivity = mem.last_used_at || mem.confirmed_at || mem.learned_at;
+    if (!lastActivity) continue;
+
+    const elapsed = now.getTime() - new Date(lastActivity).getTime();
+    const periods = Math.floor(elapsed / DECAY_INTERVAL_MS);
+
+    if (periods <= 0) continue;
+
+    const newConfidence = Math.max(mem.confidence - (DECAY_RATE * periods), MIN_CONFIDENCE);
+    if (newConfidence < mem.confidence) {
+      sqlite.prepare(
+        `UPDATE memories SET confidence = ? WHERE id = ?`
+      ).run(newConfidence, mem.id);
+      decayed++;
+    }
+  }
+
+  return decayed;
+}
 
 const INITIAL_CONFIDENCE: Record<SourceType, number> = {
   stated: 0.9,

@@ -4,6 +4,18 @@ import { homedir } from "os";
 
 let readDb: Database.Database | null = null;
 let writeDb: Database.Database | null = null;
+let _hasEntityColumns: boolean | null = null;
+
+function hasEntityColumns(db: Database.Database): boolean {
+  if (_hasEntityColumns !== null) return _hasEntityColumns;
+  try {
+    db.prepare(`SELECT entity_type FROM memories LIMIT 0`).run();
+    _hasEntityColumns = true;
+  } catch {
+    _hasEntityColumns = false;
+  }
+  return _hasEntityColumns;
+}
 
 function getDbPath(): string {
   return resolve(homedir(), ".engrams", "engrams.db");
@@ -47,6 +59,9 @@ export interface MemoryRow {
   last_used_at: string | null;
   deleted_at: string | null;
   has_pii_flag: number;
+  entity_type: string | null;
+  entity_name: string | null;
+  structured_data: string | null;
 }
 
 export interface EventRow {
@@ -78,6 +93,7 @@ export function getMemories(opts?: {
   sortBy?: "confidence" | "recency" | "used" | "learned";
   search?: string;
   sourceType?: string;
+  entityType?: string;
   minConfidence?: number;
   maxConfidence?: number;
   unused?: boolean;
@@ -103,6 +119,10 @@ export function getMemories(opts?: {
     }
     if (opts?.unused) {
       q += ` AND used_count = 0`;
+    }
+    if (opts?.entityType && hasEntityColumns(db)) {
+      q += ` AND entity_type = ?`;
+      params.push(opts.entityType);
     }
     return { q, params };
   }
@@ -139,6 +159,19 @@ export function getMemories(opts?: {
   ({ q, params } = applyFilters(q, params));
   q = applySort(q);
   return db.prepare(q).all(...params) as MemoryRow[];
+}
+
+export function getEntityTypes(): string[] {
+  const db = getReadDb();
+  try {
+    const rows = db
+      .prepare(`SELECT DISTINCT entity_type FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL ORDER BY entity_type`)
+      .all() as { entity_type: string }[];
+    return rows.map((r) => r.entity_type);
+  } catch {
+    // Column may not exist yet if migrations haven't run
+    return [];
+  }
 }
 
 export function getSourceTypes(): string[] {
@@ -381,6 +414,142 @@ export function splitMemoryById(
   ).run(generateId(), id, JSON.stringify({ reason: "split", splitInto: newIds }), timestamp);
 
   return { newIds };
+}
+
+export interface GraphNode {
+  id: string;
+  content: string;
+  entity_type: string | null;
+  entity_name: string | null;
+  domain: string;
+  confidence: number;
+  connectionCount: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relationship: string;
+}
+
+export function getGraphData(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const db = getReadDb();
+
+  const connectedIds = db.prepare(`
+    SELECT DISTINCT id FROM memories
+    WHERE deleted_at IS NULL AND id IN (
+      SELECT source_memory_id FROM memory_connections
+      UNION
+      SELECT target_memory_id FROM memory_connections
+    )
+  `).all() as { id: string }[];
+
+  const entityTypeCol = hasEntityColumns(db)
+    ? "m.entity_type, m.entity_name"
+    : "NULL as entity_type, NULL as entity_name";
+
+  const nodes = connectedIds.length > 0
+    ? db.prepare(`
+        SELECT m.id, m.content, ${entityTypeCol}, m.domain, m.confidence,
+          (SELECT COUNT(*) FROM memory_connections mc
+           WHERE mc.source_memory_id = m.id OR mc.target_memory_id = m.id) as connectionCount
+        FROM memories m
+        WHERE m.deleted_at IS NULL AND m.id IN (
+          SELECT source_memory_id FROM memory_connections
+          UNION
+          SELECT target_memory_id FROM memory_connections
+        )
+        ORDER BY connectionCount DESC
+        LIMIT 200
+      `).all() as GraphNode[]
+    : db.prepare(`
+        SELECT m.id, m.content, ${entityTypeCol}, m.domain, m.confidence, 0 as connectionCount
+        FROM memories m WHERE m.deleted_at IS NULL
+        ORDER BY m.confidence DESC LIMIT 50
+      `).all() as GraphNode[];
+
+  const edges = db.prepare(`
+    SELECT mc.source_memory_id as source, mc.target_memory_id as target, mc.relationship
+    FROM memory_connections mc
+    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
+    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
+  `).all() as GraphEdge[];
+
+  return { nodes, edges };
+}
+
+export interface EntityNode {
+  entityName: string;
+  entityType: string;
+  memoryCount: number;
+  avgConfidence: number;
+  memoryIds: string[];
+}
+
+export interface EntityEdge {
+  sourceEntity: string;
+  targetEntity: string;
+  connectionCount: number;
+  relationships: string[];
+}
+
+export function getEntityGraphData(): {
+  entities: EntityNode[];
+  edges: EntityEdge[];
+  uncategorized: GraphNode[];
+} {
+  const db = getReadDb();
+
+  if (!hasEntityColumns(db)) {
+    return { entities: [], edges: [], uncategorized: [] };
+  }
+
+  const rawEntities = db.prepare(`
+    SELECT entity_name as entityName, entity_type as entityType,
+           COUNT(*) as memoryCount, AVG(confidence) as avgConfidence,
+           GROUP_CONCAT(id) as memoryIdsCsv
+    FROM memories
+    WHERE deleted_at IS NULL AND entity_name IS NOT NULL
+    GROUP BY entity_name, entity_type
+    ORDER BY memoryCount DESC
+  `).all() as (EntityNode & { memoryIdsCsv: string })[];
+
+  const entities = rawEntities.map((e) => ({
+    entityName: e.entityName,
+    entityType: e.entityType,
+    memoryCount: e.memoryCount,
+    avgConfidence: e.avgConfidence,
+    memoryIds: e.memoryIdsCsv.split(","),
+  }));
+
+  const rawEdges = db.prepare(`
+    SELECT
+      m1.entity_name as sourceEntity,
+      m2.entity_name as targetEntity,
+      COUNT(*) as connectionCount,
+      GROUP_CONCAT(DISTINCT mc.relationship) as relationshipsCsv
+    FROM memory_connections mc
+    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
+    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
+    WHERE m1.entity_name IS NOT NULL AND m2.entity_name IS NOT NULL
+      AND m1.entity_name != m2.entity_name
+    GROUP BY m1.entity_name, m2.entity_name
+  `).all() as (EntityEdge & { relationshipsCsv: string })[];
+
+  const edges = rawEdges.map((e) => ({
+    sourceEntity: e.sourceEntity,
+    targetEntity: e.targetEntity,
+    connectionCount: e.connectionCount,
+    relationships: e.relationshipsCsv.split(","),
+  }));
+
+  const uncategorized = db.prepare(`
+    SELECT id, content, entity_type, entity_name, domain, confidence, 0 as connectionCount
+    FROM memories WHERE deleted_at IS NULL AND entity_name IS NULL
+    ORDER BY confidence DESC LIMIT 30
+  `).all() as GraphNode[];
+
+  return { entities, edges, uncategorized };
 }
 
 export function clearAllMemories(): void {

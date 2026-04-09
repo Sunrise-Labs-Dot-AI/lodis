@@ -48,6 +48,11 @@ export default async function MemoryDetailPage({ params }: PageProps) {
             <StatusBadge variant="neutral">
               {sourceTypeLabel(memory.source_type)}
             </StatusBadge>
+            {memory.entity_type && (
+              <StatusBadge variant="neutral">
+                {memory.entity_type}{memory.entity_name ? `: ${memory.entity_name}` : ""}
+              </StatusBadge>
+            )}
             {!!memory.has_pii_flag && (
               <StatusBadge variant="warning">
                 <ShieldAlert size={12} className="mr-0.5 inline" />
@@ -106,6 +111,28 @@ export default async function MemoryDetailPage({ params }: PageProps) {
           <MemoryActions id={memory.id} currentContent={memory.content} currentDetail={memory.detail} />
         </Card>
       </div>
+
+      {memory.structured_data && (() => {
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = JSON.parse(memory.structured_data);
+        } catch {
+          // Invalid JSON — skip structured data display
+        }
+        return parsed ? (
+          <Card className="p-4">
+            <h3 className="text-sm font-semibold mb-3">Structured Data</h3>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {Object.entries(parsed).map(([key, value]) => (
+                <div key={key}>
+                  <span className="text-[var(--color-text-muted)]">{key}</span>
+                  <p className="font-medium">{String(value ?? "—")}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) : null;
+      })()}
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold mb-3">Connections</h3>

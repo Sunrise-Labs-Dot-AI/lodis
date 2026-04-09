@@ -7,6 +7,7 @@ import { ArrowUpDown, Filter } from "lucide-react";
 
 interface MemoryFiltersProps {
   sourceTypes: string[];
+  entityTypes: string[];
 }
 
 const SORT_OPTIONS = [
@@ -23,13 +24,14 @@ const CONFIDENCE_PRESETS = [
   { value: "0-0.5", label: "Low (<50%)" },
 ] as const;
 
-export function MemoryFilters({ sourceTypes }: MemoryFiltersProps) {
+export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
 
   const activeSort = searchParams.get("sort") ?? "confidence";
   const activeSource = searchParams.get("source") ?? "";
+  const activeEntity = searchParams.get("entity") ?? "";
   const activeMinConf = searchParams.get("minConf") ?? "";
   const activeMaxConf = searchParams.get("maxConf") ?? "";
   const activeUnused = searchParams.get("unused") === "1";
@@ -71,7 +73,7 @@ export function MemoryFilters({ sourceTypes }: MemoryFiltersProps) {
     updateParam("unused", activeUnused ? null : "1");
   }
 
-  const hasActiveFilters = activeSource || activeMinConf || activeUnused;
+  const hasActiveFilters = activeSource || activeEntity || activeMinConf || activeUnused;
 
   return (
     <div className="flex items-center gap-3 flex-wrap text-xs">
@@ -132,6 +134,22 @@ export function MemoryFilters({ sourceTypes }: MemoryFiltersProps) {
         </select>
       )}
 
+      {/* Entity type */}
+      {entityTypes.length > 0 && (
+        <select
+          value={activeEntity}
+          onChange={(e) => updateParam("entity", e.target.value || null)}
+          className="px-2 py-1 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
+        >
+          <option value="">All types</option>
+          {entityTypes.map((et) => (
+            <option key={et} value={et}>
+              {et}
+            </option>
+          ))}
+        </select>
+      )}
+
       {/* Unused toggle */}
       <button
         onClick={toggleUnused}
@@ -154,6 +172,7 @@ export function MemoryFilters({ sourceTypes }: MemoryFiltersProps) {
               startTransition(() => {
                 const params = new URLSearchParams(searchParams.toString());
                 params.delete("source");
+                params.delete("entity");
                 params.delete("minConf");
                 params.delete("maxConf");
                 params.delete("unused");

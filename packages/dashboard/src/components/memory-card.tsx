@@ -51,6 +51,11 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
             <StatusBadge variant="neutral">
               {sourceTypeLabel(m.source_type)}
             </StatusBadge>
+            {m.entity_type && (
+              <StatusBadge variant="neutral">
+                {m.entity_type}{m.entity_name ? `: ${m.entity_name}` : ""}
+              </StatusBadge>
+            )}
             {!!m.has_pii_flag && (
               <StatusBadge variant="warning">
                 <ShieldAlert size={12} className="mr-0.5 inline" />

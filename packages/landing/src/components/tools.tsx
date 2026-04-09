@@ -42,6 +42,20 @@ const toolGroups = [
       { name: "memory_set_permissions", desc: "Per-agent read/write access by domain" },
     ],
   },
+  {
+    label: "Onboarding",
+    tools: [
+      { name: "memory_onboard", desc: "Personalized plan to seed your memory" },
+      { name: "memory_import", desc: "Import from Claude, ChatGPT, Cursor, gitconfig" },
+      { name: "memory_configure", desc: "Configure LLM provider for entity extraction" },
+    ],
+  },
+  {
+    label: "Pro",
+    tools: [
+      { name: "memory_sync", desc: "Sync memories with cloud across devices" },
+    ],
+  },
 ];
 
 export function Tools() {
@@ -50,7 +64,7 @@ export function Tools() {
       <div className="max-w-6xl mx-auto">
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4 tracking-tight">
-            16 MCP tools.{" "}
+            20 MCP tools.{" "}
             <span className="text-glow">One install.</span>
           </h2>
           <p className="text-text-muted text-center mb-16 text-lg">

@@ -24,10 +24,36 @@ export async function getEmbedder(): Promise<Embedder> {
   return embedder;
 }
 
+// --- LRU Embedding Cache ---
+const CACHE_MAX = 100;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CacheEntry {
+  embedding: Float32Array;
+  timestamp: number;
+}
+
+const embeddingCache = new Map<string, CacheEntry>();
+
 export async function generateEmbedding(text: string): Promise<Float32Array> {
+  // Check cache
+  const cached = embeddingCache.get(text);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.embedding;
+  }
+
   const model = await getEmbedder();
   const output = await model(text, { pooling: "mean", normalize: true });
-  return new Float32Array(output.data as Float64Array);
+  const embedding = new Float32Array(output.data as Float64Array);
+
+  // Store in cache, evict oldest if full
+  if (embeddingCache.size >= CACHE_MAX) {
+    const oldestKey = embeddingCache.keys().next().value;
+    if (oldestKey) embeddingCache.delete(oldestKey);
+  }
+  embeddingCache.set(text, { embedding, timestamp: Date.now() });
+
+  return embedding;
 }
 
 export async function generateEmbeddings(texts: string[]): Promise<Float32Array[]> {

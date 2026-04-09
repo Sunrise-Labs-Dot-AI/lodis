@@ -55,6 +55,12 @@ const CREATE_TABLES_SQL = `
     can_read INTEGER NOT NULL DEFAULT 1,
     can_write INTEGER NOT NULL DEFAULT 1
   );
+
+  CREATE TABLE IF NOT EXISTS engrams_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  INSERT OR IGNORE INTO engrams_meta (key, value) VALUES ('last_modified', datetime('now'));
 `;
 
 export function createDatabase(dbPath?: string): { db: EngramsDatabase; sqlite: Database.Database; vecAvailable: boolean } {
@@ -85,4 +91,10 @@ export function createDatabase(dbPath?: string): { db: EngramsDatabase; sqlite: 
   const db = drizzle(sqlite, { schema });
 
   return { db, sqlite, vecAvailable };
+}
+
+export function bumpLastModified(sqlite: Database.Database): void {
+  sqlite
+    .prepare(`INSERT OR REPLACE INTO engrams_meta (key, value) VALUES ('last_modified', ?)`)
+    .run(new Date().toISOString());
 }

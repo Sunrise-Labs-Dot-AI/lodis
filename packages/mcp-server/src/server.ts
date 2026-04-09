@@ -21,6 +21,7 @@ import {
   searchVec,
   hybridSearch,
   backfillEmbeddings,
+  bumpLastModified,
 } from "@engrams/core";
 import type { SourceType, Relationship } from "@engrams/core";
 
@@ -251,6 +252,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         }
       }
 
+      bumpLastModified(sqlite);
+
       const result: Record<string, unknown> = { id, confidence, domain: params.domain ?? "general", created: true };
       if (splitSuggestion?.should_split && splitSuggestion.parts) {
         result.split_suggested = true;
@@ -270,20 +273,24 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       domain: z.string().optional().describe("Filter by domain"),
       minConfidence: z.number().optional().describe("Minimum confidence threshold"),
       limit: z.number().optional().describe("Max results (default 20)"),
+      expand: z.boolean().optional().describe("Include connected memories (default true)"),
+      maxDepth: z.number().optional().describe("Max graph expansion depth (default 3)"),
+      similarityThreshold: z.number().optional().describe("Min similarity for connected memories (default 0.5)"),
     },
     async (params) => {
       const limit = params.limit ?? 20;
 
-      const searchResults = await hybridSearch(sqlite, params.query, {
+      const { results: searchResults, cached: wasCached } = await hybridSearch(sqlite, params.query, {
         domain: params.domain,
         minConfidence: params.minConfidence,
         limit,
+        expand: params.expand,
+        maxDepth: params.maxDepth,
+        similarityThreshold: params.similarityThreshold,
       });
 
-      const results = searchResults.map((r) => r.memory);
-
-      if (results.length === 0) {
-        return textResult({ memories: [], count: 0 });
+      if (searchResults.length === 0) {
+        return textResult({ memories: [], count: 0, totalConnected: 0, cached: wasCached });
       }
 
       // --- Auto-track usage: bump used_count and last_used_at on returned memories ---
@@ -295,14 +302,28 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         `INSERT INTO memory_events (id, memory_id, event_type, timestamp) VALUES (?, ?, 'used', ?)`,
       );
       const batchUpdate = sqlite.transaction(() => {
-        for (const mem of results) {
-          updateStmt.run(timestamp, mem.id);
-          insertEventStmt.run(generateId(), mem.id, timestamp);
+        for (const r of searchResults) {
+          updateStmt.run(timestamp, r.memory.id);
+          insertEventStmt.run(generateId(), r.memory.id, timestamp);
         }
       });
       batchUpdate();
 
-      return textResult({ memories: results, count: results.length });
+      return textResult({
+        memories: searchResults.map((r) => ({
+          ...r.memory,
+          _searchScore: r.score,
+          _connected: r.connected.map((c) => ({
+            ...c.memory,
+            _relationship: c.relationship,
+            _depth: c.depth,
+            _similarity: c.similarity,
+          })),
+        })),
+        count: searchResults.length,
+        totalConnected: searchResults.reduce((sum, r) => sum + r.connected.length, 0),
+        cached: wasCached,
+      });
     },
   );
 
@@ -368,6 +389,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         })
         .run();
 
+      bumpLastModified(sqlite);
+
       return textResult({ id: params.id, updated: true, changes: updates });
     },
   );
@@ -409,6 +432,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           timestamp,
         })
         .run();
+
+      bumpLastModified(sqlite);
 
       return textResult({ id: params.id, removed: true });
     },
@@ -457,6 +482,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           timestamp,
         })
         .run();
+
+      bumpLastModified(sqlite);
 
       return textResult({
         id: params.id,
@@ -523,6 +550,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         })
         .run();
 
+      bumpLastModified(sqlite);
+
       return textResult({
         id: params.id,
         corrected: true,
@@ -576,6 +605,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         })
         .run();
 
+      bumpLastModified(sqlite);
+
       return textResult({
         id: params.id,
         flagged: true,
@@ -611,6 +642,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           relationship: params.relationship,
         })
         .run();
+
+      bumpLastModified(sqlite);
 
       return textResult({
         connected: true,
@@ -727,6 +760,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           timestamp,
         })
         .run();
+
+      bumpLastModified(sqlite);
 
       return textResult({
         split: true,

@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #0a0e1a;
+  --color-surface: #111827;
+  --color-surface-raised: #1e293b;
+  --color-glow: #7dd3fc;
+  --color-glow-soft: #bae6fd;
+  --color-violet: #a78bfa;
+  --color-violet-soft: #c4b5fd;
+  --color-emerald: #34d399;
+  --color-amber: #fbbf24;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --color-text-dim: #64748b;
+  --color-border: rgba(125, 211, 252, 0.1);
+  --color-border-hover: rgba(125, 211, 252, 0.25);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background-color: var(--color-void);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+/* Floating orb animation */
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(30px, -20px) scale(1.05); }
+  50% { transform: translate(-20px, 15px) scale(0.95); }
+  75% { transform: translate(15px, 25px) scale(1.02); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-node {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes dash-flow {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  animation: float 20s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.orb-1 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(125, 211, 252, 0.15), transparent 70%);
+  top: 10%;
+  left: 20%;
+  animation-delay: 0s;
+}
+
+.orb-2 {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.12), transparent 70%);
+  top: 40%;
+  right: 15%;
+  animation-delay: -7s;
+}
+
+.orb-3 {
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.08), transparent 70%);
+  bottom: 20%;
+  left: 40%;
+  animation-delay: -13s;
+}
+
+/* Glass card */
+.glass {
+  background: rgba(17, 24, 39, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  transition: border-color 300ms, box-shadow 300ms;
+}
+
+.glass:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: 0 0 20px rgba(125, 211, 252, 0.08);
+}
+
+/* Code block styling */
+.code-block {
+  background: rgba(10, 14, 26, 0.9);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-glow);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  padding: 1.5rem;
+  overflow-x: auto;
+}
+
+/* Placeholder shimmer for future screenshots */
+.screenshot-placeholder {
+  background: linear-gradient(
+    90deg,
+    rgba(17, 24, 39, 0.5) 25%,
+    rgba(125, 211, 252, 0.05) 50%,
+    rgba(17, 24, 39, 0.5) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+/* Section gradient divider */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(125, 211, 252, 0.15),
+    transparent
+  );
+  margin: 4rem 0;
+}
+
+/* Glow button */
+.btn-glow {
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.15), rgba(167, 139, 250, 0.15));
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-glow-soft);
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 300ms;
+  cursor: pointer;
+}
+
+.btn-glow:hover {
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.25), rgba(167, 139, 250, 0.25));
+  box-shadow: 0 0 30px rgba(125, 211, 252, 0.15);
+  border-color: var(--color-glow);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 300ms;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text);
+}
+
+/* Scroll reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 600ms, transform 600ms;
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Memory thread nodes */
+.thread-node {
+  animation: pulse-node 3s ease-in-out infinite;
+}
+
+.thread-path {
+  stroke-dasharray: 8 4;
+  animation: dash-flow 2s linear infinite;
+}

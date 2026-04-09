@@ -69,6 +69,98 @@ export async function startServer() {
     }
   }
 
+  // --- Permission enforcement ---
+  function checkPermission(agentId: string | undefined, domain: string, operation: "read" | "write"): boolean {
+    if (!agentId) return true; // No agent ID = no restriction
+
+    const specific = sqlite.prepare(
+      `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = ?`,
+    ).get(agentId, domain) as { can_read: number; can_write: number } | undefined;
+
+    if (specific) return operation === "read" ? !!specific.can_read : !!specific.can_write;
+
+    const wildcard = sqlite.prepare(
+      `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
+    ).get(agentId) as { can_read: number; can_write: number } | undefined;
+
+    if (wildcard) return operation === "read" ? !!wildcard.can_read : !!wildcard.can_write;
+
+    return true; // No rule = allowed
+  }
+
+  function getBlockedDomains(agentId: string | undefined, operation: "read" | "write"): string[] | "all" {
+    if (!agentId) return [];
+
+    const col = operation === "read" ? "can_read" : "can_write";
+
+    // Check wildcard block: agent has domain='*' with read/write=0
+    const wildcard = sqlite.prepare(
+      `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
+    ).get(agentId) as { allowed: number } | undefined;
+
+    if (wildcard && !wildcard.allowed) {
+      // Wildcard block: only allow explicitly permitted domains
+      const allowed = sqlite.prepare(
+        `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1`,
+      ).all(agentId) as { domain: string }[];
+      if (allowed.length === 0) return "all";
+      // Return "all" to signal caller to use allowlist instead
+      return "all";
+    }
+
+    // Normal case: return explicitly blocked domains
+    const blocked = sqlite.prepare(
+      `SELECT domain FROM agent_permissions WHERE agent_id = ? AND ${col} = 0 AND domain != '*'`,
+    ).all(agentId) as { domain: string }[];
+    return blocked.map(r => r.domain);
+  }
+
+  function getAllowedDomains(agentId: string | undefined, operation: "read" | "write"): string[] | null {
+    if (!agentId) return null; // null = no restriction
+
+    const col = operation === "read" ? "can_read" : "can_write";
+
+    // Check wildcard block
+    const wildcard = sqlite.prepare(
+      `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
+    ).get(agentId) as { allowed: number } | undefined;
+
+    if (wildcard && !wildcard.allowed) {
+      // Wildcard block: return only explicitly allowed domains
+      const allowed = sqlite.prepare(
+        `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1`,
+      ).all(agentId) as { domain: string }[];
+      return allowed.map(r => r.domain);
+    }
+
+    return null; // No wildcard block = no allowlist needed
+  }
+
+  function applyReadFilter(query: string, queryParams: unknown[], agentId: string | undefined): { query: string; params: unknown[] } {
+    if (!agentId) return { query, params: queryParams };
+
+    const allowed = getAllowedDomains(agentId, "read");
+    if (allowed !== null) {
+      if (allowed.length === 0) {
+        query += ` AND 0`; // Block everything
+      } else {
+        const placeholders = allowed.map(() => "?").join(",");
+        query += ` AND domain IN (${placeholders})`;
+        queryParams.push(...allowed);
+      }
+      return { query, params: queryParams };
+    }
+
+    const blocked = getBlockedDomains(agentId, "read");
+    if (blocked !== "all" && blocked.length > 0) {
+      const placeholders = blocked.map(() => "?").join(",");
+      query += ` AND domain NOT IN (${placeholders})`;
+      queryParams.push(...blocked);
+    }
+
+    return { query, params: queryParams };
+  }
+
   // Resolve LLM providers — separate tiers for extraction (cheap) vs analysis (capable)
   let extractionProvider: LLMProvider | null = resolveLLMProvider("extraction");
   let analysisProvider: LLMProvider | null = resolveLLMProvider("analysis");
@@ -429,6 +521,12 @@ Organize memories by life domain: general, work, health, finance, relationships,
         }
       }
 
+      // --- Permission check ---
+      const writeDomain = params.domain ?? "general";
+      if (!checkPermission(params.sourceAgentId, writeDomain, "write")) {
+        return textResult({ error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${writeDomain}"` });
+      }
+
       // --- Insert new memory ---
       const VALID_ENTITY_TYPES = ["person", "organization", "place", "project", "preference", "event", "goal", "fact"];
       if (params.entityType && !VALID_ENTITY_TYPES.includes(params.entityType)) {
@@ -612,12 +710,13 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       expand: z.boolean().optional().describe("Include connected memories (default true)"),
       maxDepth: z.number().optional().describe("Max graph expansion depth (default 3)"),
       similarityThreshold: z.number().optional().describe("Min similarity for connected memories (default 0.5)"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params) => {
       maybeRunDecay();
       const limit = params.limit ?? 20;
 
-      const { results: searchResults, cached: wasCached } = await hybridSearch(sqlite, params.query, {
+      let { results: searchResults, cached: wasCached } = await hybridSearch(sqlite, params.query, {
         domain: params.domain,
         entityType: params.entityType,
         entityName: params.entityName,
@@ -627,6 +726,21 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         maxDepth: params.maxDepth,
         similarityThreshold: params.similarityThreshold,
       });
+
+      // Filter by read permissions
+      if (params.agentId) {
+        const allowed = getAllowedDomains(params.agentId, "read");
+        if (allowed !== null) {
+          const allowSet = new Set(allowed);
+          searchResults = searchResults.filter(r => allowSet.has(r.memory.domain as string));
+        } else {
+          const blocked = getBlockedDomains(params.agentId, "read");
+          if (blocked !== "all" && blocked.length > 0) {
+            const blockSet = new Set(blocked);
+            searchResults = searchResults.filter(r => !blockSet.has(r.memory.domain as string));
+          }
+        }
+      }
 
       if (searchResults.length === 0) {
         const totalCount = (sqlite.prepare("SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL").get() as { count: number }).count;
@@ -690,6 +804,11 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
+      }
+
+      // Permission check: agent must have write access to the memory's domain
+      if (!checkPermission(params.agentId, existing.domain, "write")) {
+        return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
       const updates: Record<string, unknown> = {};
@@ -758,6 +877,10 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         return textResult({ error: "Memory not found or already deleted" });
       }
 
+      if (!checkPermission(params.agentId, existing.domain, "write")) {
+        return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
+      }
+
       const timestamp = now();
       db.update(memories)
         .set({ deletedAt: timestamp })
@@ -799,6 +922,10 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
+      }
+
+      if (!checkPermission(params.agentId, existing.domain, "write")) {
+        return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
       const newConfidence = applyConfirm(existing.confidence);
@@ -856,6 +983,10 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
+      }
+
+      if (!checkPermission(params.agentId, existing.domain, "write")) {
+        return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
       const newConfidence = applyCorrect();
@@ -922,6 +1053,10 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
+      }
+
+      if (!checkPermission(params.agentId, existing.domain, "write")) {
+        return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
       const newConfidence = applyMistake(existing.confidence);
@@ -1203,6 +1338,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     "Get all connections for a memory",
     {
       memoryId: z.string().describe("Memory ID to get connections for"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params) => {
       const outgoing = db
@@ -1217,6 +1353,28 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         .where(eq(memoryConnections.targetMemoryId, params.memoryId))
         .all();
 
+      // Filter out connections where either memory is in a blocked domain
+      if (params.agentId) {
+        const filterConnection = (conn: { sourceMemoryId: string; targetMemoryId: string }) => {
+          const otherId = conn.sourceMemoryId === params.memoryId ? conn.targetMemoryId : conn.sourceMemoryId;
+          const other = sqlite.prepare(
+            `SELECT domain FROM memories WHERE id = ? AND deleted_at IS NULL`,
+          ).get(otherId) as { domain: string } | undefined;
+          if (!other) return false;
+          return checkPermission(params.agentId, other.domain, "read");
+        };
+
+        const filteredOutgoing = outgoing.filter(filterConnection);
+        const filteredIncoming = incoming.filter(filterConnection);
+
+        return textResult({
+          memoryId: params.memoryId,
+          outgoing: filteredOutgoing,
+          incoming: filteredIncoming,
+          totalConnections: filteredOutgoing.length + filteredIncoming.length,
+        });
+      }
+
       return textResult({
         memoryId: params.memoryId,
         outgoing,
@@ -1229,13 +1387,20 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
   server.tool(
     "memory_list_domains",
     "List all memory domains with counts",
-    {},
-    async () => {
+    {
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
+    },
+    async (params) => {
+      let query = `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL`;
+      let queryParams: unknown[] = [];
+
+      ({ query, params: queryParams } = applyReadFilter(query, queryParams, params.agentId));
+
+      query += ` GROUP BY domain ORDER BY count DESC`;
+
       const results = sqlite
-        .prepare(
-          `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL GROUP BY domain ORDER BY count DESC`,
-        )
-        .all() as { domain: string; count: number }[];
+        .prepare(query)
+        .all(...queryParams) as { domain: string; count: number }[];
 
       return textResult({ domains: results });
     },
@@ -1251,6 +1416,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       sortBy: z.enum(["confidence", "recency"]).optional().describe("Sort order (default: confidence)"),
       limit: z.number().optional().describe("Max results (default 20)"),
       offset: z.number().optional().describe("Offset for pagination"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params) => {
       maybeRunDecay();
@@ -1259,7 +1425,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       const sortBy = params.sortBy ?? "confidence";
 
       let query = `SELECT * FROM memories WHERE deleted_at IS NULL`;
-      const queryParams: unknown[] = [];
+      let queryParams: unknown[] = [];
 
       if (params.domain) {
         query += ` AND domain = ?`;
@@ -1275,6 +1441,9 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         query += ` AND entity_name = ? COLLATE NOCASE`;
         queryParams.push(params.entityName);
       }
+
+      // Apply read permission filtering
+      ({ query, params: queryParams } = applyReadFilter(query, queryParams, params.agentId));
 
       if (sortBy === "confidence") {
         query += ` ORDER BY confidence DESC`;
@@ -1405,17 +1574,21 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     "List all known entities grouped by type. Useful for discovering what the system knows about people, organizations, projects, etc.",
     {
       entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Filter to a specific entity type"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params) => {
       let query = `SELECT entity_type, entity_name, COUNT(*) as memory_count
         FROM memories
         WHERE entity_type IS NOT NULL AND entity_name IS NOT NULL AND deleted_at IS NULL`;
-      const queryParams: unknown[] = [];
+      let queryParams: unknown[] = [];
 
       if (params.entityType) {
         query += ` AND entity_type = ?`;
         queryParams.push(params.entityType);
       }
+
+      // Apply read permission filtering
+      ({ query, params: queryParams } = applyReadFilter(query, queryParams, params.agentId));
 
       query += ` GROUP BY entity_type, entity_name ORDER BY entity_type, memory_count DESC`;
 

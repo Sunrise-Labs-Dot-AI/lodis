@@ -1,6 +1,8 @@
 import { getAgentPermissions, getAgents, getDomains } from "@/lib/db";
 import { Card } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/status-badge";
+import { PermissionToggle } from "@/components/permission-toggle";
+import { AddRuleForm } from "@/components/add-rule-form";
+import { RemoveRuleButton } from "@/components/remove-rule-button";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +11,7 @@ export default function AgentsPage() {
   const permissions = getAgentPermissions();
   const domains = getDomains();
 
+  // Build permission map: agentId -> domain -> { canRead, canWrite }
   const permMap = new Map<string, Map<string, { canRead: boolean; canWrite: boolean }>>();
   for (const p of permissions) {
     if (!permMap.has(p.agent_id)) permMap.set(p.agent_id, new Map());
@@ -17,6 +20,21 @@ export default function AgentsPage() {
       canWrite: !!p.can_write,
     });
   }
+
+  // Collect all domains that have explicit rules (including * wildcard)
+  const ruleDomains = new Set<string>();
+  for (const p of permissions) {
+    ruleDomains.add(p.domain);
+  }
+  // Also include memory domains
+  for (const d of domains) {
+    ruleDomains.add(d.domain);
+  }
+  const allDomains = Array.from(ruleDomains).sort((a, b) => {
+    if (a === "*") return -1;
+    if (b === "*") return 1;
+    return a.localeCompare(b);
+  });
 
   if (agents.length === 0) {
     return (
@@ -32,6 +50,9 @@ export default function AgentsPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Agent Permissions</h1>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Click R/W badges to toggle. Agents without explicit rules have full access.
+      </p>
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
@@ -41,12 +62,12 @@ export default function AgentsPage() {
                 <th className="text-left p-3 font-medium text-[var(--color-text-secondary)]">
                   Agent
                 </th>
-                {domains.map((d) => (
+                {allDomains.map((d) => (
                   <th
-                    key={d.domain}
+                    key={d}
                     className="text-center p-3 font-medium text-[var(--color-text-secondary)]"
                   >
-                    {d.domain}
+                    {d === "*" ? "All (*)" : d}
                   </th>
                 ))}
               </tr>
@@ -65,22 +86,28 @@ export default function AgentsPage() {
                       </p>
                     </div>
                   </td>
-                  {domains.map((d) => {
-                    const perm = permMap.get(agent.agent_id)?.get(d.domain);
+                  {allDomains.map((d) => {
+                    const perm = permMap.get(agent.agent_id)?.get(d);
                     return (
-                      <td key={d.domain} className="text-center p-3">
+                      <td key={d} className="text-center p-3">
                         {perm ? (
                           <div className="flex items-center justify-center gap-1">
-                            <StatusBadge
-                              variant={perm.canRead ? "success" : "danger"}
-                            >
-                              R
-                            </StatusBadge>
-                            <StatusBadge
-                              variant={perm.canWrite ? "success" : "danger"}
-                            >
-                              W
-                            </StatusBadge>
+                            <PermissionToggle
+                              agentId={agent.agent_id}
+                              domain={d}
+                              field="read"
+                              enabled={perm.canRead}
+                            />
+                            <PermissionToggle
+                              agentId={agent.agent_id}
+                              domain={d}
+                              field="write"
+                              enabled={perm.canWrite}
+                            />
+                            <RemoveRuleButton
+                              agentId={agent.agent_id}
+                              domain={d}
+                            />
                           </div>
                         ) : (
                           <span className="text-[var(--color-text-muted)]">
@@ -95,6 +122,17 @@ export default function AgentsPage() {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card className="p-4">
+        <h2 className="text-sm font-medium mb-3">Add Permission Rule</h2>
+        <AddRuleForm
+          agents={agents.map((a) => ({
+            agent_id: a.agent_id,
+            agent_name: a.agent_name,
+          }))}
+          domains={domains.map((d) => d.domain)}
+        />
       </Card>
     </div>
   );

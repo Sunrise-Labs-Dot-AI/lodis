@@ -47,7 +47,7 @@ export function startHttpApi(
 ) {
   const server = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "POST, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     if (req.method === "OPTIONS") {
@@ -250,6 +250,25 @@ export function startHttpApi(
         }
 
         return json(res, { agentId, domain, canRead: !!canRead, canWrite: !!canWrite });
+      }
+
+      // DELETE /api/permissions
+      if (url === "/api/permissions" && req.method === "DELETE") {
+        const body = await parseBody(req);
+        const agentId = body.agentId as string;
+        const domain = body.domain as string;
+        if (!agentId || !domain) return json(res, { error: "agentId and domain required" }, 400);
+
+        db.delete(agentPermissions)
+          .where(
+            and(
+              eq(agentPermissions.agentId, agentId),
+              eq(agentPermissions.domain, domain),
+            ),
+          )
+          .run();
+
+        return json(res, { agentId, domain, deleted: true });
       }
 
       // POST /api/clear-all

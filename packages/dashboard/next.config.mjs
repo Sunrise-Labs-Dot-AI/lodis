@@ -1,11 +1,11 @@
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: __dirname,
+  outputFileTracingRoot: resolve(__dirname, "../.."),
   serverExternalPackages: ["better-sqlite3", "onnxruntime-node", "@huggingface/transformers"],
 
   env: {

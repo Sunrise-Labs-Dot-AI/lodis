@@ -26,11 +26,11 @@ That's it. Your AI agent now has persistent memory.
 
 ## What You Get
 
-Engrams provides 12 MCP tools:
+Engrams provides 20 MCP tools:
 
 | Tool | Description |
 |------|-------------|
-| `memory_write` | Create a new memory with content, domain, and source attribution |
+| `memory_write` | Create a new memory with dedup detection and resolution |
 | `memory_search` | Full-text search across all memories (FTS5) |
 | `memory_update` | Modify a memory's content, detail, or domain |
 | `memory_remove` | Soft-delete a memory |
@@ -39,9 +39,17 @@ Engrams provides 12 MCP tools:
 | `memory_flag_mistake` | Flag a memory as incorrect (degrades confidence) |
 | `memory_connect` | Create typed relationships between memories |
 | `memory_get_connections` | View a memory's relationship graph |
-| `memory_list_domains` | List all memory domains with counts |
+| `memory_split` | Break compound memories into atomic units |
+| `memory_scrub` | Detect and redact PII or secrets from memory content |
 | `memory_list` | Browse memories by domain, sorted by confidence or recency |
+| `memory_list_domains` | List all memory domains with counts |
+| `memory_list_entities` | List extracted entities grouped by type |
+| `memory_classify` | Batch-classify untyped memories using entity extraction |
 | `memory_set_permissions` | Configure per-agent read/write access |
+| `memory_configure` | Configure LLM provider for entity extraction and corrections |
+| `memory_onboard` | Get a personalized onboarding plan to seed your memory |
+| `memory_import` | Import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
+| `memory_sync` | Sync memories with cloud (Pro tier) |
 
 ## MCP Config Examples
 

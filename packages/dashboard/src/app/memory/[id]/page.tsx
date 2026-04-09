@@ -23,11 +23,11 @@ interface PageProps {
 
 export default async function MemoryDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const memory = getMemoryById(id);
+  const memory = await getMemoryById(id);
   if (!memory) notFound();
 
-  const events = getMemoryEvents(id);
-  const connections = getMemoryConnections(id);
+  const events = await getMemoryEvents(id);
+  const connections = await getMemoryConnections(id);
 
   return (
     <div className="space-y-6">

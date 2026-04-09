@@ -25,7 +25,7 @@ interface PageProps {
 
 export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const totalCount = getTotalMemoryCount();
+  const totalCount = await getTotalMemoryCount();
 
   // Empty state: no memories in the entire DB
   if (totalCount === 0) {
@@ -50,10 +50,10 @@ export default async function HomePage({ searchParams }: PageProps) {
     );
   }
 
-  const domains = getDomains();
-  const sourceTypes = getSourceTypes();
-  const entityTypes = getEntityTypes();
-  const unreviewedCount = getUnreviewedCount();
+  const domains = await getDomains();
+  const sourceTypes = await getSourceTypes();
+  const entityTypes = await getEntityTypes();
+  const unreviewedCount = await getUnreviewedCount();
 
   const sortBy = (["confidence", "recency", "used", "learned"] as const).includes(
     params.sort as "confidence" | "recency" | "used" | "learned",
@@ -61,7 +61,7 @@ export default async function HomePage({ searchParams }: PageProps) {
     ? (params.sort as "confidence" | "recency" | "used" | "learned")
     : "confidence";
 
-  const memories = getMemories({
+  const memories = await getMemories({
     search: params.q,
     domain: params.domain,
     sortBy,

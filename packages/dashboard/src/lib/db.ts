@@ -1,94 +1,66 @@
-import Database from "better-sqlite3";
-import { resolve } from "path";
-import { homedir } from "os";
+// db.ts — facade that routes to local (better-sqlite3) or hosted (Turso) backend
 
-let readDb: Database.Database | null = null;
-let writeDb: Database.Database | null = null;
-let _hasEntityColumns: boolean | null = null;
+// Re-export all types from db-local
+export type {
+  MemoryRow,
+  EventRow,
+  ConnectionRow,
+  PermissionRow,
+  GraphNode,
+  GraphEdge,
+  EntityNode,
+  EntityEdge,
+} from "./db-local";
 
-function hasEntityColumns(db: Database.Database): boolean {
-  if (_hasEntityColumns !== null) return _hasEntityColumns;
-  try {
-    db.prepare(`SELECT entity_type FROM memories LIMIT 0`).run();
-    _hasEntityColumns = true;
-  } catch {
-    _hasEntityColumns = false;
-  }
-  return _hasEntityColumns;
-}
+import type {
+  MemoryRow,
+  EventRow,
+  ConnectionRow,
+  PermissionRow,
+  GraphNode,
+  GraphEdge,
+  EntityNode,
+  EntityEdge,
+} from "./db-local";
 
-function getDbPath(): string {
-  return resolve(homedir(), ".engrams", "engrams.db");
-}
+const isHosted = (): boolean => !!process.env.TURSO_DATABASE_URL;
+
+// --- getReadDb / getWriteDb (used by cleanup.ts and db-actions.ts) ---
+
+import type Database from "better-sqlite3";
 
 export function getReadDb(): Database.Database {
-  if (!readDb) {
-    readDb = new Database(getDbPath(), { readonly: true });
-    readDb.pragma("journal_mode = WAL");
+  if (isHosted()) {
+    throw new Error("getReadDb is not available in hosted mode. Use the async facade functions instead.");
   }
-  return readDb;
+  const { getReadDb: localGetReadDb } = require("./db-local") as typeof import("./db-local");
+  return localGetReadDb();
 }
 
 export function getWriteDb(): Database.Database {
-  if (!writeDb) {
-    writeDb = new Database(getDbPath());
-    writeDb.pragma("journal_mode = WAL");
-    writeDb.pragma("foreign_keys = ON");
+  if (isHosted()) {
+    throw new Error("getWriteDb is not available in hosted mode. Use the async facade functions instead.");
   }
-  return writeDb;
+  const { getWriteDb: localGetWriteDb } = require("./db-local") as typeof import("./db-local");
+  return localGetWriteDb();
 }
 
-export interface MemoryRow {
-  id: string;
-  content: string;
-  detail: string | null;
-  domain: string;
-  source_agent_id: string;
-  source_agent_name: string;
-  cross_agent_id: string | null;
-  cross_agent_name: string | null;
-  source_type: string;
-  source_description: string | null;
-  confidence: number;
-  confirmed_count: number;
-  corrected_count: number;
-  mistake_count: number;
-  used_count: number;
-  learned_at: string | null;
-  confirmed_at: string | null;
-  last_used_at: string | null;
-  deleted_at: string | null;
-  has_pii_flag: number;
-  entity_type: string | null;
-  entity_name: string | null;
-  structured_data: string | null;
+// --- Helper: lazily load Turso client for inline implementations ---
+
+function getTursoClient() {
+  const { createClient } = require("@libsql/client") as typeof import("@libsql/client");
+  if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
+    throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN required for hosted mode");
+  }
+  return createClient({
+    url: process.env.TURSO_DATABASE_URL,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
 }
 
-export interface EventRow {
-  id: string;
-  memory_id: string;
-  event_type: string;
-  agent_id: string | null;
-  agent_name: string | null;
-  old_value: string | null;
-  new_value: string | null;
-  timestamp: string;
-}
+// --- Read functions ---
 
-export interface ConnectionRow {
-  source_memory_id: string;
-  target_memory_id: string;
-  relationship: string;
-}
-
-export interface PermissionRow {
-  agent_id: string;
-  domain: string;
-  can_read: number;
-  can_write: number;
-}
-
-export function getMemories(opts?: {
+export async function getMemories(opts?: {
   domain?: string;
   sortBy?: "confidence" | "recency" | "used" | "learned";
   search?: string;
@@ -98,482 +70,232 @@ export function getMemories(opts?: {
   maxConfidence?: number;
   unused?: boolean;
   needsReview?: boolean;
-}): MemoryRow[] {
-  const db = getReadDb();
-
-  function applyFilters(q: string, params: unknown[]): { q: string; params: unknown[] } {
-    if (opts?.domain) {
-      q += ` AND domain = ?`;
-      params.push(opts.domain);
-    }
-    if (opts?.sourceType) {
-      q += ` AND source_type = ?`;
-      params.push(opts.sourceType);
-    }
-    if (opts?.minConfidence !== undefined) {
-      q += ` AND confidence >= ?`;
-      params.push(opts.minConfidence);
-    }
-    if (opts?.maxConfidence !== undefined) {
-      q += ` AND confidence <= ?`;
-      params.push(opts.maxConfidence);
-    }
-    if (opts?.unused) {
-      q += ` AND used_count = 0`;
-    }
-    if (opts?.entityType && hasEntityColumns(db)) {
-      q += ` AND entity_type = ?`;
-      params.push(opts.entityType);
-    }
-    if (opts?.needsReview) {
-      q += ` AND confirmed_count = 0 AND source_type = 'inferred'`;
-    }
-    return { q, params };
+}): Promise<MemoryRow[]> {
+  if (isHosted()) {
+    const { getMemoriesHosted } = await import("./db-hosted");
+    return getMemoriesHosted(opts);
   }
+  const { getMemories: local } = await import("./db-local");
+  return Promise.resolve(local(opts));
+}
 
-  function applySort(q: string): string {
-    switch (opts?.sortBy) {
-      case "recency": return q + ` ORDER BY learned_at DESC`;
-      case "used": return q + ` ORDER BY used_count DESC, confidence DESC`;
-      case "learned": return q + ` ORDER BY learned_at ASC`;
-      default: return q + ` ORDER BY confidence DESC`;
-    }
+export async function getMemoryById(id: string): Promise<MemoryRow | undefined> {
+  if (isHosted()) {
+    const { getMemoryByIdHosted } = await import("./db-hosted");
+    return getMemoryByIdHosted(id);
   }
+  const { getMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id));
+}
 
-  if (opts?.search) {
-    const ftsRows = db
-      .prepare(
-        `SELECT rowid FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT 100`,
-      )
-      .all(opts.search) as { rowid: number }[];
-
-    if (ftsRows.length === 0) return [];
-
-    const rowids = ftsRows.map((r) => r.rowid);
-    const placeholders = rowids.map(() => "?").join(",");
-    let q = `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL`;
-    let params: unknown[] = [...rowids];
-    ({ q, params } = applyFilters(q, params));
-    q = applySort(q);
-    return db.prepare(q).all(...params) as MemoryRow[];
+export async function getMemoryEvents(memoryId: string): Promise<EventRow[]> {
+  if (isHosted()) {
+    const { getMemoryEventsHosted } = await import("./db-hosted");
+    return getMemoryEventsHosted(memoryId);
   }
-
-  let q = `SELECT * FROM memories WHERE deleted_at IS NULL`;
-  let params: unknown[] = [];
-  ({ q, params } = applyFilters(q, params));
-  q = applySort(q);
-  return db.prepare(q).all(...params) as MemoryRow[];
+  const { getMemoryEvents: local } = await import("./db-local");
+  return Promise.resolve(local(memoryId));
 }
 
-export function getEntityTypes(): string[] {
-  const db = getReadDb();
-  try {
-    const rows = db
-      .prepare(`SELECT DISTINCT entity_type FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL ORDER BY entity_type`)
-      .all() as { entity_type: string }[];
-    return rows.map((r) => r.entity_type);
-  } catch {
-    // Column may not exist yet if migrations haven't run
-    return [];
-  }
-}
-
-export function getSourceTypes(): string[] {
-  const db = getReadDb();
-  const rows = db
-    .prepare(`SELECT DISTINCT source_type FROM memories WHERE deleted_at IS NULL ORDER BY source_type`)
-    .all() as { source_type: string }[];
-  return rows.map((r) => r.source_type);
-}
-
-export function getMemoryById(id: string): MemoryRow | undefined {
-  const db = getReadDb();
-  return db
-    .prepare(`SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`)
-    .get(id) as MemoryRow | undefined;
-}
-
-export function getMemoryEvents(memoryId: string): EventRow[] {
-  const db = getReadDb();
-  return db
-    .prepare(
-      `SELECT * FROM memory_events WHERE memory_id = ? ORDER BY timestamp DESC`,
-    )
-    .all(memoryId) as EventRow[];
-}
-
-export function getMemoryConnections(memoryId: string): {
+export async function getMemoryConnections(memoryId: string): Promise<{
   outgoing: (ConnectionRow & { content: string })[];
   incoming: (ConnectionRow & { content: string })[];
-} {
-  const db = getReadDb();
-  const outgoing = db
-    .prepare(
-      `SELECT mc.*, m.content FROM memory_connections mc
-       JOIN memories m ON m.id = mc.target_memory_id
-       WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL`,
-    )
-    .all(memoryId) as (ConnectionRow & { content: string })[];
-
-  const incoming = db
-    .prepare(
-      `SELECT mc.*, m.content FROM memory_connections mc
-       JOIN memories m ON m.id = mc.source_memory_id
-       WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL`,
-    )
-    .all(memoryId) as (ConnectionRow & { content: string })[];
-
-  return { outgoing, incoming };
+}> {
+  if (isHosted()) {
+    const { getMemoryConnectionsHosted } = await import("./db-hosted");
+    return getMemoryConnectionsHosted(memoryId);
+  }
+  const { getMemoryConnections: local } = await import("./db-local");
+  return Promise.resolve(local(memoryId));
 }
 
-export function getDomains(): { domain: string; count: number }[] {
-  const db = getReadDb();
-  return db
-    .prepare(
+export async function getDomains(): Promise<{ domain: string; count: number }[]> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const result = await client.execute(
       `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL GROUP BY domain ORDER BY count DESC`,
-    )
-    .all() as { domain: string; count: number }[];
+    );
+    return result.rows as unknown as { domain: string; count: number }[];
+  }
+  const { getDomains: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getAgentPermissions(): PermissionRow[] {
-  const db = getReadDb();
-  return db
-    .prepare(`SELECT * FROM agent_permissions ORDER BY agent_id, domain`)
-    .all() as PermissionRow[];
+export async function getAgentPermissions(): Promise<PermissionRow[]> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const result = await client.execute(
+      `SELECT * FROM agent_permissions ORDER BY agent_id, domain`,
+    );
+    return result.rows as unknown as PermissionRow[];
+  }
+  const { getAgentPermissions: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getAgents(): { agent_id: string; agent_name: string }[] {
-  const db = getReadDb();
-  return db
-    .prepare(
+export async function getAgents(): Promise<{ agent_id: string; agent_name: string }[]> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const result = await client.execute(
       `SELECT DISTINCT source_agent_id as agent_id, source_agent_name as agent_name
        FROM memories WHERE deleted_at IS NULL ORDER BY agent_name`,
-    )
-    .all() as { agent_id: string; agent_name: string }[];
+    );
+    return result.rows as unknown as { agent_id: string; agent_name: string }[];
+  }
+  const { getAgents: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getDbStats(): {
+export async function getDbStats(): Promise<{
   totalMemories: number;
   totalDomains: number;
   dbSizeBytes: number;
-} {
-  const db = getReadDb();
-  const totalMemories = (
-    db
-      .prepare(`SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL`)
-      .get() as { c: number }
-  ).c;
-  const totalDomains = (
-    db
-      .prepare(
-        `SELECT COUNT(DISTINCT domain) as c FROM memories WHERE deleted_at IS NULL`,
-      )
-      .get() as { c: number }
-  ).c;
-
-  const { size } = require("fs").statSync(
-    resolve(homedir(), ".engrams", "engrams.db"),
-  );
-  return { totalMemories, totalDomains, dbSizeBytes: size };
+}> {
+  if (isHosted()) {
+    const { getDbStatsHosted } = await import("./db-hosted");
+    return getDbStatsHosted();
+  }
+  const { getDbStats: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getUnreviewedCount(): number {
-  const db = getReadDb();
-  const result = db.prepare(
-    `SELECT COUNT(*) as count FROM memories WHERE confirmed_count = 0 AND source_type = 'inferred' AND deleted_at IS NULL`,
-  ).get() as { count: number };
-  return result.count;
+export async function getSourceTypes(): Promise<string[]> {
+  if (isHosted()) {
+    const { getSourceTypesHosted } = await import("./db-hosted");
+    return getSourceTypesHosted();
+  }
+  const { getSourceTypes: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getTotalMemoryCount(): number {
-  const db = getReadDb();
-  const result = db.prepare(
-    `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL`,
-  ).get() as { count: number };
-  return result.count;
+export async function getEntityTypes(): Promise<string[]> {
+  if (isHosted()) {
+    const { getEntityTypesHosted } = await import("./db-hosted");
+    return getEntityTypesHosted();
+  }
+  const { getEntityTypes: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
-export function getAllMemoriesForExport(): MemoryRow[] {
-  const db = getReadDb();
-  return db
-    .prepare(`SELECT * FROM memories WHERE deleted_at IS NULL ORDER BY domain, confidence DESC`)
-    .all() as MemoryRow[];
+export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  if (isHosted()) {
+    const { getGraphDataHosted } = await import("./db-hosted");
+    return getGraphDataHosted();
+  }
+  const { getGraphData: local } = await import("./db-local");
+  return Promise.resolve(local());
+}
+
+export async function getEntityGraphData(): Promise<{
+  entities: EntityNode[];
+  edges: EntityEdge[];
+  uncategorized: GraphNode[];
+}> {
+  if (isHosted()) {
+    const { getEntityGraphDataHosted } = await import("./db-hosted");
+    return getEntityGraphDataHosted();
+  }
+  const { getEntityGraphData: local } = await import("./db-local");
+  return Promise.resolve(local());
+}
+
+export async function getTotalMemoryCount(): Promise<number> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const result = await client.execute(
+      `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL`,
+    );
+    return result.rows[0].count as number;
+  }
+  const { getTotalMemoryCount: local } = await import("./db-local");
+  return Promise.resolve(local());
+}
+
+export async function getUnreviewedCount(): Promise<number> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const result = await client.execute(
+      `SELECT COUNT(*) as count FROM memories WHERE confirmed_count = 0 AND source_type = 'inferred' AND deleted_at IS NULL`,
+    );
+    return result.rows[0].count as number;
+  }
+  const { getUnreviewedCount: local } = await import("./db-local");
+  return Promise.resolve(local());
+}
+
+export async function getAllMemoriesForExport(): Promise<MemoryRow[]> {
+  if (isHosted()) {
+    const client = getTursoClient();
+    const { decrypt } = await import("@engrams/core");
+    const key = process.env.ENGRAMS_ENCRYPTION_KEY;
+    if (!key) throw new Error("ENGRAMS_ENCRYPTION_KEY required for hosted mode");
+    const keyBuf = Buffer.from(key, "base64");
+    const result = await client.execute(
+      `SELECT * FROM memories WHERE deleted_at IS NULL ORDER BY domain, confidence DESC`,
+    );
+    return result.rows.map((row) => {
+      const r = row as unknown as MemoryRow;
+      return {
+        ...r,
+        content: decrypt(r.content, keyBuf),
+        detail: r.detail ? decrypt(r.detail, keyBuf) : null,
+        structured_data: r.structured_data ? decrypt(r.structured_data, keyBuf) : null,
+      };
+    });
+  }
+  const { getAllMemoriesForExport: local } = await import("./db-local");
+  return Promise.resolve(local());
 }
 
 // --- Write operations ---
 
-function generateId(): string {
-  return require("crypto").randomBytes(16).toString("hex");
-}
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-export function deleteMemoryById(id: string): boolean {
-  const db = getWriteDb();
-  const timestamp = now();
-  const result = db
-    .prepare(`UPDATE memories SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
-    .run(timestamp, id);
-  if (result.changes > 0) {
-    db.prepare(
-      `INSERT INTO memory_events (id, memory_id, event_type, agent_name, new_value, timestamp) VALUES (?, ?, 'removed', 'dashboard', ?, ?)`,
-    ).run(generateId(), id, JSON.stringify({ reason: "deleted via dashboard" }), timestamp);
+export async function deleteMemoryById(id: string): Promise<boolean> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
   }
-  return result.changes > 0;
+  const { deleteMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id));
 }
 
-export function confirmMemoryById(id: string): { newConfidence: number } | null {
-  const db = getWriteDb();
-  const existing = db
-    .prepare(`SELECT confidence, confirmed_count FROM memories WHERE id = ? AND deleted_at IS NULL`)
-    .get(id) as { confidence: number; confirmed_count: number } | undefined;
-  if (!existing) return null;
-
-  const newConfidence = 0.99;
-  const timestamp = now();
-  db.prepare(
-    `UPDATE memories SET confidence = ?, confirmed_count = ?, confirmed_at = ? WHERE id = ?`,
-  ).run(newConfidence, existing.confirmed_count + 1, timestamp, id);
-  db.prepare(
-    `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'confirmed', 'dashboard', ?, ?, ?)`,
-  ).run(generateId(), id, JSON.stringify({ confidence: existing.confidence }), JSON.stringify({ confidence: newConfidence }), timestamp);
-  return { newConfidence };
+export async function confirmMemoryById(id: string): Promise<{ newConfidence: number } | null> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
+  }
+  const { confirmMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id));
 }
 
-export function flagMemoryById(id: string): { newConfidence: number } | null {
-  const db = getWriteDb();
-  const existing = db
-    .prepare(`SELECT confidence, mistake_count FROM memories WHERE id = ? AND deleted_at IS NULL`)
-    .get(id) as { confidence: number; mistake_count: number } | undefined;
-  if (!existing) return null;
-
-  const newConfidence = Math.max(existing.confidence - 0.15, 0.10);
-  const timestamp = now();
-  db.prepare(
-    `UPDATE memories SET confidence = ?, mistake_count = ? WHERE id = ?`,
-  ).run(newConfidence, existing.mistake_count + 1, id);
-  db.prepare(
-    `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'confidence_changed', 'dashboard', ?, ?, ?)`,
-  ).run(generateId(), id, JSON.stringify({ confidence: existing.confidence }), JSON.stringify({ confidence: newConfidence, flaggedAsMistake: true }), timestamp);
-  return { newConfidence };
+export async function flagMemoryById(id: string): Promise<{ newConfidence: number } | null> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
+  }
+  const { flagMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id));
 }
 
-export function correctMemoryById(id: string, content: string, detail?: string | null): { newConfidence: number } | null {
-  const db = getWriteDb();
-  const existing = db
-    .prepare(`SELECT content, detail, confidence, corrected_count FROM memories WHERE id = ? AND deleted_at IS NULL`)
-    .get(id) as { content: string; detail: string | null; confidence: number; corrected_count: number } | undefined;
-  if (!existing) return null;
-
-  const newConfidence = Math.min(Math.max(existing.confidence, 0.85), 0.99);
-  const timestamp = now();
-  const newDetail = detail !== undefined ? detail : existing.detail;
-  db.prepare(
-    `UPDATE memories SET content = ?, detail = ?, confidence = ?, corrected_count = ? WHERE id = ?`,
-  ).run(content, newDetail, newConfidence, existing.corrected_count + 1, id);
-  db.prepare(
-    `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'corrected', 'dashboard', ?, ?, ?)`,
-  ).run(generateId(), id, JSON.stringify({ content: existing.content, detail: existing.detail }), JSON.stringify({ content, detail: newDetail, confidence: newConfidence }), timestamp);
-  return { newConfidence };
+export async function correctMemoryById(id: string, content: string, detail?: string | null): Promise<{ newConfidence: number } | null> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
+  }
+  const { correctMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id, content, detail));
 }
 
-export function splitMemoryById(
+export async function splitMemoryById(
   id: string,
   parts: { content: string; detail?: string | null }[],
-): { newIds: string[] } | null {
-  const db = getWriteDb();
-  const existing = db
-    .prepare(`SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`)
-    .get(id) as MemoryRow | undefined;
-  if (!existing) return null;
-
-  const timestamp = now();
-  const newIds: string[] = [];
-
-  for (const part of parts) {
-    const newId = generateId();
-    newIds.push(newId);
-    const confidence = Math.min((existing.confidence || 0.7) + 0.05, 0.99);
-
-    db.prepare(
-      `INSERT INTO memories (id, content, detail, domain, source_agent_id, source_agent_name, source_type, source_description, confidence, learned_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      newId,
-      part.content,
-      part.detail ?? null,
-      existing.domain,
-      existing.source_agent_id,
-      existing.source_agent_name,
-      existing.source_type,
-      existing.source_description,
-      confidence,
-      timestamp,
-    );
-
-    db.prepare(
-      `INSERT INTO memory_events (id, memory_id, event_type, agent_name, new_value, timestamp) VALUES (?, ?, 'created', 'dashboard', ?, ?)`,
-    ).run(generateId(), newId, JSON.stringify({ content: part.content, splitFrom: id }), timestamp);
+): Promise<{ newIds: string[] } | null> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
   }
+  const { splitMemoryById: local } = await import("./db-local");
+  return Promise.resolve(local(id, parts));
+}
 
-  // Connect new memories to each other
-  for (let i = 0; i < newIds.length; i++) {
-    for (let j = i + 1; j < newIds.length; j++) {
-      db.prepare(
-        `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, 'related')`,
-      ).run(newIds[i], newIds[j]);
-    }
+export async function clearAllMemories(): Promise<void> {
+  if (isHosted()) {
+    throw new Error("Write operations not supported in hosted dashboard");
   }
-
-  // Soft-delete original
-  db.prepare(`UPDATE memories SET deleted_at = ? WHERE id = ?`).run(timestamp, id);
-  db.prepare(
-    `INSERT INTO memory_events (id, memory_id, event_type, agent_name, new_value, timestamp) VALUES (?, ?, 'removed', 'dashboard', ?, ?)`,
-  ).run(generateId(), id, JSON.stringify({ reason: "split", splitInto: newIds }), timestamp);
-
-  return { newIds };
-}
-
-export interface GraphNode {
-  id: string;
-  content: string;
-  entity_type: string | null;
-  entity_name: string | null;
-  domain: string;
-  confidence: number;
-  connectionCount: number;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  relationship: string;
-}
-
-export function getGraphData(): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const db = getReadDb();
-
-  const connectedIds = db.prepare(`
-    SELECT DISTINCT id FROM memories
-    WHERE deleted_at IS NULL AND id IN (
-      SELECT source_memory_id FROM memory_connections
-      UNION
-      SELECT target_memory_id FROM memory_connections
-    )
-  `).all() as { id: string }[];
-
-  const entityTypeCol = hasEntityColumns(db)
-    ? "m.entity_type, m.entity_name"
-    : "NULL as entity_type, NULL as entity_name";
-
-  const nodes = connectedIds.length > 0
-    ? db.prepare(`
-        SELECT m.id, m.content, ${entityTypeCol}, m.domain, m.confidence,
-          (SELECT COUNT(*) FROM memory_connections mc
-           WHERE mc.source_memory_id = m.id OR mc.target_memory_id = m.id) as connectionCount
-        FROM memories m
-        WHERE m.deleted_at IS NULL AND m.id IN (
-          SELECT source_memory_id FROM memory_connections
-          UNION
-          SELECT target_memory_id FROM memory_connections
-        )
-        ORDER BY connectionCount DESC
-        LIMIT 200
-      `).all() as GraphNode[]
-    : db.prepare(`
-        SELECT m.id, m.content, ${entityTypeCol}, m.domain, m.confidence, 0 as connectionCount
-        FROM memories m WHERE m.deleted_at IS NULL
-        ORDER BY m.confidence DESC LIMIT 50
-      `).all() as GraphNode[];
-
-  const edges = db.prepare(`
-    SELECT mc.source_memory_id as source, mc.target_memory_id as target, mc.relationship
-    FROM memory_connections mc
-    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
-    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
-  `).all() as GraphEdge[];
-
-  return { nodes, edges };
-}
-
-export interface EntityNode {
-  entityName: string;
-  entityType: string;
-  memoryCount: number;
-  avgConfidence: number;
-  memoryIds: string[];
-}
-
-export interface EntityEdge {
-  sourceEntity: string;
-  targetEntity: string;
-  connectionCount: number;
-  relationships: string[];
-}
-
-export function getEntityGraphData(): {
-  entities: EntityNode[];
-  edges: EntityEdge[];
-  uncategorized: GraphNode[];
-} {
-  const db = getReadDb();
-
-  if (!hasEntityColumns(db)) {
-    return { entities: [], edges: [], uncategorized: [] };
-  }
-
-  const rawEntities = db.prepare(`
-    SELECT entity_name as entityName, entity_type as entityType,
-           COUNT(*) as memoryCount, AVG(confidence) as avgConfidence,
-           GROUP_CONCAT(id) as memoryIdsCsv
-    FROM memories
-    WHERE deleted_at IS NULL AND entity_name IS NOT NULL
-    GROUP BY entity_name, entity_type
-    ORDER BY memoryCount DESC
-  `).all() as (EntityNode & { memoryIdsCsv: string })[];
-
-  const entities = rawEntities.map((e) => ({
-    entityName: e.entityName,
-    entityType: e.entityType,
-    memoryCount: e.memoryCount,
-    avgConfidence: e.avgConfidence,
-    memoryIds: e.memoryIdsCsv.split(","),
-  }));
-
-  const rawEdges = db.prepare(`
-    SELECT
-      m1.entity_name as sourceEntity,
-      m2.entity_name as targetEntity,
-      COUNT(*) as connectionCount,
-      GROUP_CONCAT(DISTINCT mc.relationship) as relationshipsCsv
-    FROM memory_connections mc
-    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
-    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
-    WHERE m1.entity_name IS NOT NULL AND m2.entity_name IS NOT NULL
-      AND m1.entity_name != m2.entity_name
-    GROUP BY m1.entity_name, m2.entity_name
-  `).all() as (EntityEdge & { relationshipsCsv: string })[];
-
-  const edges = rawEdges.map((e) => ({
-    sourceEntity: e.sourceEntity,
-    targetEntity: e.targetEntity,
-    connectionCount: e.connectionCount,
-    relationships: e.relationshipsCsv.split(","),
-  }));
-
-  const uncategorized = db.prepare(`
-    SELECT id, content, entity_type, entity_name, domain, confidence, 0 as connectionCount
-    FROM memories WHERE deleted_at IS NULL AND entity_name IS NULL
-    ORDER BY confidence DESC LIMIT 30
-  `).all() as GraphNode[];
-
-  return { entities, edges, uncategorized };
-}
-
-export function clearAllMemories(): void {
-  const db = getWriteDb();
-  const timestamp = now();
-  db.prepare(`UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL`).run(timestamp);
+  const { clearAllMemories: local } = await import("./db-local");
+  return Promise.resolve(local());
 }

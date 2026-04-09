@@ -6,10 +6,10 @@ import { RemoveRuleButton } from "@/components/remove-rule-button";
 
 export const dynamic = "force-dynamic";
 
-export default function AgentsPage() {
-  const agents = getAgents();
-  const permissions = getAgentPermissions();
-  const domains = getDomains();
+export default async function AgentsPage() {
+  const agents = await getAgents();
+  const permissions = await getAgentPermissions();
+  const domains = await getDomains();
 
   // Build permission map: agentId -> domain -> { canRead, canWrite }
   const permMap = new Map<string, Map<string, { canRead: boolean; canWrite: boolean }>>();

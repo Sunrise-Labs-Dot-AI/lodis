@@ -12,8 +12,10 @@ import { LLMProviderForm } from "@/components/llm-provider-form";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const stats = getDbStats();
-  const dbPath = resolve(homedir(), ".engrams", "engrams.db");
+  const stats = await getDbStats();
+  const dbPath = process.env.TURSO_DATABASE_URL
+    ? "(hosted — Turso)"
+    : resolve(homedir(), ".engrams", "engrams.db");
   const syncStatus = await getSyncStatus();
   const llmStatus = await getLLMStatus();
 

@@ -22,32 +22,32 @@ import { resolveLLMProvider, parseLLMJson, validateCorrection, validateSplit } f
 import type { LLMProvider } from "@engrams/core";
 
 export async function deleteMemoryAction(id: string) {
-  deleteMemoryById(id);
+  await deleteMemoryById(id);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
 }
 
 export async function confirmMemoryAction(id: string) {
-  const result = confirmMemoryById(id);
+  const result = await confirmMemoryById(id);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
   return result;
 }
 
 export async function flagMemoryAction(id: string) {
-  const result = flagMemoryById(id);
+  const result = await flagMemoryById(id);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
   return result;
 }
 
 export async function correctMemoryAction(id: string, feedback: string) {
-  const memory = getMemoryById(id);
+  const memory = await getMemoryById(id);
   if (!memory) return null;
 
   const provider = resolveLLMProvider("analysis");
   if (!provider) {
-    const result = correctMemoryById(id, feedback);
+    const result = await correctMemoryById(id, feedback);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
@@ -73,18 +73,18 @@ Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
 
     const validation = validateCorrection(memory.content, newContent, feedback);
     if (!validation.valid) {
-      const result = correctMemoryById(id, feedback);
+      const result = await correctMemoryById(id, feedback);
       revalidatePath("/");
       revalidatePath(`/memory/${id}`);
       return result;
     }
 
-    const result = correctMemoryById(id, newContent, newDetail);
+    const result = await correctMemoryById(id, newContent, newDetail);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
   } catch {
-    const result = correctMemoryById(id, feedback);
+    const result = await correctMemoryById(id, feedback);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
@@ -97,7 +97,7 @@ export async function proposeSplitAction(
   id: string,
   guidance?: string,
 ): Promise<{ parts: SplitPart[] } | { error: string }> {
-  const memory = getMemoryById(id);
+  const memory = await getMemoryById(id);
   if (!memory) return { error: "Memory not found" };
 
   const provider = resolveLLMProvider("analysis");
@@ -139,14 +139,14 @@ export async function confirmSplitAction(
   parts: SplitPart[],
 ): Promise<{ newIds: string[] } | { error: string } | null> {
   if (parts.length < 2) return { error: "Need at least 2 parts to split" };
-  const result = splitMemoryById(id, parts);
+  const result = await splitMemoryById(id, parts);
   if (!result) return { error: "Memory not found" };
   revalidatePath("/");
   return result;
 }
 
 export async function clearAllMemoriesAction() {
-  clearAll();
+  await clearAll();
   revalidatePath("/");
 }
 
@@ -157,7 +157,7 @@ export async function scanCleanupAction(): Promise<
   { suggestions: CleanupSuggestion[] } | { error: string }
 > {
   try {
-    const suggestions = scanForSuggestions();
+    const suggestions = await scanForSuggestions();
     return { suggestions };
   } catch (e) {
     console.error("[engrams] Cleanup scan failed:", e);
@@ -204,7 +204,7 @@ export async function applyMergeSuggestionAction(
 ): Promise<{ error?: string }> {
   for (const id of deleteIds) {
     if (id !== keepId) {
-      deleteMemoryById(id);
+      await deleteMemoryById(id);
     }
   }
   revalidatePath("/");
@@ -217,7 +217,7 @@ export async function applySplitSuggestionAction(
   parts: SplitPart[],
 ): Promise<{ newIds: string[]; error?: string } | { error: string }> {
   if (parts.length < 2) return { error: "Need at least 2 parts to split" };
-  const result = splitMemoryById(id, parts);
+  const result = await splitMemoryById(id, parts);
   if (!result) return { error: "Memory not found" };
   revalidatePath("/");
   revalidatePath("/cleanup");

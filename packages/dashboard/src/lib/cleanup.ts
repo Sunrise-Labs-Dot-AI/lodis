@@ -1,4 +1,5 @@
 import { getMemories, getReadDb, type MemoryRow } from "./db";
+import type DatabaseType from "better-sqlite3";
 
 // --- Types ---
 
@@ -104,7 +105,12 @@ function findSplitCandidates(memories: MemoryRow[]): CleanupSuggestion[] {
  * near-identical memories. Requires sqlite-vec extension loaded on the DB.
  */
 function findDuplicateClusters(memories: MemoryRow[]): CleanupSuggestion[] {
-  const db = getReadDb();
+  let db: DatabaseType.Database;
+  try {
+    db = getReadDb();
+  } catch {
+    return []; // Not available in hosted mode
+  }
 
   // Check if memory_embeddings table exists and has data
   let hasVec = false;
@@ -199,7 +205,12 @@ function findDuplicateClusters(memories: MemoryRow[]): CleanupSuggestion[] {
  * different enough to potentially conflict.
  */
 function findContradictionCandidates(memories: MemoryRow[]): CleanupSuggestion[] {
-  const db = getReadDb();
+  let db: DatabaseType.Database;
+  try {
+    db = getReadDb();
+  } catch {
+    return []; // Not available in hosted mode
+  }
 
   let hasVec = false;
   try {
@@ -283,8 +294,8 @@ const TYPE_PRIORITY: Record<SuggestionType, number> = {
   update: 4,
 };
 
-export function scanForSuggestions(): CleanupSuggestion[] {
-  const memories = getMemories();
+export async function scanForSuggestions(): Promise<CleanupSuggestion[]> {
+  const memories = await getMemories();
   if (memories.length === 0) return [];
 
   const suggestions = [

@@ -1,6 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
 import { decrypt } from "@engrams/core";
-import type { MemoryRow, EventRow, ConnectionRow, GraphNode, GraphEdge, EntityNode, EntityEdge } from "./db";
+import type { MemoryRow, EventRow, ConnectionRow, GraphNode, GraphEdge, EntityNode, EntityEdge } from "./db-local";
 
 let tursoClient: Client | null = null;
 

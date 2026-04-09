@@ -4,7 +4,7 @@ import { getAllMemoriesForExport } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const memories = getAllMemoriesForExport();
+  const memories = await getAllMemoriesForExport();
   const data = JSON.stringify(
     { exportedAt: new Date().toISOString(), count: memories.length, memories },
     null,

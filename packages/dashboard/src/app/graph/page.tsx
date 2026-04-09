@@ -4,8 +4,8 @@ import { KnowledgeGraph } from "@/components/knowledge-graph";
 export const dynamic = "force-dynamic";
 
 export default async function GraphPage() {
-  const entityData = getEntityGraphData();
-  const { nodes: rawNodes, edges: rawEdges } = getGraphData();
+  const entityData = await getEntityGraphData();
+  const { nodes: rawNodes, edges: rawEdges } = await getGraphData();
 
   const hasEntities = entityData.entities.length > 0;
   const totalMemories = rawNodes.length + entityData.uncategorized.length;

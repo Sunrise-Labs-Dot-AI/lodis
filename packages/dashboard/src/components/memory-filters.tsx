@@ -35,6 +35,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
   const activeMinConf = searchParams.get("minConf") ?? "";
   const activeMaxConf = searchParams.get("maxConf") ?? "";
   const activeUnused = searchParams.get("unused") === "1";
+  const activeReview = searchParams.get("review") === "1";
 
   const activeConfPreset = activeMinConf && activeMaxConf
     ? `${activeMinConf}-${activeMaxConf}`
@@ -73,7 +74,11 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
     updateParam("unused", activeUnused ? null : "1");
   }
 
-  const hasActiveFilters = activeSource || activeEntity || activeMinConf || activeUnused;
+  function toggleReview() {
+    updateParam("review", activeReview ? null : "1");
+  }
+
+  const hasActiveFilters = activeSource || activeEntity || activeMinConf || activeUnused || activeReview;
 
   return (
     <div className="flex items-center gap-3 flex-wrap text-xs">
@@ -163,6 +168,19 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
         Unused
       </button>
 
+      {/* Needs review toggle */}
+      <button
+        onClick={toggleReview}
+        className={clsx(
+          "px-2 py-1 rounded-md transition-colors cursor-pointer",
+          activeReview
+            ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
+            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+        )}
+      >
+        Needs review
+      </button>
+
       {/* Clear filters */}
       {hasActiveFilters && (
         <>
@@ -176,6 +194,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
                 params.delete("minConf");
                 params.delete("maxConf");
                 params.delete("unused");
+                params.delete("review");
                 router.push(`/?${params.toString()}`);
               });
             }}

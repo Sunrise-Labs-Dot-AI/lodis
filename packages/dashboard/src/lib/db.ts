@@ -97,6 +97,7 @@ export function getMemories(opts?: {
   minConfidence?: number;
   maxConfidence?: number;
   unused?: boolean;
+  needsReview?: boolean;
 }): MemoryRow[] {
   const db = getReadDb();
 
@@ -123,6 +124,9 @@ export function getMemories(opts?: {
     if (opts?.entityType && hasEntityColumns(db)) {
       q += ` AND entity_type = ?`;
       params.push(opts.entityType);
+    }
+    if (opts?.needsReview) {
+      q += ` AND confirmed_count = 0 AND source_type = 'inferred'`;
     }
     return { q, params };
   }
@@ -271,6 +275,22 @@ export function getDbStats(): {
     resolve(homedir(), ".engrams", "engrams.db"),
   );
   return { totalMemories, totalDomains, dbSizeBytes: size };
+}
+
+export function getUnreviewedCount(): number {
+  const db = getReadDb();
+  const result = db.prepare(
+    `SELECT COUNT(*) as count FROM memories WHERE confirmed_count = 0 AND source_type = 'inferred' AND deleted_at IS NULL`,
+  ).get() as { count: number };
+  return result.count;
+}
+
+export function getTotalMemoryCount(): number {
+  const db = getReadDb();
+  const result = db.prepare(
+    `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL`,
+  ).get() as { count: number };
+  return result.count;
 }
 
 export function getAllMemoriesForExport(): MemoryRow[] {

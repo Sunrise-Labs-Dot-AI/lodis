@@ -21,6 +21,29 @@ Add to your Claude Code config (`~/.claude.json`):
 
 That's it. Your AI now has persistent memory.
 
+## Getting Started
+
+After installing, tell your AI assistant:
+
+> "Help me set up Engrams"
+
+The assistant will call `memory_onboard` and:
+1. **Scan** your connected tools (calendar, email, GitHub) to extract people, projects, and context
+2. **Interview** you with targeted questions based on what it found
+3. **Seed** 30-50 memories with entity types and connections
+
+Review your memories at `localhost:3838`. Confirm what's right, correct what's wrong.
+
+### Importing Existing Memories
+
+If you have memories in other tools, your AI can import them:
+
+- **Claude Code auto-memory:** "Import my Claude memories into Engrams"
+- **ChatGPT memory export:** "Import this ChatGPT memory export into Engrams"
+- **Cursor rules:** "Import my .cursorrules as Engrams preferences"
+
+The `memory_import` tool handles parsing, deduplication, and entity classification automatically.
+
 ## What It Does
 
 - **Remembers across tools.** Teach Claude something, Cursor knows it too.
@@ -67,6 +90,8 @@ Features:
 | `memory_list` | Browse by domain, type, or confidence |
 | `memory_list_domains` | List all domains |
 | `memory_set_permissions` | Per-agent access control |
+| `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
+| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
 | `memory_scrub` | Detect and redact PII |
 
 ## Architecture

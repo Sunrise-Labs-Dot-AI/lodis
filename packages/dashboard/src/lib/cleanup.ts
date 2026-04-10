@@ -1,5 +1,37 @@
 import { getMemories, type MemoryRow } from "./db";
-import { detectSensitiveData } from "@engrams/core";
+
+// Inline PII detection patterns (avoids @engrams/core import issues in some environments)
+const PII_PATTERNS: { type: string; pattern: RegExp }[] = [
+  { type: "ssn", pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
+  { type: "credit_card", pattern: /\b(?:\d[ -]*?){13,19}\b/g },
+  { type: "api_key", pattern: /\b(?:sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|xoxp-[a-zA-Z0-9-]+|AKIA[A-Z0-9]{16}|rk_live_[a-zA-Z0-9]+|rk_test_[a-zA-Z0-9]+|pk_live_[a-zA-Z0-9]+|pk_test_[a-zA-Z0-9]+)\b/g },
+  { type: "email", pattern: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g },
+  { type: "phone", pattern: /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g },
+  { type: "ip_address", pattern: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+];
+
+function detectPii(text: string): string[] {
+  const types: Set<string> = new Set();
+  for (const { type, pattern } of PII_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (type === "credit_card") {
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(text)) !== null) {
+        const digits = m[0].replace(/[^0-9]/g, "");
+        if (digits.length >= 13 && digits.length <= 19) types.add(type);
+      }
+    } else if (type === "phone") {
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(text)) !== null) {
+        const digits = m[0].replace(/[^0-9]/g, "");
+        if (digits.length >= 10) types.add(type);
+      }
+    } else {
+      if (pattern.test(text)) types.add(type);
+    }
+  }
+  return [...types];
+}
 
 // --- Types ---
 
@@ -242,10 +274,9 @@ function findPiiMemories(memories: MemoryRow[]): CleanupSuggestion[] {
   const results: CleanupSuggestion[] = [];
   for (const m of memories) {
     const text = m.content + (m.detail ? " " + m.detail : "");
-    const matches = detectSensitiveData(text);
-    if (matches.length === 0) continue;
+    const types = detectPii(text);
+    if (types.length === 0) continue;
 
-    const types = [...new Set(matches.map((match) => match.type))];
     const typeLabels = types.map((t) => t.replace(/_/g, " ")).join(", ");
     results.push({
       type: "pii",

@@ -22,4 +22,10 @@ export default defineConfig([
     splitting: false,
     noExternal: ["@engrams/core"],
   },
+  {
+    entry: ["src/cloud.ts"],
+    format: ["esm"],
+    splitting: false,
+    noExternal: ["@engrams/core"],
+  },
 ]);

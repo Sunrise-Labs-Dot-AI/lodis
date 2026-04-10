@@ -61,6 +61,7 @@ async function expandConnections(
   queryEmbedding: Float32Array | null,
   maxDepth: number,
   similarityThreshold: number,
+  userId?: string | null,
 ): Promise<ExpandedResult[]> {
   if (!queryEmbedding) {
     return results.map((r) => ({ ...r, connected: [] }));
@@ -82,16 +83,16 @@ async function expandConnections(
         sql: `SELECT mc.target_memory_id as id, mc.relationship, m.*
              FROM memory_connections mc
              JOIN memories m ON m.id = mc.target_memory_id
-             WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL`,
-        args: [memoryId],
+             WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL${userId ? ' AND m.user_id = ?' : ''}`,
+        args: userId ? [memoryId, userId] : [memoryId],
       });
 
       const incomingResult = await client.execute({
         sql: `SELECT mc.source_memory_id as id, mc.relationship, m.*
              FROM memory_connections mc
              JOIN memories m ON m.id = mc.source_memory_id
-             WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL`,
-        args: [memoryId],
+             WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL${userId ? ' AND m.user_id = ?' : ''}`,
+        args: userId ? [memoryId, userId] : [memoryId],
       });
 
       const allConns = [
@@ -144,6 +145,7 @@ export async function hybridSearch(
   client: Client,
   query: string,
   options: {
+    userId?: string | null;
     domain?: string;
     entityType?: string;
     entityName?: string;
@@ -154,6 +156,7 @@ export async function hybridSearch(
     similarityThreshold?: number;
   } = {},
 ): Promise<{ results: ExpandedResult[]; cached: boolean }> {
+  const userId = options.userId ?? null;
   const limit = options.limit ?? 20;
   const expand = options.expand ?? true;
   const maxDepth = options.maxDepth ?? 3;
@@ -161,7 +164,7 @@ export async function hybridSearch(
   const fetchLimit = limit * 3;
 
   // --- Check result cache ---
-  const cacheKey = JSON.stringify({ query, ...options });
+  const cacheKey = JSON.stringify({ query, userId, ...options });
   const currentLastModifiedResult = await client.execute({
     sql: `SELECT value FROM engrams_meta WHERE key = 'last_modified'`,
     args: [],
@@ -181,8 +184,8 @@ export async function hybridSearch(
       const rowids = ftsResults.map((r) => r.rowid);
       const placeholders = rowids.map(() => "?").join(",");
       const rowsResult = await client.execute({
-        sql: `SELECT id FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL`,
-        args: rowids,
+        sql: `SELECT id FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [...rowids, userId] : rowids,
       });
       ftsIds.push(...rowsResult.rows.map((r) => r.id as string));
     }
@@ -215,8 +218,8 @@ export async function hybridSearch(
   // 4. Apply confidence weighting and recency boost
   for (const [id, rawScore] of scores.entries()) {
     const memResult = await client.execute({
-      sql: `SELECT confidence, learned_at FROM memories WHERE id = ? AND deleted_at IS NULL`,
-      args: [id],
+      sql: `SELECT confidence, learned_at FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+      args: userId ? [id, userId] : [id],
     });
     const mem = memResult.rows[0] as unknown as { confidence: number; learned_at: string | null } | undefined;
     if (mem) {
@@ -244,6 +247,11 @@ export async function hybridSearch(
   const placeholders = topIds.map(() => "?").join(",");
   let sql = `SELECT * FROM memories WHERE id IN (${placeholders}) AND deleted_at IS NULL`;
   const params: unknown[] = [...topIds];
+
+  if (userId) {
+    sql += ` AND user_id = ?`;
+    params.push(userId);
+  }
 
   if (options.domain) {
     sql += ` AND domain = ?`;
@@ -281,7 +289,7 @@ export async function hybridSearch(
   // 6. Graph expansion
   let expandedResults: ExpandedResult[];
   if (expand) {
-    expandedResults = await expandConnections(client, searchResults, queryEmbedding, maxDepth, similarityThreshold);
+    expandedResults = await expandConnections(client, searchResults, queryEmbedding, maxDepth, similarityThreshold, userId);
   } else {
     expandedResults = searchResults.map((r) => ({ ...r, connected: [] }));
   }

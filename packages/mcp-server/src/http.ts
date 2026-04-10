@@ -10,6 +10,7 @@ import {
   applyMistake,
 } from "@engrams/core";
 import type { EngramsDatabase, Client } from "@engrams/core";
+import { validateToken } from "./auth.js";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -43,11 +44,12 @@ export function startHttpApi(
   db: EngramsDatabase,
   client: Client,
   port = 3838,
+  userId?: string | null,
 ) {
   const server = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (req.method === "OPTIONS") {
       res.writeHead(200);
@@ -58,6 +60,21 @@ export function startHttpApi(
     const url = req.url ?? "";
 
     try {
+      const isHosted = !!process.env.TURSO_DATABASE_URL;
+      let effectiveUserId = userId ?? null;
+
+      if (isHosted && !effectiveUserId) {
+        // Extract Bearer token for cloud mode
+        const authHeader = req.headers.authorization;
+        if (!authHeader?.startsWith("Bearer ")) {
+          return json(res, { error: "Authorization required" }, 401);
+        }
+        const result = await validateToken(authHeader.slice(7));
+        if (!result) {
+          return json(res, { error: "Invalid or expired token" }, 401);
+        }
+        effectiveUserId = result.userId;
+      }
       // POST /api/memory/:id/confirm
       const confirmMatch = url.match(/^\/api\/memory\/([^/]+)\/confirm$/);
       if (confirmMatch && req.method === "POST") {
@@ -273,10 +290,17 @@ export function startHttpApi(
       // POST /api/clear-all
       if (url === "/api/clear-all" && req.method === "POST") {
         const timestamp = now();
-        await client.execute({
-          sql: `UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL`,
-          args: [timestamp],
-        });
+        if (effectiveUserId) {
+          await client.execute({
+            sql: `UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL AND user_id = ?`,
+            args: [timestamp, effectiveUserId],
+          });
+        } else {
+          await client.execute({
+            sql: `UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL`,
+            args: [timestamp],
+          });
+        }
         return json(res, { cleared: true });
       }
 

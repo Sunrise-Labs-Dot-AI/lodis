@@ -1,5 +1,6 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 import { eq, and, isNull, desc, sql, gte } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -54,7 +55,12 @@ function textResult(data: unknown) {
   };
 }
 
-export async function startServer() {
+function getUserId(extra: Record<string, unknown>): string | null {
+  const authInfo = extra?.authInfo as { extra?: { userId?: string } } | undefined;
+  return authInfo?.extra?.userId ?? null;
+}
+
+export async function startServer(options?: { transport?: Transport }) {
   const server = new McpServer({
     name: "engrams",
     version: "0.1.0",
@@ -65,29 +71,33 @@ export async function startServer() {
   // Throttled confidence decay — runs at most once per hour
   let lastDecayRun = 0;
   const DECAY_THROTTLE_MS = 60 * 60 * 1000;
-  async function maybeRunDecay() {
+  async function maybeRunDecay(userId?: string | null) {
     const nowMs = Date.now();
     if (nowMs - lastDecayRun > DECAY_THROTTLE_MS) {
-      await applyConfidenceDecay(client);
-      await applyTemporalDecay(client);
+      await applyConfidenceDecay(client, userId);
+      await applyTemporalDecay(client, userId);
       lastDecayRun = nowMs;
     }
   }
 
   // --- Permission enforcement ---
-  async function checkPermission(agentId: string | undefined, domain: string, operation: "read" | "write"): Promise<boolean> {
+  async function checkPermission(agentId: string | undefined, domain: string, operation: "read" | "write", userId?: string | null): Promise<boolean> {
     if (!agentId) return true; // No agent ID = no restriction
 
+    const userFilter = userId ? ' AND user_id = ?' : '';
+    const baseArgs = userId ? [agentId, domain, userId] : [agentId, domain];
+
     const specific = (await client.execute({
-      sql: `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = ?`,
-      args: [agentId, domain],
+      sql: `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = ?${userFilter}`,
+      args: baseArgs,
     })).rows[0] as { can_read: number; can_write: number } | undefined;
 
     if (specific) return operation === "read" ? !!specific.can_read : !!specific.can_write;
 
+    const wildcardArgs = userId ? [agentId, userId] : [agentId];
     const wildcard = (await client.execute({
-      sql: `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
-      args: [agentId],
+      sql: `SELECT can_read, can_write FROM agent_permissions WHERE agent_id = ? AND domain = '*'${userFilter}`,
+      args: wildcardArgs,
     })).rows[0] as { can_read: number; can_write: number } | undefined;
 
     if (wildcard) return operation === "read" ? !!wildcard.can_read : !!wildcard.can_write;
@@ -95,22 +105,23 @@ export async function startServer() {
     return true; // No rule = allowed
   }
 
-  async function getBlockedDomains(agentId: string | undefined, operation: "read" | "write"): Promise<string[] | "all"> {
+  async function getBlockedDomains(agentId: string | undefined, operation: "read" | "write", userId?: string | null): Promise<string[] | "all"> {
     if (!agentId) return [];
 
     const col = operation === "read" ? "can_read" : "can_write";
+    const userFilter = userId ? ' AND user_id = ?' : '';
 
     // Check wildcard block: agent has domain='*' with read/write=0
     const wildcard = (await client.execute({
-      sql: `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
-      args: [agentId],
+      sql: `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'${userFilter}`,
+      args: userId ? [agentId, userId] : [agentId],
     })).rows[0] as { allowed: number } | undefined;
 
     if (wildcard && !wildcard.allowed) {
       // Wildcard block: only allow explicitly permitted domains
       const allowed = (await client.execute({
-        sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1`,
-        args: [agentId],
+        sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1${userFilter}`,
+        args: userId ? [agentId, userId] : [agentId],
       })).rows as unknown as { domain: string }[];
       if (allowed.length === 0) return "all";
       // Return "all" to signal caller to use allowlist instead
@@ -119,28 +130,29 @@ export async function startServer() {
 
     // Normal case: return explicitly blocked domains
     const blocked = (await client.execute({
-      sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND ${col} = 0 AND domain != '*'`,
-      args: [agentId],
+      sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND ${col} = 0 AND domain != '*'${userFilter}`,
+      args: userId ? [agentId, userId] : [agentId],
     })).rows as unknown as { domain: string }[];
     return blocked.map(r => r.domain);
   }
 
-  async function getAllowedDomains(agentId: string | undefined, operation: "read" | "write"): Promise<string[] | null> {
+  async function getAllowedDomains(agentId: string | undefined, operation: "read" | "write", userId?: string | null): Promise<string[] | null> {
     if (!agentId) return null; // null = no restriction
 
     const col = operation === "read" ? "can_read" : "can_write";
+    const userFilter = userId ? ' AND user_id = ?' : '';
 
     // Check wildcard block
     const wildcard = (await client.execute({
-      sql: `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'`,
-      args: [agentId],
+      sql: `SELECT ${col} as allowed FROM agent_permissions WHERE agent_id = ? AND domain = '*'${userFilter}`,
+      args: userId ? [agentId, userId] : [agentId],
     })).rows[0] as { allowed: number } | undefined;
 
     if (wildcard && !wildcard.allowed) {
       // Wildcard block: return only explicitly allowed domains
       const allowed = (await client.execute({
-        sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1`,
-        args: [agentId],
+        sql: `SELECT domain FROM agent_permissions WHERE agent_id = ? AND domain != '*' AND ${col} = 1${userFilter}`,
+        args: userId ? [agentId, userId] : [agentId],
       })).rows as unknown as { domain: string }[];
       return allowed.map(r => r.domain);
     }
@@ -148,10 +160,16 @@ export async function startServer() {
     return null; // No wildcard block = no allowlist needed
   }
 
-  async function applyReadFilter(query: string, queryParams: unknown[], agentId: string | undefined): Promise<{ query: string; params: unknown[] }> {
+  async function applyReadFilter(query: string, queryParams: unknown[], agentId: string | undefined, userId?: string | null): Promise<{ query: string; params: unknown[] }> {
+    // Apply userId scoping first
+    if (userId) {
+      query += ` AND user_id = ?`;
+      queryParams.push(userId);
+    }
+
     if (!agentId) return { query, params: queryParams };
 
-    const allowed = await getAllowedDomains(agentId, "read");
+    const allowed = await getAllowedDomains(agentId, "read", userId);
     if (allowed !== null) {
       if (allowed.length === 0) {
         query += ` AND 0`; // Block everything
@@ -163,7 +181,7 @@ export async function startServer() {
       return { query, params: queryParams };
     }
 
-    const blocked = await getBlockedDomains(agentId, "read");
+    const blocked = await getBlockedDomains(agentId, "read", userId);
     if (blocked !== "all" && blocked.length > 0) {
       const placeholders = blocked.map(() => "?").join(",");
       query += ` AND domain NOT IN (${placeholders})`;
@@ -255,7 +273,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
       resolution: z.enum(["update", "correct", "add_detail", "keep_both", "skip"]).optional().describe("How to resolve a similarity match"),
       existingMemoryId: z.string().optional().describe("ID of existing memory to act on (required for update/correct/add_detail)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       // --- Phase 2: Resolution of a previous similar_found response ---
       if (params.resolution && params.resolution !== "keep_both") {
         if (params.resolution === "skip") {
@@ -269,7 +288,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         const existing = await db
           .select()
           .from(memories)
-          .where(and(eq(memories.id, params.existingMemoryId), isNull(memories.deletedAt)))
+          .where(and(eq(memories.id, params.existingMemoryId), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
           .get();
 
         if (!existing) {
@@ -419,8 +438,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
               const matchedMemories = (await Promise.all(
                 closeMatches.map(async (m) => {
                   const row = (await client.execute({
-                    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`,
-                    args: [m.memory_id],
+                    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                    args: userId ? [m.memory_id, userId] : [m.memory_id],
                   })).rows[0] as Record<string, unknown> | undefined;
                   if (!row) return null;
                   return {
@@ -502,8 +521,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
             const rowids = dedupResults.map((r) => r.rowid);
             const placeholders = rowids.map(() => "?").join(",");
             const existing = (await client.execute({
-              sql: `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL`,
-              args: rowids,
+              sql: `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+              args: userId ? [...rowids, userId] : rowids,
             })).rows as unknown as Record<string, unknown>[];
 
             if (existing.length > 0) {
@@ -539,8 +558,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
           const entityMatches = (await client.execute({
             sql: `SELECT * FROM memories
                WHERE entity_type = ? AND entity_name = ? COLLATE NOCASE
-               AND deleted_at IS NULL`,
-            args: [params.entityType, params.entityName],
+               AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+            args: userId ? [params.entityType, params.entityName, userId] : [params.entityType, params.entityName],
           })).rows as unknown as Record<string, unknown>[];
 
           if (entityMatches.length > 0) {
@@ -574,7 +593,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       // --- Permission check ---
       const writeDomain = params.domain ?? "general";
-      if (!(await checkPermission(params.sourceAgentId, writeDomain, "write"))) {
+      if (!(await checkPermission(params.sourceAgentId, writeDomain, "write", userId))) {
         return textResult({ error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${writeDomain}"` });
       }
 
@@ -609,6 +628,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
           entityType: params.entityType ?? null,
           entityName: params.entityName ?? null,
           structuredData: params.structuredData ? JSON.stringify(params.structuredData) : null,
+          userId: userId ?? null,
         })
         .run();
 
@@ -643,8 +663,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
           try {
             // Gather existing entity names for normalization
             const existingNames = (await client.execute({
-              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`,
-              args: [],
+              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+              args: userId ? [userId] : [],
             })).rows as unknown as { entity_name: string }[];
 
             const extraction = await extractEntity(
@@ -662,34 +682,31 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
             // Race condition guard: only update if entity_type hasn't been set yet
             const current = (await client.execute({
-              sql: `SELECT entity_type FROM memories WHERE id = ? AND deleted_at IS NULL`,
-              args: [id],
+              sql: `SELECT entity_type FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+              args: userId ? [id, userId] : [id],
             })).rows[0] as { entity_type: string | null } | undefined;
 
             if (!current || current.entity_type) return;
 
             // Update entity type
             await client.execute({
-              sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
-              args: [
-                extraction.entity_type,
-                extraction.entity_name,
-                JSON.stringify(extraction.structured_data),
-                id,
-              ],
+              sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+              args: userId
+                ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), id, userId]
+                : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), id],
             });
 
             // Auto-create suggested connections
             for (const conn of extraction.suggested_connections) {
               const target = (await client.execute({
-                sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`,
-                args: [conn.target_entity_name],
+                sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+                args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
               })).rows[0] as { id: string } | undefined;
 
               if (target && target.id !== id) {
                 await client.execute({
-                  sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
-                  args: [id, target.id, conn.relationship],
+                  sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
+                  args: [id, target.id, conn.relationship, userId ?? null],
                 });
               }
             }
@@ -725,8 +742,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           if (splitResult?.should_split && splitResult.parts && splitResult.parts.length >= 2) {
             // Auto-split: soft-delete original and insert parts
             await client.execute({
-              sql: `UPDATE memories SET deleted_at = ? WHERE id = ?`,
-              args: [now(), id],
+              sql: `UPDATE memories SET deleted_at = ? WHERE id = ?${userId ? ' AND user_id = ?' : ''}`,
+              args: userId ? [now(), id, userId] : [now(), id],
             });
 
             autoSplitIds = [];
@@ -745,6 +762,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
                 confidence: partConfidence,
                 learnedAt: now(),
                 hasPiiFlag: detectSensitiveData(part.content + (part.detail ?? "")).length > 0 ? 1 : 0,
+                userId: userId ?? null,
               }).run();
 
               // Generate embedding for each part
@@ -763,8 +781,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
                 (async () => {
                   try {
                     const existingNames2 = (await client.execute({
-                      sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`,
-                      args: [],
+                      sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                      args: userId ? [userId] : [],
                     })).rows as unknown as { entity_name: string }[];
 
                     const ext = await extractEntity(extractionProvider!, capturedContent, capturedDetail, existingNames2.map(r => r.entity_name));
@@ -772,19 +790,21 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
                     if (!val.valid) return;
 
                     await client.execute({
-                      sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
-                      args: [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), capturedPartId],
+                      sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                      args: userId
+                        ? [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), capturedPartId, userId]
+                        : [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), capturedPartId],
                     });
 
                     for (const conn of ext.suggested_connections) {
                       const target = (await client.execute({
-                        sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`,
-                        args: [conn.target_entity_name],
+                        sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+                        args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
                       })).rows[0] as { id: string } | undefined;
                       if (target && target.id !== capturedPartId) {
                         await client.execute({
-                          sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
-                          args: [capturedPartId, target.id, conn.relationship],
+                          sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
+                          args: [capturedPartId, target.id, conn.relationship, userId ?? null],
                         });
                       }
                     }
@@ -804,8 +824,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       // Check if onboarding hint should be added for near-empty databases
       const totalAfterWrite = ((await client.execute({
-        sql: "SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL",
-        args: [],
+        sql: `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [userId] : [],
       })).rows[0] as unknown as { count: number }).count;
 
       // If auto-split happened, return the split result
@@ -858,11 +878,13 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       similarityThreshold: z.number().optional().describe("Min similarity for connected memories (default 0.5)"),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
-    async (params) => {
-      await maybeRunDecay();
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      await maybeRunDecay(userId);
       const limit = params.limit ?? 20;
 
       let { results: searchResults, cached: wasCached } = await hybridSearch(client, params.query, {
+        userId,
         domain: params.domain,
         entityType: params.entityType,
         entityName: params.entityName,
@@ -875,12 +897,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       // Filter by read permissions
       if (params.agentId) {
-        const allowed = await getAllowedDomains(params.agentId, "read");
+        const allowed = await getAllowedDomains(params.agentId, "read", userId);
         if (allowed !== null) {
           const allowSet = new Set(allowed);
           searchResults = searchResults.filter(r => allowSet.has(r.memory.domain as string));
         } else {
-          const blocked = await getBlockedDomains(params.agentId, "read");
+          const blocked = await getBlockedDomains(params.agentId, "read", userId);
           if (blocked !== "all" && blocked.length > 0) {
             const blockSet = new Set(blocked);
             searchResults = searchResults.filter(r => !blockSet.has(r.memory.domain as string));
@@ -889,7 +911,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
 
       if (searchResults.length === 0) {
-        const totalCountRow = (await client.execute({ sql: "SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL", args: [] })).rows[0] as { count: number };
+        const totalCountRow = (await client.execute({ sql: `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`, args: userId ? [userId] : [] })).rows[0] as { count: number };
         const totalCount = totalCountRow.count;
         const onboarding_hint = totalCount < 5
           ? "Your memory database is nearly empty. Call memory_onboard with your list of available tools to run a guided setup."
@@ -941,11 +963,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
@@ -953,7 +976,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
 
       // Permission check: agent must have write access to the memory's domain
-      if (!(await checkPermission(params.agentId, existing.domain, "write"))) {
+      if (!(await checkPermission(params.agentId, existing.domain, "write", userId))) {
         return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
@@ -1014,25 +1037,26 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
         return textResult({ error: "Memory not found or already deleted" });
       }
 
-      if (!(await checkPermission(params.agentId, existing.domain, "write"))) {
+      if (!(await checkPermission(params.agentId, existing.domain, "write", userId))) {
         return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
       const timestamp = now();
       await db.update(memories)
         .set({ deletedAt: timestamp })
-        .where(eq(memories.id, params.id))
+        .where(and(eq(memories.id, params.id), userId ? eq(memories.userId, userId) : undefined))
         .run();
 
       await db.insert(memoryEvents)
@@ -1061,18 +1085,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
       }
 
-      if (!(await checkPermission(params.agentId, existing.domain, "write"))) {
+      if (!(await checkPermission(params.agentId, existing.domain, "write", userId))) {
         return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
@@ -1122,18 +1147,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
       }
 
-      if (!(await checkPermission(params.agentId, existing.domain, "write"))) {
+      if (!(await checkPermission(params.agentId, existing.domain, "write", userId))) {
         return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
@@ -1192,18 +1218,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
         return textResult({ error: "Memory not found or deleted" });
       }
 
-      if (!(await checkPermission(params.agentId, existing.domain, "write"))) {
+      if (!(await checkPermission(params.agentId, existing.domain, "write", userId))) {
         return textResult({ error: `Agent is not allowed to write to domain "${existing.domain}"` });
       }
 
@@ -1253,13 +1280,14 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         .enum(["influences", "supports", "contradicts", "related", "learned-together", "works_at", "involves", "located_at", "part_of", "about"])
         .describe("Type of relationship"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       if (params.sourceMemoryId === params.targetMemoryId) {
         return textResult({ error: "Cannot connect a memory to itself" });
       }
 
-      const source = await db.select().from(memories).where(eq(memories.id, params.sourceMemoryId)).get();
-      const target = await db.select().from(memories).where(eq(memories.id, params.targetMemoryId)).get();
+      const source = await db.select().from(memories).where(and(eq(memories.id, params.sourceMemoryId), userId ? eq(memories.userId, userId) : undefined)).get();
+      const target = await db.select().from(memories).where(and(eq(memories.id, params.targetMemoryId), userId ? eq(memories.userId, userId) : undefined)).get();
 
       if (!source || !target) {
         return textResult({ error: "One or both memories not found" });
@@ -1270,6 +1298,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           sourceMemoryId: params.sourceMemoryId,
           targetMemoryId: params.targetMemoryId,
           relationship: params.relationship,
+          userId: userId ?? null,
         })
         .run();
 
@@ -1302,11 +1331,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
@@ -1333,6 +1363,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             sourceDescription: existing.sourceDescription,
             confidence: Math.min(existing.confidence + 0.05, 0.99),
             learnedAt: timestamp,
+            userId: userId ?? null,
           })
           .run();
 
@@ -1368,6 +1399,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
               sourceMemoryId: newIds[i],
               targetMemoryId: newIds[j],
               relationship: "related",
+              userId: userId ?? null,
             })
             .run();
         }
@@ -1376,7 +1408,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       // Soft-delete the original
       await db.update(memories)
         .set({ deletedAt: timestamp })
-        .where(eq(memories.id, params.id))
+        .where(and(eq(memories.id, params.id), userId ? eq(memories.userId, userId) : undefined))
         .run();
 
       await db.insert(memoryEvents)
@@ -1409,11 +1441,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       id: z.string().describe("Memory ID to scan"),
       redact: z.boolean().optional().describe("Replace detected PII with redaction tokens (default false)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(memories)
-        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt)))
+        .where(and(eq(memories.id, params.id), isNull(memories.deletedAt), userId ? eq(memories.userId, userId) : undefined))
         .get();
 
       if (!existing) {
@@ -1512,17 +1545,18 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       memoryId: z.string().describe("Memory ID to get connections for"),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const outgoing = await db
         .select()
         .from(memoryConnections)
-        .where(eq(memoryConnections.sourceMemoryId, params.memoryId))
+        .where(and(eq(memoryConnections.sourceMemoryId, params.memoryId), userId ? eq(memoryConnections.userId, userId) : undefined))
         .all();
 
       const incoming = await db
         .select()
         .from(memoryConnections)
-        .where(eq(memoryConnections.targetMemoryId, params.memoryId))
+        .where(and(eq(memoryConnections.targetMemoryId, params.memoryId), userId ? eq(memoryConnections.userId, userId) : undefined))
         .all();
 
       // Filter out connections where either memory is in a blocked domain
@@ -1530,11 +1564,11 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         const filterConnection = async (conn: { sourceMemoryId: string; targetMemoryId: string }) => {
           const otherId = conn.sourceMemoryId === params.memoryId ? conn.targetMemoryId : conn.sourceMemoryId;
           const other = (await client.execute({
-            sql: `SELECT domain FROM memories WHERE id = ? AND deleted_at IS NULL`,
-            args: [otherId],
+            sql: `SELECT domain FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+            args: userId ? [otherId, userId] : [otherId],
           })).rows[0] as { domain: string } | undefined;
           if (!other) return false;
-          return checkPermission(params.agentId, other.domain, "read");
+          return checkPermission(params.agentId, other.domain, "read", userId);
         };
 
         const filteredOutgoing: typeof outgoing = [];
@@ -1569,11 +1603,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     {
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       let query = `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL`;
       let queryParams: unknown[] = [];
 
-      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId));
+      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId, userId));
 
       query += ` GROUP BY domain ORDER BY count DESC`;
 
@@ -1598,8 +1633,9 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       offset: z.number().optional().describe("Offset for pagination"),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
-    async (params) => {
-      await maybeRunDecay();
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      await maybeRunDecay(userId);
       const limit = params.limit ?? 20;
       const offset = params.offset ?? 0;
       const sortBy = params.sortBy ?? "confidence";
@@ -1623,7 +1659,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
 
       // Apply read permission filtering
-      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId));
+      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId, userId));
 
       if (sortBy === "confidence") {
         query += ` ORDER BY confidence DESC`;
@@ -1641,12 +1677,12 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       const countResult = params.domain
         ? (await client.execute({
-            sql: `SELECT COUNT(*) as total FROM memories WHERE deleted_at IS NULL AND domain = ?`,
-            args: [params.domain],
+            sql: `SELECT COUNT(*) as total FROM memories WHERE deleted_at IS NULL AND domain = ?${userId ? ' AND user_id = ?' : ''}`,
+            args: userId ? [params.domain, userId] : [params.domain],
           })).rows[0] as { total: number }
         : (await client.execute({
-            sql: `SELECT COUNT(*) as total FROM memories WHERE deleted_at IS NULL`,
-            args: [],
+            sql: `SELECT COUNT(*) as total FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+            args: userId ? [userId] : [],
           })).rows[0] as { total: number };
 
       return textResult({
@@ -1666,7 +1702,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       limit: z.number().optional().describe("Max memories to classify (default 50)"),
       domain: z.string().optional().describe("Only classify memories in this domain"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       if (!extractionProvider) {
         return textResult({ error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure ~/.engrams/config.json" });
       }
@@ -1674,6 +1711,11 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       const classifyLimit = params.limit ?? 50;
       let query = `SELECT id, content, detail FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`;
       const queryParams: unknown[] = [];
+
+      if (userId) {
+        query += ` AND user_id = ?`;
+        queryParams.push(userId);
+      }
 
       if (params.domain) {
         query += ` AND domain = ?`;
@@ -1693,8 +1735,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       // Gather existing entity names for normalization
       const existingNames = (await client.execute({
-        sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`,
-        args: [],
+        sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [userId] : [],
       })).rows as unknown as { entity_name: string }[];
       const nameList = existingNames.map((r) => r.entity_name);
 
@@ -1714,26 +1756,23 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           }
 
           await client.execute({
-            sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
-            args: [
-              extraction.entity_type,
-              extraction.entity_name,
-              JSON.stringify(extraction.structured_data),
-              mem.id,
-            ],
+            sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+            args: userId
+              ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), mem.id, userId]
+              : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), mem.id],
           });
 
           // Auto-create connections
           for (const conn of extraction.suggested_connections) {
             const target = (await client.execute({
-              sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`,
-              args: [conn.target_entity_name],
+              sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+              args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
             })).rows[0] as { id: string } | undefined;
 
             if (target && target.id !== mem.id) {
               await client.execute({
-                sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
-                args: [mem.id, target.id, conn.relationship],
+                sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
+                args: [mem.id, target.id, conn.relationship, userId ?? null],
               });
             }
           }
@@ -1754,8 +1793,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       if (classified > 0) await bumpLastModified(client);
 
       const remainingRow = (await client.execute({
-        sql: `SELECT COUNT(*) as c FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`,
-        args: [],
+        sql: `SELECT COUNT(*) as c FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [userId] : [],
       })).rows[0] as { c: number };
 
       return textResult({
@@ -1775,7 +1814,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact"]).optional().describe("Filter to a specific entity type"),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       let query = `SELECT entity_type, entity_name, COUNT(*) as memory_count
         FROM memories
         WHERE entity_type IS NOT NULL AND entity_name IS NOT NULL AND deleted_at IS NULL`;
@@ -1787,7 +1827,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
 
       // Apply read permission filtering
-      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId));
+      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId, userId));
 
       query += ` GROUP BY entity_type, entity_name ORDER BY entity_type, memory_count DESC`;
 
@@ -1820,7 +1860,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       canRead: z.boolean().optional().describe("Allow reading (default true)"),
       canWrite: z.boolean().optional().describe("Allow writing (default true)"),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const existing = await db
         .select()
         .from(agentPermissions)
@@ -1828,6 +1869,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
           and(
             eq(agentPermissions.agentId, params.agentId),
             eq(agentPermissions.domain, params.domain),
+            userId ? eq(agentPermissions.userId, userId) : undefined,
           ),
         )
         .get();
@@ -1842,6 +1884,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             and(
               eq(agentPermissions.agentId, params.agentId),
               eq(agentPermissions.domain, params.domain),
+              userId ? eq(agentPermissions.userId, userId) : undefined,
             ),
           )
           .run();
@@ -1852,6 +1895,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             domain: params.domain,
             canRead,
             canWrite,
+            userId: userId ?? null,
           })
           .run();
       }
@@ -1878,7 +1922,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       llm_extraction_model: z.string().optional().describe("Model for entity extraction (high-volume, cheap). Defaults: anthropic=claude-haiku-4-5, openai=gpt-4o-mini, ollama=llama3.2"),
       llm_analysis_model: z.string().optional().describe("Model for correction/splitting (user-initiated, capable). Defaults: anthropic=claude-sonnet-4-5, openai=gpt-4o, ollama=llama3.2"),
     },
-    async (params) => {
+    async (params, _extra) => {
       const config = loadConfig();
       config.llm = {
         provider: params.llm_provider,
@@ -1926,16 +1970,17 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       skip_scan: z.boolean().optional().describe("Skip the tool scan phase and go straight to interview. Default false."),
       skip_interview: z.boolean().optional().describe("Skip the interview phase. Useful if re-running just the scan. Default false."),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       // 1. Assess current state
-      const memoryCountRow = (await client.execute({ sql: "SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL", args: [] })).rows[0] as { count: number };
+      const memoryCountRow = (await client.execute({ sql: `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`, args: userId ? [userId] : [] })).rows[0] as { count: number };
       const entityCounts = (await client.execute({
-        sql: `SELECT entity_type, COUNT(*) as count FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL GROUP BY entity_type`,
-        args: [],
+        sql: `SELECT entity_type, COUNT(*) as count FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} GROUP BY entity_type`,
+        args: userId ? [userId] : [],
       })).rows as unknown as { entity_type: string; count: number }[];
       const domainCounts = (await client.execute({
-        sql: `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL GROUP BY domain`,
-        args: [],
+        sql: `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} GROUP BY domain`,
+        args: userId ? [userId] : [],
       })).rows as unknown as { domain: string; count: number }[];
 
       const totalMemories = memoryCountRow.count;
@@ -2227,7 +2272,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       content: z.string().describe("The raw content to import. For file-based sources, pass the file contents."),
       domain: z.string().optional().describe("Domain to assign to imported memories. Default: 'general'."),
     },
-    async (params) => {
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
       const domain = params.domain ?? "general";
 
       // Parse into individual memory strings based on source type
@@ -2346,9 +2392,9 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             const existing = (await client.execute({
               sql: `SELECT m.id, m.content FROM memories m
                 JOIN memory_fts fts ON fts.rowid = m.rowid
-                WHERE memory_fts MATCH ? AND m.deleted_at IS NULL
+                WHERE memory_fts MATCH ? AND m.deleted_at IS NULL${userId ? ' AND m.user_id = ?' : ''}
                 LIMIT 3`,
-              args: [searchTerms],
+              args: userId ? [searchTerms, userId] : [searchTerms],
             })).rows as unknown as { id: string; content: string }[];
 
             const entryWords = new Set(entry.content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
@@ -2389,6 +2435,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             confidence: 0.5,
             learnedAt: timestamp,
             hasPiiFlag: piiMatches.length > 0 ? 1 : 0,
+            userId: userId ?? null,
           })
           .run();
 
@@ -2425,16 +2472,16 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         (async () => {
           try {
             const existingNames = (await client.execute({
-              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`,
-              args: [],
+              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+              args: userId ? [userId] : [],
             })).rows as unknown as { entity_name: string }[];
             const names = existingNames.map((r) => r.entity_name);
 
             for (const id of importedIds) {
               try {
                 const mem = (await client.execute({
-                  sql: `SELECT content, detail, entity_type FROM memories WHERE id = ? AND deleted_at IS NULL`,
-                  args: [id],
+                  sql: `SELECT content, detail, entity_type FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                  args: userId ? [id, userId] : [id],
                 })).rows[0] as { content: string; detail: string | null; entity_type: string | null } | undefined;
 
                 if (!mem || mem.entity_type) continue;
@@ -2450,20 +2497,22 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
                 if (!validation.valid) continue;
 
                 await client.execute({
-                  sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
-                  args: [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), id],
+                  sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                  args: userId
+                    ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), id, userId]
+                    : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), id],
                 });
 
                 for (const conn of extraction.suggested_connections) {
                   const target = (await client.execute({
-                    sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`,
-                    args: [conn.target_entity_name],
+                    sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+                    args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
                   })).rows[0] as { id: string } | undefined;
 
                   if (target && target.id !== id) {
                     await client.execute({
-                      sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
-                      args: [id, target.id, conn.relationship],
+                      sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
+                      args: [id, target.id, conn.relationship, userId ?? null],
                     });
                   }
                 }
@@ -2514,7 +2563,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       cloud_token: z.string().optional().describe("Turso auth token (required for to_cloud if not already configured)"),
       encryption_key: z.string().optional().describe("Base64 encryption key (generated if not provided for to_cloud)"),
     },
-    async (params) => {
+    async (params, _extra) => {
       const creds = loadCredentials();
 
       const cloudUrl = params.cloud_url ?? creds?.tursoUrl;
@@ -2663,6 +2712,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
     startHttpApi(db, client);
   }
 
-  const transport = new StdioServerTransport();
+  const transport = options?.transport ?? new StdioServerTransport();
   await server.connect(transport);
+  return server;
 }

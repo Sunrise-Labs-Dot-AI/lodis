@@ -6,14 +6,14 @@ export const UNUSED_DECAY_RATE = 0.05; // per 30 days (never-used memories)
 export const MIN_CONFIDENCE = 0.10;
 export const DECAY_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-export async function applyConfidenceDecay(client: Client): Promise<number> {
+export async function applyConfidenceDecay(client: Client, userId?: string | null): Promise<number> {
   const now = new Date();
 
   const result = await client.execute({
     sql: `SELECT id, confidence, used_count, confirmed_count, last_used_at, confirmed_at, learned_at
           FROM memories
-          WHERE deleted_at IS NULL AND confidence > ?`,
-    args: [MIN_CONFIDENCE],
+          WHERE deleted_at IS NULL AND confidence > ?${userId ? ' AND user_id = ?' : ''}`,
+    args: userId ? [MIN_CONFIDENCE, userId] : [MIN_CONFIDENCE],
   });
 
   const candidates = result.rows as unknown as {
@@ -44,8 +44,8 @@ export async function applyConfidenceDecay(client: Client): Promise<number> {
     const newConfidence = Math.max(mem.confidence - (rate * periods), MIN_CONFIDENCE);
     if (newConfidence < mem.confidence) {
       await client.execute({
-        sql: `UPDATE memories SET confidence = ? WHERE id = ?`,
-        args: [newConfidence, mem.id],
+        sql: `UPDATE memories SET confidence = ? WHERE id = ?${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [newConfidence, mem.id, userId] : [newConfidence, mem.id],
       });
       decayed++;
     }
@@ -98,7 +98,7 @@ const TEMPORAL_PATTERNS = [
  * This runs alongside normal decay to prevent stale temporal references from
  * polluting search results.
  */
-export async function applyTemporalDecay(client: Client): Promise<number> {
+export async function applyTemporalDecay(client: Client, userId?: string | null): Promise<number> {
   const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
   const result = await client.execute({
@@ -106,8 +106,8 @@ export async function applyTemporalDecay(client: Client): Promise<number> {
           FROM memories
           WHERE deleted_at IS NULL
           AND confidence > 0.5
-          AND learned_at < ?`,
-    args: [fourteenDaysAgo],
+          AND learned_at < ?${userId ? ' AND user_id = ?' : ''}`,
+    args: userId ? [fourteenDaysAgo, userId] : [fourteenDaysAgo],
   });
 
   const candidates = result.rows as unknown as {
@@ -129,8 +129,8 @@ export async function applyTemporalDecay(client: Client): Promise<number> {
     const newConfidence = Math.min(mem.confidence, 0.5);
     if (newConfidence < mem.confidence) {
       await client.execute({
-        sql: `UPDATE memories SET confidence = ? WHERE id = ?`,
-        args: [newConfidence, mem.id],
+        sql: `UPDATE memories SET confidence = ? WHERE id = ?${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [newConfidence, mem.id, userId] : [newConfidence, mem.id],
       });
       degraded++;
     }

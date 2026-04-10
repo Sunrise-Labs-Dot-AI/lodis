@@ -16,6 +16,38 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./llm": {
+      "import": "./dist/llm.js",
+      "types": "./dist/llm.d.ts"
+    },
+    "./llm-config": {
+      "import": "./dist/llm-config.js",
+      "types": "./dist/llm-config.d.ts"
+    },
+    "./llm-utils": {
+      "import": "./dist/llm-utils.js",
+      "types": "./dist/llm-utils.d.ts"
+    },
+    "./llm-validation": {
+      "import": "./dist/llm-validation.js",
+      "types": "./dist/llm-validation.d.ts"
+    },
+    "./crypto": {
+      "import": "./dist/crypto.js",
+      "types": "./dist/crypto.d.ts"
+    },
+    "./pii": {
+      "import": "./dist/pii.js",
+      "types": "./dist/pii.d.ts"
+    },
+    "./credentials": {
+      "import": "./dist/credentials.js",
+      "types": "./dist/credentials.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types.js",
+      "types": "./dist/types.d.ts"
     }
   },
   "scripts": {

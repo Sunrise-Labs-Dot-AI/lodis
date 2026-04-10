@@ -23,8 +23,10 @@ import {
 } from "./cleanup";
 import { getUserId } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { resolveLLMProvider, parseLLMJson, validateCorrection, validateSplit } from "@engrams/core";
-import type { LLMProvider } from "@engrams/core";
+import { resolveLLMProvider } from "@engrams/core/llm-config";
+import { parseLLMJson } from "@engrams/core/llm-utils";
+import { validateCorrection, validateSplit } from "@engrams/core/llm-validation";
+import type { LLMProvider } from "@engrams/core/llm";
 
 export async function deleteMemoryAction(id: string) {
   const userId = await getUserId();
@@ -252,7 +254,7 @@ export async function scrubMemoryAction(
   const memory = await getMemoryById(id, userId);
   if (!memory) return { scrubbed: false, error: "Memory not found" };
 
-  const { redactSensitiveData } = await import("@engrams/core");
+  const { redactSensitiveData } = await import("@engrams/core/pii");
   const { redacted: redactedContent } = redactSensitiveData(memory.content);
   const redactedDetail = memory.detail
     ? redactSensitiveData(memory.detail).redacted

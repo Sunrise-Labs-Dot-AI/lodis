@@ -157,6 +157,11 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function userFilter(userId?: string | null): { clause: string; args: string[] } {
+  if (!userId) return { clause: "", args: [] };
+  return { clause: " AND user_id = ?", args: [userId] };
+}
+
 // --- Read functions ---
 
 export async function getMemories(opts?: {
@@ -169,8 +174,9 @@ export async function getMemories(opts?: {
   maxConfidence?: number;
   unused?: boolean;
   needsReview?: boolean;
-}): Promise<MemoryRow[]> {
+}, userId?: string | null): Promise<MemoryRow[]> {
   const client = getClient();
+  const uf = userFilter(userId);
 
   if (opts?.search) {
     // Try FTS first, fall back to LIKE
@@ -182,8 +188,8 @@ export async function getMemories(opts?: {
       if (ftsResult.rows.length > 0) {
         const rowids = ftsResult.rows.map(r => r.rowid as number);
         const placeholders = rowids.map(() => "?").join(",");
-        let sql = `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL`;
-        const args: (string | number | null)[] = [...rowids];
+        let sql = `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL${uf.clause}`;
+        const args: (string | number | null)[] = [...rowids, ...uf.args];
         sql = applyFilters(sql, args, opts);
         sql = applySort(sql, opts?.sortBy);
         const result = await client.execute({ sql, args });
@@ -193,16 +199,16 @@ export async function getMemories(opts?: {
       // FTS not available (e.g., hosted mode) — fall back to LIKE
     }
 
-    let sql = `SELECT * FROM memories WHERE deleted_at IS NULL AND content LIKE ?`;
-    const args: (string | number | null)[] = [`%${opts.search}%`];
+    let sql = `SELECT * FROM memories WHERE deleted_at IS NULL AND content LIKE ?${uf.clause}`;
+    const args: (string | number | null)[] = [`%${opts.search}%`, ...uf.args];
     sql = applyFilters(sql, args, opts);
     sql = applySort(sql, opts?.sortBy);
     const result = await client.execute({ sql, args });
     return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
   }
 
-  let sql = `SELECT * FROM memories WHERE deleted_at IS NULL`;
-  const args: (string | number | null)[] = [];
+  let sql = `SELECT * FROM memories WHERE deleted_at IS NULL${uf.clause}`;
+  const args: (string | number | null)[] = [...uf.args];
   sql = applyFilters(sql, args, opts);
   sql = applySort(sql, opts?.sortBy);
   const result = await client.execute({ sql, args });
@@ -256,41 +262,45 @@ function applySort(sql: string, sortBy?: string): string {
   }
 }
 
-export async function getMemoryById(id: string): Promise<MemoryRow | undefined> {
+export async function getMemoryById(id: string, userId?: string | null): Promise<MemoryRow | undefined> {
   const client = getClient();
+  const uf = userFilter(userId);
   const result = await client.execute({
-    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (result.rows.length === 0) return undefined;
   return await decryptRow(result.rows[0] as unknown as MemoryRow);
 }
 
-export async function getMemoryEvents(memoryId: string): Promise<EventRow[]> {
+export async function getMemoryEvents(memoryId: string, userId?: string | null): Promise<EventRow[]> {
   const client = getClient();
+  const uf = userFilter(userId);
   const result = await client.execute({
-    sql: `SELECT * FROM memory_events WHERE memory_id = ? ORDER BY timestamp DESC`,
-    args: [memoryId],
+    sql: `SELECT me.* FROM memory_events me JOIN memories m ON m.id = me.memory_id WHERE me.memory_id = ? AND m.deleted_at IS NULL${uf.clause.replace("user_id", "m.user_id")} ORDER BY me.timestamp DESC`,
+    args: [memoryId, ...uf.args],
   });
   return result.rows as unknown as EventRow[];
 }
 
-export async function getMemoryConnections(memoryId: string): Promise<{
+export async function getMemoryConnections(memoryId: string, userId?: string | null): Promise<{
   outgoing: (ConnectionRow & { content: string })[];
   incoming: (ConnectionRow & { content: string })[];
 }> {
   const client = getClient();
+  const uf = userFilter(userId);
+  const muf = { clause: uf.clause.replace("user_id", "m.user_id"), args: uf.args };
   const outgoing = await client.execute({
     sql: `SELECT mc.*, m.content FROM memory_connections mc
           JOIN memories m ON m.id = mc.target_memory_id
-          WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL`,
-    args: [memoryId],
+          WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL${muf.clause}`,
+    args: [memoryId, ...muf.args],
   });
   const incoming = await client.execute({
     sql: `SELECT mc.*, m.content FROM memory_connections mc
           JOIN memories m ON m.id = mc.source_memory_id
-          WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL`,
-    args: [memoryId],
+          WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL${muf.clause}`,
+    args: [memoryId, ...muf.args],
   });
 
   const decryptContent = async (r: unknown) => {
@@ -304,39 +314,46 @@ export async function getMemoryConnections(memoryId: string): Promise<{
   };
 }
 
-export async function getDomains(): Promise<{ domain: string; count: number }[]> {
+export async function getDomains(userId?: string | null): Promise<{ domain: string; count: number }[]> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL GROUP BY domain ORDER BY count DESC`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL${uf.clause} GROUP BY domain ORDER BY count DESC`,
+    args: [...uf.args],
+  });
   return result.rows as unknown as { domain: string; count: number }[];
 }
 
-export async function getAgentPermissions(): Promise<PermissionRow[]> {
+export async function getAgentPermissions(userId?: string | null): Promise<PermissionRow[]> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT * FROM agent_permissions ORDER BY agent_id, domain`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT * FROM agent_permissions WHERE 1=1${uf.clause} ORDER BY agent_id, domain`,
+    args: [...uf.args],
+  });
   return result.rows as unknown as PermissionRow[];
 }
 
-export async function getAgents(): Promise<{ agent_id: string; agent_name: string }[]> {
+export async function getAgents(userId?: string | null): Promise<{ agent_id: string; agent_name: string }[]> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT DISTINCT source_agent_id as agent_id, source_agent_name as agent_name
-     FROM memories WHERE deleted_at IS NULL ORDER BY agent_name`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT DISTINCT source_agent_id as agent_id, source_agent_name as agent_name
+     FROM memories WHERE deleted_at IS NULL${uf.clause} ORDER BY agent_name`,
+    args: [...uf.args],
+  });
   return result.rows as unknown as { agent_id: string; agent_name: string }[];
 }
 
-export async function getDbStats(): Promise<{
+export async function getDbStats(userId?: string | null): Promise<{
   totalMemories: number;
   totalDomains: number;
   dbSizeBytes: number;
 }> {
   const client = getClient();
-  const memResult = await client.execute(`SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL`);
-  const domResult = await client.execute(`SELECT COUNT(DISTINCT domain) as c FROM memories WHERE deleted_at IS NULL`);
+  const uf = userFilter(userId);
+  const memResult = await client.execute({ sql: `SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL${uf.clause}`, args: [...uf.args] });
+  const domResult = await client.execute({ sql: `SELECT COUNT(DISTINCT domain) as c FROM memories WHERE deleted_at IS NULL${uf.clause}`, args: [...uf.args] });
 
   let dbSizeBytes = 0;
   if (!isHosted()) {
@@ -354,38 +371,45 @@ export async function getDbStats(): Promise<{
   };
 }
 
-export async function getSourceTypes(): Promise<string[]> {
+export async function getSourceTypes(userId?: string | null): Promise<string[]> {
   const client = getClient();
-  const result = await client.execute(`SELECT DISTINCT source_type FROM memories WHERE deleted_at IS NULL ORDER BY source_type`);
+  const uf = userFilter(userId);
+  const result = await client.execute({ sql: `SELECT DISTINCT source_type FROM memories WHERE deleted_at IS NULL${uf.clause} ORDER BY source_type`, args: [...uf.args] });
   return result.rows.map(r => r.source_type as string);
 }
 
-export async function getEntityTypes(): Promise<string[]> {
+export async function getEntityTypes(userId?: string | null): Promise<string[]> {
   const client = getClient();
+  const uf = userFilter(userId);
   try {
-    const result = await client.execute(`SELECT DISTINCT entity_type FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL ORDER BY entity_type`);
+    const result = await client.execute({ sql: `SELECT DISTINCT entity_type FROM memories WHERE entity_type IS NOT NULL AND deleted_at IS NULL${uf.clause} ORDER BY entity_type`, args: [...uf.args] });
     return result.rows.map(r => r.entity_type as string);
   } catch {
     return [];
   }
 }
 
-export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+export async function getGraphData(userId?: string | null): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
   const client = getClient();
+  const uf = userFilter(userId);
+  const muf = { clause: uf.clause.replace("user_id", "m.user_id"), args: uf.args };
 
-  const nodesResult = await client.execute(`
+  const nodesResult = await client.execute({
+    sql: `
     SELECT m.id, m.content, m.entity_type, m.entity_name, m.domain, m.confidence,
       (SELECT COUNT(*) FROM memory_connections mc
        WHERE mc.source_memory_id = m.id OR mc.target_memory_id = m.id) as connectionCount
     FROM memories m
-    WHERE m.deleted_at IS NULL AND m.id IN (
+    WHERE m.deleted_at IS NULL${muf.clause} AND m.id IN (
       SELECT source_memory_id FROM memory_connections
       UNION
       SELECT target_memory_id FROM memory_connections
     )
     ORDER BY connectionCount DESC
     LIMIT 200
-  `);
+  `,
+    args: [...muf.args],
+  });
 
   const nodes = await Promise.all(nodesResult.rows.map(async r => {
     const row = r as unknown as GraphNode & { content: string };
@@ -394,11 +418,14 @@ export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: Graph
 
   // If no connected nodes, show top memories by confidence
   if (nodes.length === 0) {
-    const fallback = await client.execute(`
+    const fallback = await client.execute({
+      sql: `
       SELECT m.id, m.content, m.entity_type, m.entity_name, m.domain, m.confidence, 0 as connectionCount
-      FROM memories m WHERE m.deleted_at IS NULL
+      FROM memories m WHERE m.deleted_at IS NULL${muf.clause}
       ORDER BY m.confidence DESC LIMIT 50
-    `);
+    `,
+      args: [...muf.args],
+    });
     const fallbackNodes = await Promise.all(fallback.rows.map(async r => {
       const row = r as unknown as GraphNode & { content: string };
       return { ...row, content: await maybeDecrypt(row.content) };
@@ -406,32 +433,41 @@ export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: Graph
     return { nodes: fallbackNodes, edges: [] };
   }
 
-  const edgesResult = await client.execute(`
+  const m1uf = { clause: uf.clause.replace("user_id", "m1.user_id"), args: uf.args };
+  const m2uf = { clause: uf.clause.replace("user_id", "m2.user_id"), args: uf.args };
+  const edgesResult = await client.execute({
+    sql: `
     SELECT mc.source_memory_id as source, mc.target_memory_id as target, mc.relationship
     FROM memory_connections mc
-    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
-    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
-  `);
+    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL${m1uf.clause}
+    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL${m2uf.clause}
+  `,
+    args: [...m1uf.args, ...m2uf.args],
+  });
 
   return { nodes, edges: edgesResult.rows as unknown as GraphEdge[] };
 }
 
-export async function getEntityGraphData(): Promise<{
+export async function getEntityGraphData(userId?: string | null): Promise<{
   entities: EntityNode[];
   edges: EntityEdge[];
   uncategorized: GraphNode[];
 }> {
   const client = getClient();
+  const uf = userFilter(userId);
 
-  const rawEntities = await client.execute(`
+  const rawEntities = await client.execute({
+    sql: `
     SELECT entity_name as entityName, entity_type as entityType,
            COUNT(*) as memoryCount, AVG(confidence) as avgConfidence,
            GROUP_CONCAT(id) as memoryIdsCsv
     FROM memories
-    WHERE deleted_at IS NULL AND entity_name IS NOT NULL
+    WHERE deleted_at IS NULL AND entity_name IS NOT NULL${uf.clause}
     GROUP BY entity_name, entity_type
     ORDER BY memoryCount DESC
-  `);
+  `,
+    args: [...uf.args],
+  });
 
   const entities = rawEntities.rows.map(e => ({
     entityName: e.entityName as string,
@@ -441,19 +477,24 @@ export async function getEntityGraphData(): Promise<{
     memoryIds: (e.memoryIdsCsv as string).split(","),
   }));
 
-  const rawEdges = await client.execute(`
+  const m1uf = { clause: uf.clause.replace("user_id", "m1.user_id"), args: uf.args };
+  const m2uf = { clause: uf.clause.replace("user_id", "m2.user_id"), args: uf.args };
+  const rawEdges = await client.execute({
+    sql: `
     SELECT
       m1.entity_name as sourceEntity,
       m2.entity_name as targetEntity,
       COUNT(*) as connectionCount,
       GROUP_CONCAT(DISTINCT mc.relationship) as relationshipsCsv
     FROM memory_connections mc
-    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
-    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL
+    JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL${m1uf.clause}
+    JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL${m2uf.clause}
     WHERE m1.entity_name IS NOT NULL AND m2.entity_name IS NOT NULL
       AND m1.entity_name != m2.entity_name
     GROUP BY m1.entity_name, m2.entity_name
-  `);
+  `,
+    args: [...m1uf.args, ...m2uf.args],
+  });
 
   const edges = rawEdges.rows.map(e => ({
     sourceEntity: e.sourceEntity as string,
@@ -462,11 +503,14 @@ export async function getEntityGraphData(): Promise<{
     relationships: (e.relationshipsCsv as string).split(","),
   }));
 
-  const uncatResult = await client.execute(`
+  const uncatResult = await client.execute({
+    sql: `
     SELECT id, content, entity_type, entity_name, domain, confidence, 0 as connectionCount
-    FROM memories WHERE deleted_at IS NULL AND entity_name IS NULL
+    FROM memories WHERE deleted_at IS NULL AND entity_name IS NULL${uf.clause}
     ORDER BY confidence DESC LIMIT 30
-  `);
+  `,
+    args: [...uf.args],
+  });
 
   const uncategorized = await Promise.all(uncatResult.rows.map(async r => {
     const row = r as unknown as GraphNode & { content: string };
@@ -476,38 +520,45 @@ export async function getEntityGraphData(): Promise<{
   return { entities, edges, uncategorized };
 }
 
-export async function getTotalMemoryCount(): Promise<number> {
+export async function getTotalMemoryCount(userId?: string | null): Promise<number> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL${uf.clause}`,
+    args: [...uf.args],
+  });
   return result.rows[0].count as number;
 }
 
-export async function getUnreviewedCount(): Promise<number> {
+export async function getUnreviewedCount(userId?: string | null): Promise<number> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT COUNT(*) as count FROM memories WHERE confirmed_count = 0 AND source_type = 'inferred' AND deleted_at IS NULL`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT COUNT(*) as count FROM memories WHERE confirmed_count = 0 AND source_type = 'inferred' AND deleted_at IS NULL${uf.clause}`,
+    args: [...uf.args],
+  });
   return result.rows[0].count as number;
 }
 
-export async function getAllMemoriesForExport(): Promise<MemoryRow[]> {
+export async function getAllMemoriesForExport(userId?: string | null): Promise<MemoryRow[]> {
   const client = getClient();
-  const result = await client.execute(
-    `SELECT * FROM memories WHERE deleted_at IS NULL ORDER BY domain, confidence DESC`,
-  );
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT * FROM memories WHERE deleted_at IS NULL${uf.clause} ORDER BY domain, confidence DESC`,
+    args: [...uf.args],
+  });
   return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
 }
 
 // --- Write operations ---
 
-export async function deleteMemoryById(id: string): Promise<boolean> {
+export async function deleteMemoryById(id: string, userId?: string | null): Promise<boolean> {
   const client = getClient();
+  const uf = userFilter(userId);
   const timestamp = now();
   const result = await client.execute({
-    sql: `UPDATE memories SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`,
-    args: [timestamp, id],
+    sql: `UPDATE memories SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [timestamp, id, ...uf.args],
   });
   if (result.rowsAffected > 0) {
     await client.execute({
@@ -518,11 +569,12 @@ export async function deleteMemoryById(id: string): Promise<boolean> {
   return result.rowsAffected > 0;
 }
 
-export async function confirmMemoryById(id: string): Promise<{ newConfidence: number } | null> {
+export async function confirmMemoryById(id: string, userId?: string | null): Promise<{ newConfidence: number } | null> {
   const client = getClient();
+  const uf = userFilter(userId);
   const existing = await client.execute({
-    sql: `SELECT confidence, confirmed_count FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT confidence, confirmed_count FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (existing.rows.length === 0) return null;
 
@@ -530,8 +582,8 @@ export async function confirmMemoryById(id: string): Promise<{ newConfidence: nu
   const newConfidence = 0.99;
   const timestamp = now();
   await client.execute({
-    sql: `UPDATE memories SET confidence = ?, confirmed_count = ?, confirmed_at = ? WHERE id = ?`,
-    args: [newConfidence, (row.confirmed_count as number) + 1, timestamp, id],
+    sql: `UPDATE memories SET confidence = ?, confirmed_count = ?, confirmed_at = ? WHERE id = ?${uf.clause}`,
+    args: [newConfidence, (row.confirmed_count as number) + 1, timestamp, id, ...uf.args],
   });
   await client.execute({
     sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'confirmed', 'dashboard', ?, ?, ?)`,
@@ -540,11 +592,12 @@ export async function confirmMemoryById(id: string): Promise<{ newConfidence: nu
   return { newConfidence };
 }
 
-export async function flagMemoryById(id: string): Promise<{ newConfidence: number } | null> {
+export async function flagMemoryById(id: string, userId?: string | null): Promise<{ newConfidence: number } | null> {
   const client = getClient();
+  const uf = userFilter(userId);
   const existing = await client.execute({
-    sql: `SELECT confidence, mistake_count FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT confidence, mistake_count FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (existing.rows.length === 0) return null;
 
@@ -552,8 +605,8 @@ export async function flagMemoryById(id: string): Promise<{ newConfidence: numbe
   const newConfidence = Math.max((row.confidence as number) - 0.15, 0.10);
   const timestamp = now();
   await client.execute({
-    sql: `UPDATE memories SET confidence = ?, mistake_count = ? WHERE id = ?`,
-    args: [newConfidence, (row.mistake_count as number) + 1, id],
+    sql: `UPDATE memories SET confidence = ?, mistake_count = ? WHERE id = ?${uf.clause}`,
+    args: [newConfidence, (row.mistake_count as number) + 1, id, ...uf.args],
   });
   await client.execute({
     sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'confidence_changed', 'dashboard', ?, ?, ?)`,
@@ -562,11 +615,12 @@ export async function flagMemoryById(id: string): Promise<{ newConfidence: numbe
   return { newConfidence };
 }
 
-export async function correctMemoryById(id: string, content: string, detail?: string | null): Promise<{ newConfidence: number } | null> {
+export async function correctMemoryById(id: string, content: string, detail?: string | null, userId?: string | null): Promise<{ newConfidence: number } | null> {
   const client = getClient();
+  const uf = userFilter(userId);
   const existing = await client.execute({
-    sql: `SELECT content, detail, confidence, corrected_count FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT content, detail, confidence, corrected_count FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (existing.rows.length === 0) return null;
 
@@ -575,8 +629,8 @@ export async function correctMemoryById(id: string, content: string, detail?: st
   const timestamp = now();
   const newDetail = detail !== undefined ? detail : row.detail;
   await client.execute({
-    sql: `UPDATE memories SET content = ?, detail = ?, confidence = ?, corrected_count = ? WHERE id = ?`,
-    args: [content, newDetail as string | null, newConfidence, (row.corrected_count as number) + 1, id],
+    sql: `UPDATE memories SET content = ?, detail = ?, confidence = ?, corrected_count = ? WHERE id = ?${uf.clause}`,
+    args: [content, newDetail as string | null, newConfidence, (row.corrected_count as number) + 1, id, ...uf.args],
   });
   await client.execute({
     sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'corrected', 'dashboard', ?, ?, ?)`,
@@ -585,19 +639,20 @@ export async function correctMemoryById(id: string, content: string, detail?: st
   return { newConfidence };
 }
 
-export async function scrubMemoryById(id: string, redactedContent: string, redactedDetail: string | null, redactFn: (text: string) => { redacted: string }): Promise<boolean> {
+export async function scrubMemoryById(id: string, redactedContent: string, redactedDetail: string | null, redactFn: (text: string) => { redacted: string }, userId?: string | null): Promise<boolean> {
   const client = getClient();
+  const uf = userFilter(userId);
   const existing = await client.execute({
-    sql: `SELECT content, detail FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT content, detail FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (existing.rows.length === 0) return false;
 
   const row = existing.rows[0];
   const timestamp = now();
   await client.execute({
-    sql: `UPDATE memories SET content = ?, detail = ?, has_pii_flag = 0 WHERE id = ?`,
-    args: [redactedContent, redactedDetail, id],
+    sql: `UPDATE memories SET content = ?, detail = ?, has_pii_flag = 0 WHERE id = ?${uf.clause}`,
+    args: [redactedContent, redactedDetail, id, ...uf.args],
   });
   await client.execute({
     sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'corrected', 'dashboard:scrub', ?, ?, ?)`,
@@ -635,11 +690,13 @@ export async function scrubMemoryById(id: string, redactedContent: string, redac
 export async function splitMemoryById(
   id: string,
   parts: { content: string; detail?: string | null }[],
+  userId?: string | null,
 ): Promise<{ newIds: string[] } | null> {
   const client = getClient();
+  const uf = userFilter(userId);
   const existing = await client.execute({
-    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL`,
-    args: [id],
+    sql: `SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [id, ...uf.args],
   });
   if (existing.rows.length === 0) return null;
 
@@ -653,9 +710,9 @@ export async function splitMemoryById(
     const confidence = Math.min((row.confidence || 0.7) + 0.05, 0.99);
 
     await client.execute({
-      sql: `INSERT INTO memories (id, content, detail, domain, source_agent_id, source_agent_name, source_type, source_description, confidence, learned_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [newId, part.content, part.detail ?? null, row.domain, row.source_agent_id, row.source_agent_name, row.source_type, row.source_description, confidence, timestamp],
+      sql: `INSERT INTO memories (id, content, detail, domain, source_agent_id, source_agent_name, source_type, source_description, confidence, learned_at, user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [newId, part.content, part.detail ?? null, row.domain, row.source_agent_id, row.source_agent_name, row.source_type, row.source_description, confidence, timestamp, userId ?? null],
     });
 
     await client.execute({
@@ -668,16 +725,16 @@ export async function splitMemoryById(
   for (let i = 0; i < newIds.length; i++) {
     for (let j = i + 1; j < newIds.length; j++) {
       await client.execute({
-        sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, 'related')`,
-        args: [newIds[i], newIds[j]],
+        sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, 'related', ?)`,
+        args: [newIds[i], newIds[j], userId ?? null],
       });
     }
   }
 
   // Soft-delete original
   await client.execute({
-    sql: `UPDATE memories SET deleted_at = ? WHERE id = ?`,
-    args: [timestamp, id],
+    sql: `UPDATE memories SET deleted_at = ? WHERE id = ?${uf.clause}`,
+    args: [timestamp, id, ...uf.args],
   });
   await client.execute({
     sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, new_value, timestamp) VALUES (?, ?, 'removed', 'dashboard', ?, ?)`,
@@ -687,19 +744,21 @@ export async function splitMemoryById(
   return { newIds };
 }
 
-export async function clearAllMemories(): Promise<void> {
+export async function clearAllMemories(userId?: string | null): Promise<void> {
   const client = getClient();
+  const uf = userFilter(userId);
   const timestamp = now();
   await client.execute({
-    sql: `UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL`,
-    args: [timestamp],
+    sql: `UPDATE memories SET deleted_at = ? WHERE deleted_at IS NULL${uf.clause}`,
+    args: [timestamp, ...uf.args],
   });
 }
 
-export async function directUpdateMemory(id: string, content: string, detail: string | null): Promise<void> {
+export async function directUpdateMemory(id: string, content: string, detail: string | null, userId?: string | null): Promise<void> {
   const client = getClient();
+  const uf = userFilter(userId);
   await client.execute({
-    sql: `UPDATE memories SET content = ?, detail = ? WHERE id = ? AND deleted_at IS NULL`,
-    args: [content, detail, id],
+    sql: `UPDATE memories SET content = ?, detail = ? WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [content, detail, id, ...uf.args],
   });
 }

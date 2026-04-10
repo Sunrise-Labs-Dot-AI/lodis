@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ShieldAlert } from "lucide-react";
 import { getMemoryById, getMemoryEvents, getMemoryConnections } from "@/lib/db";
+import { getUserId } from "@/lib/auth";
 import {
   formatDate,
   formatConfidence,
@@ -23,11 +24,12 @@ interface PageProps {
 
 export default async function MemoryDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const memory = await getMemoryById(id);
+  const userId = await getUserId();
+  const memory = await getMemoryById(id, userId);
   if (!memory) notFound();
 
-  const events = await getMemoryEvents(id);
-  const connections = await getMemoryConnections(id);
+  const events = await getMemoryEvents(id, userId);
+  const connections = await getMemoryConnections(id, userId);
 
   return (
     <div className="space-y-6">

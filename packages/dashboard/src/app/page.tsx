@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { getMemories, getDomains, getSourceTypes, getEntityTypes, getUnreviewedCount, getTotalMemoryCount } from "@/lib/db";
+import { getUserId } from "@/lib/auth";
 import { MemoryList } from "@/components/memory-list";
 import { SearchBar } from "@/components/search-bar";
 import { DomainFilter } from "@/components/domain-filter";
@@ -25,7 +26,8 @@ interface PageProps {
 
 export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const totalCount = await getTotalMemoryCount();
+  const userId = await getUserId();
+  const totalCount = await getTotalMemoryCount(userId);
 
   // Empty state: no memories in the entire DB
   if (totalCount === 0) {
@@ -50,10 +52,10 @@ export default async function HomePage({ searchParams }: PageProps) {
     );
   }
 
-  const domains = await getDomains();
-  const sourceTypes = await getSourceTypes();
-  const entityTypes = await getEntityTypes();
-  const unreviewedCount = await getUnreviewedCount();
+  const domains = await getDomains(userId);
+  const sourceTypes = await getSourceTypes(userId);
+  const entityTypes = await getEntityTypes(userId);
+  const unreviewedCount = await getUnreviewedCount(userId);
 
   const sortBy = (["confidence", "recency", "used", "learned"] as const).includes(
     params.sort as "confidence" | "recency" | "used" | "learned",
@@ -71,7 +73,7 @@ export default async function HomePage({ searchParams }: PageProps) {
     maxConfidence: params.maxConf ? parseFloat(params.maxConf) : undefined,
     unused: params.unused === "1",
     needsReview: params.review === "1",
-  });
+  }, userId);
 
   return (
     <div className="space-y-4">

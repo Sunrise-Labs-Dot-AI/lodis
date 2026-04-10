@@ -1,11 +1,13 @@
 import { getEntityGraphData, getGraphData } from "@/lib/db";
+import { getUserId } from "@/lib/auth";
 import { KnowledgeGraph } from "@/components/knowledge-graph";
 
 export const dynamic = "force-dynamic";
 
 export default async function GraphPage() {
-  const entityData = await getEntityGraphData();
-  const { nodes: rawNodes, edges: rawEdges } = await getGraphData();
+  const userId = await getUserId();
+  const entityData = await getEntityGraphData(userId);
+  const { nodes: rawNodes, edges: rawEdges } = await getGraphData(userId);
 
   const hasEntities = entityData.entities.length > 0;
   const totalMemories = rawNodes.length + entityData.uncategorized.length;

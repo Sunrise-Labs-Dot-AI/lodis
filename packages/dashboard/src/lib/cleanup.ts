@@ -392,8 +392,8 @@ export interface ScanResult {
   allSuggestions: CleanupSuggestion[];
 }
 
-export async function scanForSuggestions(): Promise<ScanResult> {
-  const memories = await getMemories();
+export async function scanForSuggestions(userId?: string | null): Promise<ScanResult> {
+  const memories = await getMemories(undefined, userId);
   if (memories.length === 0) {
     return {
       health: computeHealthScore([], []),

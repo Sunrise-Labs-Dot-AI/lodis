@@ -1,4 +1,5 @@
 import { getAgentPermissions, getAgents, getDomains } from "@/lib/db";
+import { getUserId } from "@/lib/auth";
 import { Card } from "@/components/ui/card";
 import { PermissionToggle } from "@/components/permission-toggle";
 import { AddRuleForm } from "@/components/add-rule-form";
@@ -7,9 +8,10 @@ import { RemoveRuleButton } from "@/components/remove-rule-button";
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
-  const agents = await getAgents();
-  const permissions = await getAgentPermissions();
-  const domains = await getDomains();
+  const userId = await getUserId();
+  const agents = await getAgents(userId);
+  const permissions = await getAgentPermissions(userId);
+  const domains = await getDomains(userId);
 
   // Build permission map: agentId -> domain -> { canRead, canWrite }
   const permMap = new Map<string, Map<string, { canRead: boolean; canWrite: boolean }>>();

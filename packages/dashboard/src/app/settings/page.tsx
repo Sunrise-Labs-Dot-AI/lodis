@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { homedir } from "os";
 import { getDbStats } from "@/lib/db";
+import { getUserId } from "@/lib/auth";
 import { formatBytes } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { SettingsActions } from "./actions";
@@ -13,20 +14,9 @@ export const dynamic = "force-dynamic";
 
 const isHosted = !!process.env.TURSO_DATABASE_URL;
 
-async function getUserId(): Promise<string | null> {
-  if (!isHosted) return null;
-  try {
-    const { auth } = await import("@clerk/nextjs/server");
-    const session = await auth();
-    return session?.userId ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export default async function SettingsPage() {
-  const stats = await getDbStats();
   const userId = await getUserId();
+  const stats = await getDbStats(userId);
   const dbPath = isHosted
     ? "(hosted — Turso)"
     : resolve(homedir(), ".engrams", "engrams.db");

@@ -18,37 +18,42 @@ import {
   type CleanupSuggestion,
   type ScanResult,
 } from "./cleanup";
+import { getUserId } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { resolveLLMProvider, parseLLMJson, validateCorrection, validateSplit } from "@engrams/core";
 import type { LLMProvider } from "@engrams/core";
 
 export async function deleteMemoryAction(id: string) {
-  await deleteMemoryById(id);
+  const userId = await getUserId();
+  await deleteMemoryById(id, userId);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
 }
 
 export async function confirmMemoryAction(id: string) {
-  const result = await confirmMemoryById(id);
+  const userId = await getUserId();
+  const result = await confirmMemoryById(id, userId);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
   return result;
 }
 
 export async function flagMemoryAction(id: string) {
-  const result = await flagMemoryById(id);
+  const userId = await getUserId();
+  const result = await flagMemoryById(id, userId);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
   return result;
 }
 
 export async function correctMemoryAction(id: string, feedback: string) {
-  const memory = await getMemoryById(id);
+  const userId = await getUserId();
+  const memory = await getMemoryById(id, userId);
   if (!memory) return null;
 
   const provider = resolveLLMProvider("analysis");
   if (!provider) {
-    const result = await correctMemoryById(id, feedback);
+    const result = await correctMemoryById(id, feedback, undefined, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
@@ -74,18 +79,18 @@ Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
 
     const validation = validateCorrection(memory.content, newContent, feedback);
     if (!validation.valid) {
-      const result = await correctMemoryById(id, feedback);
+      const result = await correctMemoryById(id, feedback, undefined, userId);
       revalidatePath("/");
       revalidatePath(`/memory/${id}`);
       return result;
     }
 
-    const result = await correctMemoryById(id, newContent, newDetail);
+    const result = await correctMemoryById(id, newContent, newDetail, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
   } catch {
-    const result = await correctMemoryById(id, feedback);
+    const result = await correctMemoryById(id, feedback, undefined, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
     return result;
@@ -98,7 +103,8 @@ export async function proposeSplitAction(
   id: string,
   guidance?: string,
 ): Promise<{ parts: SplitPart[] } | { error: string }> {
-  const memory = await getMemoryById(id);
+  const userId = await getUserId();
+  const memory = await getMemoryById(id, userId);
   if (!memory) return { error: "Memory not found" };
 
   const provider = resolveLLMProvider("analysis");
@@ -139,15 +145,17 @@ export async function confirmSplitAction(
   id: string,
   parts: SplitPart[],
 ): Promise<{ newIds: string[] } | { error: string } | null> {
+  const userId = await getUserId();
   if (parts.length < 2) return { error: "Need at least 2 parts to split" };
-  const result = await splitMemoryById(id, parts);
+  const result = await splitMemoryById(id, parts, userId);
   if (!result) return { error: "Memory not found" };
   revalidatePath("/");
   return result;
 }
 
 export async function clearAllMemoriesAction() {
-  await clearAll();
+  const userId = await getUserId();
+  await clearAll(userId);
   revalidatePath("/");
 }
 
@@ -157,8 +165,9 @@ export async function clearAllMemoriesAction() {
 export async function scanCleanupAction(): Promise<
   ScanResult | { error: string }
 > {
+  const userId = await getUserId();
   try {
-    return await scanForSuggestions();
+    return await scanForSuggestions(userId);
   } catch (e) {
     console.error("[engrams] Cleanup scan failed:", e);
     return { error: "Cleanup scan failed" };
@@ -202,9 +211,10 @@ export async function applyMergeSuggestionAction(
   keepId: string,
   deleteIds: string[],
 ): Promise<{ error?: string }> {
+  const userId = await getUserId();
   for (const id of deleteIds) {
     if (id !== keepId) {
-      await deleteMemoryById(id);
+      await deleteMemoryById(id, userId);
     }
   }
   revalidatePath("/");
@@ -216,8 +226,9 @@ export async function applySplitSuggestionAction(
   id: string,
   parts: SplitPart[],
 ): Promise<{ newIds: string[]; error?: string } | { error: string }> {
+  const userId = await getUserId();
   if (parts.length < 2) return { error: "Need at least 2 parts to split" };
-  const result = await splitMemoryById(id, parts);
+  const result = await splitMemoryById(id, parts, userId);
   if (!result) return { error: "Memory not found" };
   revalidatePath("/");
   revalidatePath("/cleanup");
@@ -227,7 +238,8 @@ export async function applySplitSuggestionAction(
 export async function scrubMemoryAction(
   id: string,
 ): Promise<{ scrubbed: boolean; error?: string }> {
-  const memory = await getMemoryById(id);
+  const userId = await getUserId();
+  const memory = await getMemoryById(id, userId);
   if (!memory) return { scrubbed: false, error: "Memory not found" };
 
   const { redactSensitiveData } = await import("@engrams/core");
@@ -237,7 +249,7 @@ export async function scrubMemoryAction(
     : null;
 
   const { scrubMemoryById } = await import("./db");
-  const success = await scrubMemoryById(id, redactedContent, redactedDetail, redactSensitiveData);
+  const success = await scrubMemoryById(id, redactedContent, redactedDetail, redactSensitiveData, userId);
   if (!success) return { scrubbed: false, error: "Memory not found" };
 
   revalidatePath("/");

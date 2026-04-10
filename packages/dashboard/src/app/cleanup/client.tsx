@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { StatusBadge } from "../../components/ui/status-badge";
@@ -11,10 +12,27 @@ import {
   applySplitSuggestionAction,
   deleteMemoryAction,
   confirmMemoryAction,
+  flagMemoryAction,
+  correctMemoryAction,
   scrubMemoryAction,
 } from "../../lib/actions";
 import type { CleanupSuggestion, HealthScore } from "../../lib/cleanup";
-import { Search, CheckCircle, Loader2, ChevronDown, Shield, Zap } from "lucide-react";
+import {
+  Search,
+  CheckCircle,
+  Loader2,
+  ChevronDown,
+  Shield,
+  Zap,
+  Pencil,
+  AlertTriangle,
+  Trash2,
+  ShieldAlert,
+  ExternalLink,
+} from "lucide-react";
+import { confidenceColor, formatConfidence } from "../../lib/utils";
+
+// --- Constants ---
 
 const TYPE_LABELS: Record<CleanupSuggestion["type"], string> = {
   pii: "Sensitive Data",
@@ -37,6 +55,8 @@ const TYPE_BADGE_VARIANT: Record<
   update: "success",
 };
 
+// --- Health Score ---
+
 function healthColor(score: number): string {
   if (score >= 80) return "var(--color-success)";
   if (score >= 60) return "var(--color-accent)";
@@ -44,11 +64,73 @@ function healthColor(score: number): string {
   return "var(--color-danger)";
 }
 
+function healthLabel(score: number): string {
+  if (score >= 90) return "Great";
+  if (score >= 70) return "Good";
+  if (score >= 50) return "Fair";
+  if (score >= 30) return "Poor";
+  return "Critical";
+}
+
+function HealthFactorRow({
+  factor,
+  compact,
+}: {
+  factor: { name: string; score: number; detail: string };
+  compact?: boolean;
+}) {
+  const color = healthColor(factor.score);
+  const barWidth = factor.score === 0 ? 3 : factor.score;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-0.5">
+        <div className="flex items-center gap-1.5">
+          <span
+            className="text-xs font-medium"
+            style={{
+              color: factor.score < 80 ? color : "var(--color-text-secondary)",
+            }}
+          >
+            {factor.name}
+          </span>
+          {!compact && factor.score < 40 && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{
+                background: "var(--color-danger-bg)",
+                color: "var(--color-danger)",
+              }}
+            >
+              {factor.score === 0 ? "Critical" : "Low"}
+            </span>
+          )}
+        </div>
+        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          {factor.detail}
+        </span>
+      </div>
+      <div
+        className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden`}
+        style={{ background: "var(--color-bg-soft)" }}
+      >
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${barWidth}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function HealthScoreCard({ health }: { health: HealthScore }) {
+  const sortedFactors = [...health.factors].sort((a, b) => a.score - b.score);
+  const problemFactors = sortedFactors.filter((f) => f.score < 80);
+  const goodFactors = sortedFactors.filter((f) => f.score >= 80);
+
   return (
     <Card className="p-6 mb-6">
       <div className="flex items-start gap-6">
-        {/* Score circle */}
         <div className="flex-shrink-0 flex flex-col items-center">
           <div
             className="w-20 h-20 rounded-full flex items-center justify-center border-4"
@@ -61,53 +143,354 @@ function HealthScoreCard({ health }: { health: HealthScore }) {
               {health.overall}
             </span>
           </div>
-          <span className="text-xs mt-1.5" style={{ color: "var(--color-text-muted)" }}>
+          <span
+            className="text-xs font-medium mt-1.5"
+            style={{ color: healthColor(health.overall) }}
+          >
+            {healthLabel(health.overall)}
+          </span>
+          <span
+            className="text-xs mt-0.5"
+            style={{ color: "var(--color-text-muted)" }}
+          >
             {health.totalMemories} memories
           </span>
         </div>
 
-        {/* Factor bars */}
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-medium mb-3" style={{ color: "var(--color-text)" }}>
-            Memory Health
-          </h3>
-          <div className="flex flex-col gap-2">
-            {health.factors.map((f) => (
-              <div key={f.name}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{f.name}</span>
-                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{f.detail}</span>
-                </div>
-                <div
-                  className="h-1.5 rounded-full overflow-hidden"
-                  style={{ background: "var(--color-bg-soft)" }}
-                >
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${f.score}%`,
-                      background: healthColor(f.score),
-                    }}
-                  />
-                </div>
+          {problemFactors.length > 0 && (
+            <div className="mb-3">
+              <h3
+                className="text-xs font-medium mb-2"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Needs attention
+              </h3>
+              <div className="flex flex-col gap-2.5">
+                {problemFactors.map((f) => (
+                  <HealthFactorRow key={f.name} factor={f} />
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {goodFactors.length > 0 && (
+            <div>
+              {problemFactors.length > 0 && (
+                <h3
+                  className="text-xs font-medium mb-2 mt-3"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Looking good
+                </h3>
+              )}
+              <div className="flex flex-col gap-2">
+                {goodFactors.map((f) => (
+                  <HealthFactorRow key={f.name} factor={f} compact />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Auto-handled summary */}
-      {(health.autoHandled.temporalDegraded > 0 || health.autoHandled.staleDegrading > 0) && (
+      {(health.autoHandled.temporalDegraded > 0 ||
+        health.autoHandled.staleDegrading > 0) && (
         <div
           className="mt-4 pt-4 flex items-start gap-2 text-xs"
-          style={{ borderTop: "1px solid var(--color-border)", color: "var(--color-text-muted)" }}
+          style={{
+            borderTop: "1px solid var(--color-border)",
+            color: "var(--color-text-muted)",
+          }}
         >
-          <Zap size={14} className="flex-shrink-0 mt-0.5" style={{ color: "var(--color-accent)" }} />
+          <Zap
+            size={14}
+            className="flex-shrink-0 mt-0.5"
+            style={{ color: "var(--color-accent)" }}
+          />
           <span>{health.autoHandled.description}</span>
         </div>
       )}
     </Card>
   );
+}
+
+// --- Memory Mini Card ---
+
+type SuggestionMemory = NonNullable<CleanupSuggestion["memories"]>[number];
+
+function MemoryMiniCard({
+  memory,
+  highlight,
+  label,
+}: {
+  memory: SuggestionMemory;
+  highlight?: boolean;
+  label?: string;
+}) {
+  const confColor = confidenceColor(memory.confidence);
+  return (
+    <div
+      className="text-sm px-3 py-2.5 rounded border"
+      style={{
+        background: highlight
+          ? "var(--color-success-bg)"
+          : "var(--color-bg-soft)",
+        borderColor: highlight
+          ? "var(--color-success)"
+          : "var(--color-border)",
+      }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="line-clamp-2" style={{ color: "var(--color-text)" }}>
+          {memory.content}
+        </span>
+        <Link
+          href={`/memory/${memory.id}`}
+          className="flex-shrink-0 mt-0.5 hover:opacity-80"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <ExternalLink size={12} />
+        </Link>
+      </div>
+      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+        {label && (
+          <span
+            className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+            style={{
+              background: "var(--color-success-bg)",
+              color: "var(--color-success)",
+            }}
+          >
+            {label}
+          </span>
+        )}
+        <StatusBadge variant="accent">{memory.domain}</StatusBadge>
+        {memory.entity_type && (
+          <StatusBadge variant="neutral">{memory.entity_type}</StatusBadge>
+        )}
+        <span
+          className="text-[10px] font-medium tabular-nums"
+          style={{ color: confColor }}
+        >
+          {formatConfidence(memory.confidence)}
+        </span>
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          {memory.id.slice(0, 8)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// --- Inline Correction ---
+
+function InlineCorrection({
+  memoryId,
+  onSubmit,
+  onCancel,
+  loading,
+}: {
+  memoryId: string;
+  onSubmit: (memoryId: string, feedback: string) => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [text, setText] = useState("");
+  return (
+    <div
+      className="mt-2 p-3 rounded border"
+      style={{
+        background: "var(--color-bg-soft)",
+        borderColor: "var(--color-border)",
+      }}
+    >
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Describe what's wrong or what should change..."
+        rows={2}
+        className="w-full p-2 text-sm bg-[var(--color-card)] border border-[var(--color-border)] rounded placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={loading}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          disabled={!text.trim() || loading}
+          onClick={() => onSubmit(memoryId, text.trim())}
+        >
+          {loading ? "Applying..." : "Apply Correction"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// --- Memory Action Bar ---
+
+function MemoryActionBar({
+  memoryId,
+  showConfirm,
+  showCorrect,
+  showFlag,
+  showDelete,
+  showScrub,
+  loading,
+  correctingId,
+  onConfirm,
+  onCorrectToggle,
+  onFlag,
+  onDelete,
+  onScrub,
+}: {
+  memoryId: string;
+  showConfirm?: boolean;
+  showCorrect?: boolean;
+  showFlag?: boolean;
+  showDelete?: boolean;
+  showScrub?: boolean;
+  loading: boolean;
+  correctingId: string | null;
+  onConfirm?: (id: string) => void;
+  onCorrectToggle?: (id: string | null) => void;
+  onFlag?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onScrub?: (id: string) => void;
+}) {
+  const isCorrectingThis = correctingId === memoryId;
+  return (
+    <div className="flex items-center gap-1 mt-1.5">
+      {showConfirm && onConfirm && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => onConfirm(memoryId)}
+        >
+          <CheckCircle size={13} className="mr-1" />
+          Confirm
+        </Button>
+      )}
+      {showCorrect && onCorrectToggle && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() =>
+            onCorrectToggle(isCorrectingThis ? null : memoryId)
+          }
+        >
+          <Pencil size={13} className="mr-1" />
+          {isCorrectingThis ? "Cancel" : "Correct"}
+        </Button>
+      )}
+      {showFlag && onFlag && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => onFlag(memoryId)}
+        >
+          <AlertTriangle size={13} className="mr-1" />
+          Flag
+        </Button>
+      )}
+      {showScrub && onScrub && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => onScrub(memoryId)}
+        >
+          <ShieldAlert size={13} className="mr-1" />
+          Redact
+        </Button>
+      )}
+      {showDelete && onDelete && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => onDelete(memoryId)}
+          className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+        >
+          <Trash2 size={13} className="mr-1" />
+          Delete
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// --- Resolved State ---
+
+function ResolvedCard({
+  action,
+  memory,
+  onDismiss,
+}: {
+  action: string;
+  memory?: { content: string; detail: string | null };
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <CheckCircle
+          size={18}
+          className="flex-shrink-0 mt-0.5"
+          style={{ color: "var(--color-success)" }}
+        />
+        <div className="flex-1 min-w-0">
+          <p
+            className="text-sm font-medium"
+            style={{ color: "var(--color-success)" }}
+          >
+            {action}
+          </p>
+          {memory && (
+            <div
+              className="mt-2 text-sm p-2.5 rounded"
+              style={{
+                background: "var(--color-bg-soft)",
+                color: "var(--color-text)",
+              }}
+            >
+              <p className="line-clamp-3">{memory.content}</p>
+              {memory.detail && (
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {memory.detail}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <Button variant="ghost" size="sm" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// --- Main Component ---
+
+interface ResolvedState {
+  action: string;
+  memory?: { content: string; detail: string | null };
 }
 
 export function CleanupClient() {
@@ -118,6 +501,11 @@ export function CleanupClient() {
   const [error, setError] = useState<string | null>(null);
   const [expandingIndex, setExpandingIndex] = useState<number | null>(null);
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<Map<number, ResolvedState>>(
+    new Map(),
+  );
 
   async function handleScan() {
     setScanning(true);
@@ -129,6 +517,7 @@ export function CleanupClient() {
       } else {
         setHealth(result.health);
         setActionable(result.actionable);
+        setResolved(new Map());
       }
       setHasScanned(true);
     } catch {
@@ -138,8 +527,17 @@ export function CleanupClient() {
     }
   }
 
-  function dismiss(index: number) {
+  const dismiss = useCallback((index: number) => {
     setActionable((prev) => prev.filter((_, i) => i !== index));
+    setResolved((prev) => {
+      const next = new Map(prev);
+      next.delete(index);
+      return next;
+    });
+  }, []);
+
+  function resolve(index: number, action: string, memory?: { content: string; detail: string | null }) {
+    setResolved((prev) => new Map(prev).set(index, { action, memory }));
   }
 
   function updateSuggestion(index: number, updated: CleanupSuggestion) {
@@ -164,6 +562,88 @@ export function CleanupClient() {
     }
   }
 
+  // --- Memory-level actions ---
+
+  async function handleMemoryConfirm(memoryId: string, index: number) {
+    setActionLoading(memoryId);
+    try {
+      const result = await confirmMemoryAction(memoryId);
+      if (result) {
+        resolve(index, "Confirmed — confidence set to 99%");
+      }
+    } catch {
+      setError("Failed to confirm memory");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleMemoryFlag(memoryId: string, index: number) {
+    setActionLoading(memoryId);
+    try {
+      const result = await flagMemoryAction(memoryId);
+      if (result) {
+        resolve(index, `Flagged — confidence reduced to ${formatConfidence(result.newConfidence)}`);
+      }
+    } catch {
+      setError("Failed to flag memory");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleMemoryCorrect(
+    memoryId: string,
+    feedback: string,
+    index: number,
+  ) {
+    setActionLoading(memoryId);
+    try {
+      const result = await correctMemoryAction(memoryId, feedback);
+      if (result) {
+        setCorrectingId(null);
+        resolve(index, "Corrected", {
+          content: result.content,
+          detail: result.detail,
+        });
+      }
+    } catch {
+      setError("Failed to correct memory");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleMemoryDelete(memoryId: string, index: number) {
+    setActionLoading(memoryId);
+    try {
+      await deleteMemoryAction(memoryId);
+      resolve(index, "Deleted");
+    } catch {
+      setError("Failed to delete memory");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleMemoryScrub(memoryId: string, index: number) {
+    setActionLoading(memoryId);
+    try {
+      const result = await scrubMemoryAction(memoryId);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        resolve(index, "Redacted — sensitive data scrubbed from memory and event history", result.memory);
+      }
+    } catch {
+      setError("Failed to redact memory");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  // --- Suggestion-level actions ---
+
   async function applyMerge(suggestion: CleanupSuggestion, index: number) {
     if (!suggestion.keepId) return;
     setApplyingIndex(index);
@@ -172,7 +652,7 @@ export function CleanupClient() {
         (id) => id !== suggestion.keepId,
       );
       await applyMergeSuggestionAction(suggestion.keepId, deleteIds);
-      dismiss(index);
+      resolve(index, `Merged — kept best version, removed ${deleteIds.length} duplicate${deleteIds.length > 1 ? "s" : ""}`);
     } finally {
       setApplyingIndex(null);
     }
@@ -182,42 +662,11 @@ export function CleanupClient() {
     if (!suggestion.parts || suggestion.parts.length < 2) return;
     setApplyingIndex(index);
     try {
-      await applySplitSuggestionAction(suggestion.memoryIds[0], suggestion.parts);
-      dismiss(index);
-    } finally {
-      setApplyingIndex(null);
-    }
-  }
-
-  async function applyStaleConfirm(suggestion: CleanupSuggestion, index: number) {
-    setApplyingIndex(index);
-    try {
-      await confirmMemoryAction(suggestion.memoryIds[0]);
-      dismiss(index);
-    } finally {
-      setApplyingIndex(null);
-    }
-  }
-
-  async function applyDelete(suggestion: CleanupSuggestion, index: number) {
-    setApplyingIndex(index);
-    try {
-      await deleteMemoryAction(suggestion.memoryIds[0]);
-      dismiss(index);
-    } finally {
-      setApplyingIndex(null);
-    }
-  }
-
-  async function applyScrub(suggestion: CleanupSuggestion, index: number) {
-    setApplyingIndex(index);
-    try {
-      const result = await scrubMemoryAction(suggestion.memoryIds[0]);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        dismiss(index);
-      }
+      await applySplitSuggestionAction(
+        suggestion.memoryIds[0],
+        suggestion.parts,
+      );
+      resolve(index, `Split into ${suggestion.parts.length} separate memories`);
     } finally {
       setApplyingIndex(null);
     }
@@ -234,11 +683,14 @@ export function CleanupClient() {
       for (const id of deleteIds) {
         await deleteMemoryAction(id);
       }
-      dismiss(index);
+      resolve(index, "Resolved — kept selected version, removed conflicting memory");
     } finally {
       setApplyingIndex(null);
     }
   }
+
+  const visibleActionable = actionable.filter((_, i) => !resolved.has(i));
+  const resolvedEntries = [...resolved.entries()];
 
   return (
     <div>
@@ -278,61 +730,89 @@ export function CleanupClient() {
         </Card>
       )}
 
-      {/* Health score */}
       {health && <HealthScoreCard health={health} />}
 
-      {/* All clear state */}
-      {hasScanned && !scanning && health && actionable.length === 0 && !error && (
-        <Card className="p-8 text-center">
-          <Shield
-            size={40}
-            className="mx-auto mb-3"
-            style={{ color: "var(--color-success)" }}
-          />
-          <p
-            className="text-lg font-medium"
-            style={{ color: "var(--color-text)" }}
-          >
-            Nothing needs your attention
-          </p>
-          <p
-            className="text-sm mt-1"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            The system is handling routine maintenance automatically.
-          </p>
-        </Card>
+      {/* Resolved items */}
+      {resolvedEntries.length > 0 && (
+        <div className="flex flex-col gap-3 mb-4">
+          {resolvedEntries.map(([index, state]) => (
+            <ResolvedCard
+              key={`resolved-${index}`}
+              action={state.action}
+              memory={state.memory}
+              onDismiss={() => dismiss(index)}
+            />
+          ))}
+        </div>
       )}
 
+      {/* All clear */}
+      {hasScanned &&
+        !scanning &&
+        health &&
+        visibleActionable.length === 0 &&
+        resolvedEntries.length === 0 &&
+        !error && (
+          <Card className="p-8 text-center">
+            <Shield
+              size={40}
+              className="mx-auto mb-3"
+              style={{ color: "var(--color-success)" }}
+            />
+            <p
+              className="text-lg font-medium"
+              style={{ color: "var(--color-text)" }}
+            >
+              Nothing needs your attention
+            </p>
+            <p
+              className="text-sm mt-1"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              The system is handling routine maintenance automatically.
+            </p>
+          </Card>
+        )}
+
       {/* Actionable items */}
-      {actionable.length > 0 && (
+      {visibleActionable.length > 0 && (
         <div className="mb-4">
           <h2
             className="text-sm font-medium mb-3"
             style={{ color: "var(--color-text-secondary)" }}
           >
-            Needs your input ({actionable.length})
+            Needs your input ({visibleActionable.length})
           </h2>
           <div className="flex flex-col gap-4">
-            {actionable.map((suggestion, index) => (
-              <SuggestionCard
-                key={`${suggestion.type}-${suggestion.memoryIds.join("-")}-${index}`}
-                suggestion={suggestion}
-                index={index}
-                expanding={expandingIndex === index}
-                applying={applyingIndex === index}
-                onDismiss={() => dismiss(index)}
-                onExpand={() => handleExpand(index)}
-                onApplyMerge={() => applyMerge(suggestion, index)}
-                onApplySplit={() => applySplit(suggestion, index)}
-                onStaleConfirm={() => applyStaleConfirm(suggestion, index)}
-                onDelete={() => applyDelete(suggestion, index)}
-                onScrub={() => applyScrub(suggestion, index)}
-                onContradictionKeep={(keepId: string) =>
-                  applyContradictionKeep(suggestion, keepId, index)
-                }
-              />
-            ))}
+            {actionable.map((suggestion, index) => {
+              if (resolved.has(index)) return null;
+              return (
+                <SuggestionCard
+                  key={`${suggestion.type}-${suggestion.memoryIds.join("-")}-${index}`}
+                  suggestion={suggestion}
+                  index={index}
+                  expanding={expandingIndex === index}
+                  applying={applyingIndex === index}
+                  actionLoading={actionLoading}
+                  correctingId={correctingId}
+                  onDismiss={() => dismiss(index)}
+                  onExpand={() => handleExpand(index)}
+                  onApplyMerge={() => applyMerge(suggestion, index)}
+                  onApplySplit={() => applySplit(suggestion, index)}
+                  onContradictionKeep={(keepId: string) =>
+                    applyContradictionKeep(suggestion, keepId, index)
+                  }
+                  onMemoryConfirm={(id) => handleMemoryConfirm(id, index)}
+                  onMemoryFlag={(id) => handleMemoryFlag(id, index)}
+                  onMemoryCorrect={(id, fb) =>
+                    handleMemoryCorrect(id, fb, index)
+                  }
+                  onMemoryDelete={(id) => handleMemoryDelete(id, index)}
+                  onMemoryScrub={(id) => handleMemoryScrub(id, index)}
+                  onCorrectToggle={setCorrectingId}
+                />
+              );
+            })}
           </div>
         </div>
       )}
@@ -340,34 +820,47 @@ export function CleanupClient() {
   );
 }
 
+// --- Suggestion Card ---
+
 function SuggestionCard({
   suggestion,
   index,
   expanding,
   applying,
+  actionLoading,
+  correctingId,
   onDismiss,
   onExpand,
   onApplyMerge,
   onApplySplit,
-  onStaleConfirm,
-  onDelete,
-  onScrub,
   onContradictionKeep,
+  onMemoryConfirm,
+  onMemoryFlag,
+  onMemoryCorrect,
+  onMemoryDelete,
+  onMemoryScrub,
+  onCorrectToggle,
 }: {
   suggestion: CleanupSuggestion;
   index: number;
   expanding: boolean;
   applying: boolean;
+  actionLoading: string | null;
+  correctingId: string | null;
   onDismiss: () => void;
   onExpand: () => void;
   onApplyMerge: () => void;
   onApplySplit: () => void;
-  onStaleConfirm: () => void;
-  onDelete: () => void;
-  onScrub: () => void;
   onContradictionKeep: (keepId: string) => void;
+  onMemoryConfirm: (id: string) => void;
+  onMemoryFlag: (id: string) => void;
+  onMemoryCorrect: (id: string, feedback: string) => void;
+  onMemoryDelete: (id: string) => void;
+  onMemoryScrub: (id: string) => void;
+  onCorrectToggle: (id: string | null) => void;
 }) {
   const needsExpand = !suggestion.expanded;
+  const isLoading = applying || actionLoading !== null;
 
   return (
     <Card className="p-4">
@@ -387,34 +880,22 @@ function SuggestionCard({
           variant="ghost"
           size="sm"
           onClick={onDismiss}
-          disabled={applying}
+          disabled={isLoading}
         >
           Dismiss
         </Button>
       </div>
 
-      {suggestion.memories && suggestion.memories.length > 0 && (
-        <div className="flex flex-col gap-1.5 mb-3">
-          {suggestion.memories.map((m) => (
-            <div
-              key={m.id}
-              className="text-sm px-3 py-2 rounded"
-              style={{
-                background: "var(--color-bg-soft)",
-                color: "var(--color-text)",
-              }}
-            >
-              <span className="line-clamp-2">{m.content}</span>
-              <span
-                className="text-xs font-mono ml-2"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                {m.id.slice(0, 8)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Memory previews (only when not expanded — detail components show their own) */}
+      {!suggestion.expanded &&
+        suggestion.memories &&
+        suggestion.memories.length > 0 && (
+          <div className="flex flex-col gap-1.5 mb-3">
+            {suggestion.memories.map((m) => (
+              <MemoryMiniCard key={m.id} memory={m} />
+            ))}
+          </div>
+        )}
 
       {needsExpand && (
         <Button
@@ -440,76 +921,118 @@ function SuggestionCard({
       {suggestion.expanded && suggestion.type === "merge" && (
         <MergeDetail
           suggestion={suggestion}
-          applying={applying}
+          applying={isLoading}
+          correctingId={correctingId}
           onApply={onApplyMerge}
+          onConfirm={onMemoryConfirm}
+          onCorrectToggle={onCorrectToggle}
+          onCorrect={onMemoryCorrect}
+          onFlag={onMemoryFlag}
         />
       )}
-      {suggestion.expanded && suggestion.type === "split" && suggestion.parts && (
-        <SplitDetail
-          suggestion={suggestion}
-          applying={applying}
-          onApply={onApplySplit}
-        />
-      )}
-      {suggestion.expanded && suggestion.type === "contradiction" && suggestion.conflicts && (
-        <ContradictionDetail
-          suggestion={suggestion}
-          applying={applying}
-          onKeep={onContradictionKeep}
-        />
-      )}
+      {suggestion.expanded &&
+        suggestion.type === "split" &&
+        suggestion.parts && (
+          <SplitDetail
+            suggestion={suggestion}
+            applying={isLoading}
+            onApply={onApplySplit}
+            onFlag={onMemoryFlag}
+          />
+        )}
+      {suggestion.expanded &&
+        suggestion.type === "contradiction" &&
+        suggestion.conflicts && (
+          <ContradictionDetail
+            suggestion={suggestion}
+            applying={isLoading}
+            correctingId={correctingId}
+            onKeep={onContradictionKeep}
+            onConfirm={onMemoryConfirm}
+            onCorrectToggle={onCorrectToggle}
+            onCorrect={onMemoryCorrect}
+            onFlag={onMemoryFlag}
+          />
+        )}
       {suggestion.expanded && suggestion.type === "pii" && (
         <PiiDetail
           suggestion={suggestion}
-          applying={applying}
-          onScrub={onScrub}
-          onDelete={onDelete}
+          applying={isLoading}
+          correctingId={correctingId}
+          onScrub={onMemoryScrub}
+          onDelete={onMemoryDelete}
+          onCorrectToggle={onCorrectToggle}
+          onCorrect={onMemoryCorrect}
         />
       )}
       {suggestion.expanded && suggestion.type === "stale" && (
         <StaleDetail
-          applying={applying}
-          onConfirm={onStaleConfirm}
-          onDelete={onDelete}
+          suggestion={suggestion}
+          applying={isLoading}
+          correctingId={correctingId}
+          onConfirm={onMemoryConfirm}
+          onCorrectToggle={onCorrectToggle}
+          onCorrect={onMemoryCorrect}
+          onFlag={onMemoryFlag}
+          onDelete={onMemoryDelete}
         />
       )}
     </Card>
   );
 }
 
+// --- Detail Components ---
+
 function MergeDetail({
   suggestion,
   applying,
+  correctingId,
   onApply,
+  onConfirm,
+  onCorrectToggle,
+  onCorrect,
+  onFlag,
 }: {
   suggestion: CleanupSuggestion;
   applying: boolean;
+  correctingId: string | null;
   onApply: () => void;
+  onConfirm: (id: string) => void;
+  onCorrectToggle: (id: string | null) => void;
+  onCorrect: (id: string, feedback: string) => void;
+  onFlag: (id: string) => void;
 }) {
   return (
     <div className="mt-2">
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className="flex flex-col gap-2 mb-3">
         {suggestion.memories?.map((m) => (
-          <div
-            key={m.id}
-            className="text-xs px-2 py-1 rounded border"
-            style={{
-              background:
-                m.id === suggestion.keepId
-                  ? "var(--color-success-bg)"
-                  : "var(--color-bg-soft)",
-              borderColor:
-                m.id === suggestion.keepId
-                  ? "var(--color-success)"
-                  : "var(--color-border)",
-              color:
-                m.id === suggestion.keepId
-                  ? "var(--color-success)"
-                  : "var(--color-text-secondary)",
-            }}
-          >
-            {m.id.slice(0, 12)}...
-            {m.id === suggestion.keepId && " (keep)"}
+          <div key={m.id}>
+            <MemoryMiniCard
+              memory={m}
+              highlight={m.id === suggestion.keepId}
+              label={m.id === suggestion.keepId ? "Keep" : undefined}
+            />
+            {m.id === suggestion.keepId && (
+              <MemoryActionBar
+                memoryId={m.id}
+                showConfirm
+                showCorrect
+                showFlag
+                loading={applying}
+                correctingId={correctingId}
+                onConfirm={onConfirm}
+                onCorrectToggle={onCorrectToggle}
+                onFlag={onFlag}
+              />
+            )}
+            {correctingId === m.id && (
+              <InlineCorrection
+                memoryId={m.id}
+                onSubmit={onCorrect}
+                onCancel={() => onCorrectToggle(null)}
+                loading={applying}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -524,13 +1047,34 @@ function SplitDetail({
   suggestion,
   applying,
   onApply,
+  onFlag,
 }: {
   suggestion: CleanupSuggestion;
   applying: boolean;
   onApply: () => void;
+  onFlag: (id: string) => void;
 }) {
+  const originalMemory = suggestion.memories?.[0];
   return (
     <div className="mt-2">
+      {originalMemory && (
+        <div className="mb-3">
+          <MemoryMiniCard memory={originalMemory} />
+          <MemoryActionBar
+            memoryId={originalMemory.id}
+            showFlag
+            loading={applying}
+            correctingId={null}
+            onFlag={onFlag}
+          />
+        </div>
+      )}
+      <p
+        className="text-xs font-medium mb-2"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Proposed split:
+      </p>
       <div className="flex flex-col gap-2 mb-3">
         {suggestion.parts?.map((part, i) => (
           <div
@@ -564,45 +1108,123 @@ function SplitDetail({
 function ContradictionDetail({
   suggestion,
   applying,
+  correctingId,
   onKeep,
+  onConfirm,
+  onCorrectToggle,
+  onCorrect,
+  onFlag,
 }: {
   suggestion: CleanupSuggestion;
   applying: boolean;
+  correctingId: string | null;
   onKeep: (keepId: string) => void;
+  onConfirm: (id: string) => void;
+  onCorrectToggle: (id: string | null) => void;
+  onCorrect: (id: string, feedback: string) => void;
+  onFlag: (id: string) => void;
 }) {
+  // Map conflicts to the full memory data
+  const memoryMap = new Map(
+    suggestion.memories?.map((m) => [m.id, m]) ?? [],
+  );
+
   return (
     <div className="mt-2">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {suggestion.conflicts?.map((conflict) => (
-          <div
-            key={conflict.id}
-            className="p-3 rounded border"
-            style={{
-              background: "var(--color-bg-soft)",
-              borderColor: "var(--color-border)",
-            }}
-          >
-            <p className="text-sm mb-2" style={{ color: "var(--color-text)" }}>
-              {conflict.statement}
-            </p>
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs font-mono"
-                style={{ color: "var(--color-text-muted)" }}
+        {suggestion.conflicts?.map((conflict) => {
+          const mem = memoryMap.get(conflict.id);
+          return (
+            <div key={conflict.id}>
+              <div
+                className="p-3 rounded border"
+                style={{
+                  background: "var(--color-bg-soft)",
+                  borderColor: "var(--color-border)",
+                }}
               >
-                {conflict.id.slice(0, 12)}...
-              </span>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => onKeep(conflict.id)}
-                disabled={applying}
-              >
-                Keep this
-              </Button>
+                <p
+                  className="text-sm mb-2"
+                  style={{ color: "var(--color-text)" }}
+                >
+                  {conflict.statement}
+                </p>
+                {mem && (
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <StatusBadge variant="accent">{mem.domain}</StatusBadge>
+                    {mem.entity_type && (
+                      <StatusBadge variant="neutral">
+                        {mem.entity_type}
+                      </StatusBadge>
+                    )}
+                    <span
+                      className="text-[10px] font-medium tabular-nums"
+                      style={{ color: confidenceColor(mem.confidence) }}
+                    >
+                      {formatConfidence(mem.confidence)}
+                    </span>
+                    <Link
+                      href={`/memory/${conflict.id}`}
+                      className="hover:opacity-80"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <ExternalLink size={11} />
+                    </Link>
+                  </div>
+                )}
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onKeep(conflict.id)}
+                    disabled={applying}
+                  >
+                    Keep this
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onConfirm(conflict.id)}
+                    disabled={applying}
+                  >
+                    <CheckCircle size={13} className="mr-1" />
+                    Confirm
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      onCorrectToggle(
+                        correctingId === conflict.id ? null : conflict.id,
+                      )
+                    }
+                    disabled={applying}
+                  >
+                    <Pencil size={13} className="mr-1" />
+                    Correct
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onFlag(conflict.id)}
+                    disabled={applying}
+                  >
+                    <AlertTriangle size={13} className="mr-1" />
+                    Flag
+                  </Button>
+                </div>
+              </div>
+              {correctingId === conflict.id && (
+                <InlineCorrection
+                  memoryId={conflict.id}
+                  onSubmit={onCorrect}
+                  onCancel={() => onCorrectToggle(null)}
+                  loading={applying}
+                />
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -611,18 +1233,29 @@ function ContradictionDetail({
 function PiiDetail({
   suggestion,
   applying,
+  correctingId,
   onScrub,
   onDelete,
+  onCorrectToggle,
+  onCorrect,
 }: {
   suggestion: CleanupSuggestion;
   applying: boolean;
-  onScrub: () => void;
-  onDelete: () => void;
+  correctingId: string | null;
+  onScrub: (id: string) => void;
+  onDelete: (id: string) => void;
+  onCorrectToggle: (id: string | null) => void;
+  onCorrect: (id: string, feedback: string) => void;
 }) {
+  const memory = suggestion.memories?.[0];
+  const memoryId = suggestion.memoryIds[0];
+
   return (
     <div className="mt-2">
+      {memory && <MemoryMiniCard memory={memory} />}
+
       {suggestion.piiTypes && suggestion.piiTypes.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-3">
+        <div className="flex flex-wrap gap-1.5 mt-2 mb-2">
           {suggestion.piiTypes.map((type) => (
             <span
               key={type}
@@ -637,35 +1270,105 @@ function PiiDetail({
           ))}
         </div>
       )}
+
+      <p
+        className="text-xs mb-3"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Redacting also scrubs sensitive data from event history.
+      </p>
+
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={onScrub} disabled={applying}>
+        <Button
+          size="sm"
+          onClick={() => onScrub(memoryId)}
+          disabled={applying}
+        >
+          <ShieldAlert size={14} className="mr-1" />
           {applying ? "Redacting..." : "Redact"}
         </Button>
-        <Button size="sm" variant="danger" onClick={onDelete} disabled={applying}>
-          {applying ? "..." : "Delete"}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() =>
+            onCorrectToggle(correctingId === memoryId ? null : memoryId)
+          }
+          disabled={applying}
+        >
+          <Pencil size={13} className="mr-1" />
+          Edit manually
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          onClick={() => onDelete(memoryId)}
+          disabled={applying}
+        >
+          <Trash2 size={13} className="mr-1" />
+          Delete
         </Button>
       </div>
+
+      {correctingId === memoryId && (
+        <InlineCorrection
+          memoryId={memoryId}
+          onSubmit={onCorrect}
+          onCancel={() => onCorrectToggle(null)}
+          loading={applying}
+        />
+      )}
     </div>
   );
 }
 
 function StaleDetail({
+  suggestion,
   applying,
+  correctingId,
   onConfirm,
+  onCorrectToggle,
+  onCorrect,
+  onFlag,
   onDelete,
 }: {
+  suggestion: CleanupSuggestion;
   applying: boolean;
-  onConfirm: () => void;
-  onDelete: () => void;
+  correctingId: string | null;
+  onConfirm: (id: string) => void;
+  onCorrectToggle: (id: string | null) => void;
+  onCorrect: (id: string, feedback: string) => void;
+  onFlag: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
+  const memory = suggestion.memories?.[0];
+  const memoryId = suggestion.memoryIds[0];
+
   return (
-    <div className="flex items-center gap-2 mt-2">
-      <Button size="sm" variant="secondary" onClick={onConfirm} disabled={applying}>
-        {applying ? "..." : "Confirm"}
-      </Button>
-      <Button size="sm" variant="danger" onClick={onDelete} disabled={applying}>
-        {applying ? "..." : "Delete"}
-      </Button>
+    <div className="mt-2">
+      {memory && <MemoryMiniCard memory={memory} />}
+
+      <MemoryActionBar
+        memoryId={memoryId}
+        showConfirm
+        showCorrect
+        showFlag
+        showDelete
+        loading={applying}
+        correctingId={correctingId}
+        onConfirm={onConfirm}
+        onCorrectToggle={onCorrectToggle}
+        onFlag={onFlag}
+        onDelete={onDelete}
+      />
+
+      {correctingId === memoryId && (
+        <InlineCorrection
+          memoryId={memoryId}
+          onSubmit={onCorrect}
+          onCancel={() => onCorrectToggle(null)}
+          loading={applying}
+        />
+      )}
     </div>
   );
 }

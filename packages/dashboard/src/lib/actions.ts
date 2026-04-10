@@ -46,7 +46,7 @@ export async function flagMemoryAction(id: string) {
   return result;
 }
 
-export async function correctMemoryAction(id: string, feedback: string) {
+export async function correctMemoryAction(id: string, feedback: string): Promise<{ newConfidence: number; content: string; detail: string | null } | null> {
   const userId = await getUserId();
   const memory = await getMemoryById(id, userId);
   if (!memory) return null;
@@ -56,7 +56,9 @@ export async function correctMemoryAction(id: string, feedback: string) {
     const result = await correctMemoryById(id, feedback, undefined, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
-    return result;
+    if (!result) return null;
+    const updated = await getMemoryById(id, userId);
+    return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
   }
 
   const prompt = `You are updating a stored memory based on user feedback. Return ONLY valid JSON with "content" and "detail" fields.
@@ -82,18 +84,23 @@ Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
       const result = await correctMemoryById(id, feedback, undefined, userId);
       revalidatePath("/");
       revalidatePath(`/memory/${id}`);
-      return result;
+      if (!result) return null;
+      const updated = await getMemoryById(id, userId);
+      return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
     }
 
     const result = await correctMemoryById(id, newContent, newDetail, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
-    return result;
+    if (!result) return null;
+    return { ...result, content: newContent, detail: newDetail ?? null };
   } catch {
     const result = await correctMemoryById(id, feedback, undefined, userId);
     revalidatePath("/");
     revalidatePath(`/memory/${id}`);
-    return result;
+    if (!result) return null;
+    const updated = await getMemoryById(id, userId);
+    return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
   }
 }
 
@@ -237,7 +244,7 @@ export async function applySplitSuggestionAction(
 
 export async function scrubMemoryAction(
   id: string,
-): Promise<{ scrubbed: boolean; error?: string }> {
+): Promise<{ scrubbed: boolean; memory?: { content: string; detail: string | null }; error?: string }> {
   const userId = await getUserId();
   const memory = await getMemoryById(id, userId);
   if (!memory) return { scrubbed: false, error: "Memory not found" };
@@ -255,7 +262,7 @@ export async function scrubMemoryAction(
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
   revalidatePath("/cleanup");
-  return { scrubbed: true };
+  return { scrubbed: true, memory: { content: redactedContent, detail: redactedDetail } };
 }
 
 export { type CleanupSuggestion } from "./cleanup";

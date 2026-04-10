@@ -45,7 +45,7 @@ export interface CleanupSuggestion {
   keepId?: string;
   parts?: { content: string; detail: string | null }[];
   conflicts?: { id: string; statement: string }[];
-  memories?: { id: string; content: string; detail: string | null; domain: string; confidence: number }[];
+  memories?: { id: string; content: string; detail: string | null; domain: string; confidence: number; entity_type?: string | null }[];
   piiTypes?: string[];
   expanded?: boolean;
 }
@@ -83,7 +83,7 @@ function findStale(memories: MemoryRow[]): CleanupSuggestion[] {
       memoryIds: [m.id],
       description: `${(m.confidence * 100).toFixed(0)}% confidence, never used, learned over 30 days ago`,
       proposedAction: "Confirm if still accurate, or delete",
-      memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence }],
+      memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence, entity_type: m.entity_type }],
       expanded: true,
     }));
 }
@@ -124,7 +124,7 @@ function findSplitCandidates(memories: MemoryRow[]): CleanupSuggestion[] {
         memoryIds: [m.id],
         description: `Covers ${Math.max(sentences.length, semicolons.length)} topics — may be better as separate memories`,
         proposedAction: "Click expand to see proposed split",
-        memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence }],
+        memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence, entity_type: m.entity_type }],
         expanded: false,
       });
     }
@@ -191,6 +191,7 @@ function findDuplicateClusters(memories: MemoryRow[]): CleanupSuggestion[] {
         detail: mem.detail,
         domain: mem.domain,
         confidence: mem.confidence,
+        entity_type: mem.entity_type,
       }));
 
     results.push({
@@ -256,8 +257,8 @@ function findContradictionCandidates(memories: MemoryRow[]): CleanupSuggestion[]
             description: `Same domain ("${memWords[i].mem.domain}"), similar topic but different assertions`,
             proposedAction: "Click expand to check if these conflict",
             memories: [
-              { id: memWords[i].mem.id, content: memWords[i].mem.content, detail: memWords[i].mem.detail, domain: memWords[i].mem.domain, confidence: memWords[i].mem.confidence },
-              { id: memWords[j].mem.id, content: memWords[j].mem.content, detail: memWords[j].mem.detail, domain: memWords[j].mem.domain, confidence: memWords[j].mem.confidence },
+              { id: memWords[i].mem.id, content: memWords[i].mem.content, detail: memWords[i].mem.detail, domain: memWords[i].mem.domain, confidence: memWords[i].mem.confidence, entity_type: memWords[i].mem.entity_type },
+              { id: memWords[j].mem.id, content: memWords[j].mem.content, detail: memWords[j].mem.detail, domain: memWords[j].mem.domain, confidence: memWords[j].mem.confidence, entity_type: memWords[j].mem.entity_type },
             ],
             expanded: false,
           });
@@ -282,7 +283,7 @@ function findPiiMemories(memories: MemoryRow[]): CleanupSuggestion[] {
       memoryIds: [m.id],
       description: `Contains sensitive data: ${typeLabels}`,
       proposedAction: "Redact the sensitive data or delete the memory",
-      memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence }],
+      memories: [{ id: m.id, content: m.content, detail: m.detail, domain: m.domain, confidence: m.confidence, entity_type: m.entity_type }],
       piiTypes: types,
       expanded: true,
     });
@@ -422,7 +423,7 @@ export async function scanForSuggestions(userId?: string | null): Promise<ScanRe
   // Splits with 3+ sentences may need review
   // Stale items are auto-handled by decay — only surface if severely stale
   const actionable = allSuggestions
-    .filter(s => s.type === "pii" || s.type === "contradiction" || s.type === "merge" || s.type === "split")
+    .filter(s => s.type === "pii" || s.type === "contradiction" || s.type === "merge" || s.type === "split" || s.type === "stale")
     .slice(0, 8); // Max 8 actionable items (PII gets priority via sort order)
 
   return { health, actionable, allSuggestions };

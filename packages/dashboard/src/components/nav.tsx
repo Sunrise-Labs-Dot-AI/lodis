@@ -9,7 +9,7 @@ import { UserButton } from "@clerk/nextjs";
 const links = [
   { href: "/", label: "Memories", icon: Brain },
   { href: "/archive", label: "Archive", icon: Archive },
-  { href: "/graph", label: "Graph", icon: Network },
+  // { href: "/graph", label: "Graph", icon: Network }, // Hidden until D3 errors are resolved
   { href: "/cleanup", label: "Cleanup", icon: Sparkles },
   { href: "/agents", label: "Agents", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },

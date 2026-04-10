@@ -113,6 +113,11 @@ function getClient(): Client {
 
 const isHosted = () => !!process.env.TURSO_DATABASE_URL;
 
+/** Strip libsql Row class methods to produce a plain object safe for client components */
+function plainObj<T>(row: unknown): T {
+  return JSON.parse(JSON.stringify(row)) as T;
+}
+
 // --- Decryption helpers ---
 
 // Cache for decrypt function
@@ -138,14 +143,16 @@ async function maybeDecrypt(text: string): Promise<string> {
 }
 
 async function decryptRow<T extends { content: string; detail: string | null; structured_data?: string | null }>(row: T): Promise<T> {
+  // Always produce a plain object (strips libsql Row class methods for RSC serialization)
+  const plain = plainObj<T>(row);
   const d = await getDecrypt();
-  if (!d) return row;
+  if (!d) return plain;
   return {
-    ...row,
-    content: d.fn(row.content, d.key),
-    detail: row.detail ? d.fn(row.detail, d.key) : null,
-    ...(row.structured_data !== undefined
-      ? { structured_data: row.structured_data ? d.fn(row.structured_data, d.key) : null }
+    ...plain,
+    content: d.fn(plain.content, d.key),
+    detail: plain.detail ? d.fn(plain.detail, d.key) : null,
+    ...(plain.structured_data !== undefined
+      ? { structured_data: plain.structured_data ? d.fn(plain.structured_data, d.key) : null }
       : {}),
   };
 }
@@ -289,7 +296,7 @@ export async function getMemoryEvents(memoryId: string, userId?: string | null):
     sql: `SELECT me.* FROM memory_events me JOIN memories m ON m.id = me.memory_id WHERE me.memory_id = ? AND m.deleted_at IS NULL${uf.clause.replace("user_id", "m.user_id")} ORDER BY me.timestamp DESC`,
     args: [memoryId, ...uf.args],
   });
-  return result.rows as unknown as EventRow[];
+  return result.rows.map(r => plainObj<EventRow>(r));
 }
 
 export async function getMemoryConnections(memoryId: string, userId?: string | null): Promise<{
@@ -313,7 +320,7 @@ export async function getMemoryConnections(memoryId: string, userId?: string | n
   });
 
   const decryptContent = async (r: unknown) => {
-    const row = r as ConnectionRow & { content: string };
+    const row = plainObj<ConnectionRow & { content: string }>(r);
     return { ...row, content: await maybeDecrypt(row.content) };
   };
 
@@ -330,7 +337,7 @@ export async function getDomains(userId?: string | null): Promise<{ domain: stri
     sql: `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL${uf.clause} GROUP BY domain ORDER BY count DESC`,
     args: [...uf.args],
   });
-  return result.rows as unknown as { domain: string; count: number }[];
+  return result.rows.map(r => plainObj<{ domain: string; count: number }>(r));
 }
 
 export async function getAgentPermissions(userId?: string | null): Promise<PermissionRow[]> {
@@ -340,7 +347,7 @@ export async function getAgentPermissions(userId?: string | null): Promise<Permi
     sql: `SELECT * FROM agent_permissions WHERE 1=1${uf.clause} ORDER BY agent_id, domain`,
     args: [...uf.args],
   });
-  return result.rows as unknown as PermissionRow[];
+  return result.rows.map(r => plainObj<PermissionRow>(r));
 }
 
 export async function getAgents(userId?: string | null): Promise<{ agent_id: string; agent_name: string }[]> {
@@ -351,7 +358,7 @@ export async function getAgents(userId?: string | null): Promise<{ agent_id: str
      FROM memories WHERE deleted_at IS NULL${uf.clause} ORDER BY agent_name`,
     args: [...uf.args],
   });
-  return result.rows as unknown as { agent_id: string; agent_name: string }[];
+  return result.rows.map(r => plainObj<{ agent_id: string; agent_name: string }>(r));
 }
 
 export async function getDbStats(userId?: string | null): Promise<{
@@ -421,7 +428,7 @@ export async function getGraphData(userId?: string | null): Promise<{ nodes: Gra
   });
 
   const nodes = await Promise.all(nodesResult.rows.map(async r => {
-    const row = r as unknown as GraphNode & { content: string };
+    const row = plainObj<GraphNode & { content: string }>(r);
     return { ...row, content: await maybeDecrypt(row.content) };
   }));
 
@@ -436,7 +443,7 @@ export async function getGraphData(userId?: string | null): Promise<{ nodes: Gra
       args: [...muf.args],
     });
     const fallbackNodes = await Promise.all(fallback.rows.map(async r => {
-      const row = r as unknown as GraphNode & { content: string };
+      const row = plainObj<GraphNode & { content: string }>(r);
       return { ...row, content: await maybeDecrypt(row.content) };
     }));
     return { nodes: fallbackNodes, edges: [] };
@@ -454,7 +461,7 @@ export async function getGraphData(userId?: string | null): Promise<{ nodes: Gra
     args: [...m1uf.args, ...m2uf.args],
   });
 
-  return { nodes, edges: edgesResult.rows as unknown as GraphEdge[] };
+  return { nodes, edges: edgesResult.rows.map(r => plainObj<GraphEdge>(r)) };
 }
 
 export async function getEntityGraphData(userId?: string | null): Promise<{
@@ -522,7 +529,7 @@ export async function getEntityGraphData(userId?: string | null): Promise<{
   });
 
   const uncategorized = await Promise.all(uncatResult.rows.map(async r => {
-    const row = r as unknown as GraphNode & { content: string };
+    const row = plainObj<GraphNode & { content: string }>(r);
     return { ...row, content: await maybeDecrypt(row.content) };
   }));
 
@@ -709,7 +716,7 @@ export async function splitMemoryById(
   });
   if (existing.rows.length === 0) return null;
 
-  const row = existing.rows[0] as unknown as MemoryRow;
+  const row = plainObj<MemoryRow>(existing.rows[0]);
   const timestamp = now();
   const newIds: string[] = [];
 
@@ -897,7 +904,7 @@ export async function getEntityProfile(entityName: string, userId?: string | nul
     sql: `SELECT * FROM memory_summaries WHERE entity_name = ?${uf.clause} LIMIT 1`,
     args: [entityName, ...uf.args],
   });
-  return (result.rows[0] as unknown as EntityProfileRow) ?? null;
+  return result.rows[0] ? plainObj<EntityProfileRow>(result.rows[0]) : null;
 }
 
 export async function getMemoriesByEntityName(entityName: string, userId?: string | null): Promise<MemoryRow[]> {
@@ -907,7 +914,7 @@ export async function getMemoriesByEntityName(entityName: string, userId?: strin
     sql: `SELECT * FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${uf.clause} ORDER BY confidence DESC, learned_at DESC`,
     args: [entityName, ...uf.args],
   });
-  return result.rows as unknown as MemoryRow[];
+  return result.rows.map(r => plainObj<MemoryRow>(r));
 }
 
 export async function getEntityConnections(entityName: string, userId?: string | null): Promise<{ name: string; type: string; relationship: string }[]> {
@@ -927,5 +934,5 @@ export async function getEntityConnections(entityName: string, userId?: string |
           WHERE m2.entity_name = ? COLLATE NOCASE AND m1.deleted_at IS NULL AND m2.deleted_at IS NULL${uf.clause}`,
     args: [entityName, ...uf.args, entityName, ...uf.args],
   });
-  return result.rows as unknown as { name: string; type: string; relationship: string }[];
+  return result.rows.map(r => plainObj<{ name: string; type: string; relationship: string }>(r));
 }

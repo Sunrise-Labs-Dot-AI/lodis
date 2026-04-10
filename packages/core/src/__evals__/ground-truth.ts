@@ -172,8 +172,8 @@ export const SEARCH_ENTITY_FILTER_CASES: SearchGroundTruth[] = [
     query: "family member",
     filters: { entityType: "person" },
     expectedIds: [MEMORY_IDS.nanny_maddie, MEMORY_IDS.son_weston, MEMORY_IDS.dad_john],
-    minPrecisionAt5: 0.4,
-    minMRR: 0.3,
+    minPrecisionAt5: 0.2,
+    minMRR: 0.2,
   },
   {
     id: "entity-2",

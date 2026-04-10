@@ -16,6 +16,7 @@ import {
   expandSplitSuggestion,
   expandContradictionSuggestion,
   type CleanupSuggestion,
+  type ScanResult,
 } from "./cleanup";
 import { revalidatePath } from "next/cache";
 import { resolveLLMProvider, parseLLMJson, validateCorrection, validateSplit } from "@engrams/core";
@@ -152,13 +153,12 @@ export async function clearAllMemoriesAction() {
 
 // --- Cleanup actions ---
 
-/** Scan: algorithmic only, zero API cost. Returns suggestions instantly. */
+/** Scan: algorithmic only, zero API cost. Returns health score + prioritized suggestions. */
 export async function scanCleanupAction(): Promise<
-  { suggestions: CleanupSuggestion[] } | { error: string }
+  ScanResult | { error: string }
 > {
   try {
-    const suggestions = await scanForSuggestions();
-    return { suggestions };
+    return await scanForSuggestions();
   } catch (e) {
     console.error("[engrams] Cleanup scan failed:", e);
     return { error: "Cleanup scan failed" };
@@ -222,6 +222,28 @@ export async function applySplitSuggestionAction(
   revalidatePath("/");
   revalidatePath("/cleanup");
   return result;
+}
+
+export async function scrubMemoryAction(
+  id: string,
+): Promise<{ scrubbed: boolean; error?: string }> {
+  const memory = await getMemoryById(id);
+  if (!memory) return { scrubbed: false, error: "Memory not found" };
+
+  const { redactSensitiveData } = await import("@engrams/core");
+  const { redacted: redactedContent } = redactSensitiveData(memory.content);
+  const redactedDetail = memory.detail
+    ? redactSensitiveData(memory.detail).redacted
+    : null;
+
+  const { scrubMemoryById } = await import("./db");
+  const success = await scrubMemoryById(id, redactedContent, redactedDetail, redactSensitiveData);
+  if (!success) return { scrubbed: false, error: "Memory not found" };
+
+  revalidatePath("/");
+  revalidatePath(`/memory/${id}`);
+  revalidatePath("/cleanup");
+  return { scrubbed: true };
 }
 
 export { type CleanupSuggestion } from "./cleanup";

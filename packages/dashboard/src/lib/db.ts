@@ -585,6 +585,53 @@ export async function correctMemoryById(id: string, content: string, detail?: st
   return { newConfidence };
 }
 
+export async function scrubMemoryById(id: string, redactedContent: string, redactedDetail: string | null, redactFn: (text: string) => { redacted: string }): Promise<boolean> {
+  const client = getClient();
+  const existing = await client.execute({
+    sql: `SELECT content, detail FROM memories WHERE id = ? AND deleted_at IS NULL`,
+    args: [id],
+  });
+  if (existing.rows.length === 0) return false;
+
+  const row = existing.rows[0];
+  const timestamp = now();
+  await client.execute({
+    sql: `UPDATE memories SET content = ?, detail = ?, has_pii_flag = 0 WHERE id = ?`,
+    args: [redactedContent, redactedDetail, id],
+  });
+  await client.execute({
+    sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_name, old_value, new_value, timestamp) VALUES (?, ?, 'corrected', 'dashboard:scrub', ?, ?, ?)`,
+    args: [generateId(), id, JSON.stringify({ content: "[REDACTED]" }), JSON.stringify({ content: redactedContent, detail: redactedDetail }), timestamp],
+  });
+
+  // Scrub PII from event history for this memory
+  const events = await client.execute({
+    sql: `SELECT id, old_value, new_value FROM memory_events WHERE memory_id = ?`,
+    args: [id],
+  });
+  for (const evt of events.rows) {
+    let changed = false;
+    let oldVal = evt.old_value as string | null;
+    let newVal = evt.new_value as string | null;
+    if (oldVal) {
+      const scrubbed = redactFn(oldVal).redacted;
+      if (scrubbed !== oldVal) { oldVal = scrubbed; changed = true; }
+    }
+    if (newVal) {
+      const scrubbed = redactFn(newVal).redacted;
+      if (scrubbed !== newVal) { newVal = scrubbed; changed = true; }
+    }
+    if (changed) {
+      await client.execute({
+        sql: `UPDATE memory_events SET old_value = ?, new_value = ? WHERE id = ?`,
+        args: [oldVal, newVal, evt.id as string],
+      });
+    }
+  }
+
+  return true;
+}
+
 export async function splitMemoryById(
   id: string,
   parts: { content: string; detail?: string | null }[],

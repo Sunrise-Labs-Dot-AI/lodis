@@ -26,6 +26,7 @@ import {
   redactSensitiveData,
   extractEntity,
   applyConfidenceDecay,
+  applyTemporalDecay,
   deriveKeys,
   loadCredentials,
   saveCredentials,
@@ -68,6 +69,7 @@ export async function startServer() {
     const nowMs = Date.now();
     if (nowMs - lastDecayRun > DECAY_THROTTLE_MS) {
       await applyConfidenceDecay(client);
+      await applyTemporalDecay(client);
       lastDecayRun = nowMs;
     }
   }
@@ -230,9 +232,10 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   // --- Tools ---
 
-  // Similarity threshold for dedup (cosine similarity, 0-1). 0.7 catches near-duplicates
-  // and contradictions but won't fire on merely topically related memories.
+  // Similarity threshold for dedup (cosine similarity, 0-1). 0.7 catches near-duplicates.
   const WRITE_SIMILARITY_THRESHOLD = 0.7;
+  // Above this threshold + same entity: auto-merge without asking the agent
+  const AUTO_MERGE_THRESHOLD = 0.85;
 
   server.tool(
     "memory_write",
@@ -425,12 +428,51 @@ Organize memories by life domain: general, work, health, finance, relationships,
                     content: row.content as string,
                     detail: row.detail as string | null,
                     confidence: row.confidence as number,
+                    entityName: row.entity_name as string | null,
                     similarity: Math.round((1 - m.distance) * 100) / 100,
                   };
                 })
               )).filter(Boolean);
 
               if (matchedMemories.length > 0) {
+                // Auto-merge: if top match is very similar and same entity, update silently
+                const topMatch = matchedMemories[0]!;
+                const sameEntity = topMatch.entityName && params.entityName
+                  && topMatch.entityName.toLowerCase() === params.entityName.toLowerCase();
+                const veryHighSimilarity = topMatch.similarity >= AUTO_MERGE_THRESHOLD;
+
+                if (veryHighSimilarity || (topMatch.similarity >= WRITE_SIMILARITY_THRESHOLD && sameEntity)) {
+                  // Auto-update: keep existing memory, boost confidence, append any new detail
+                  const newConfidence = Math.min(topMatch.confidence + 0.02, 0.99);
+                  const mergedDetail = params.detail
+                    ? (topMatch.detail ? topMatch.detail + "\n" + params.detail : params.detail)
+                    : topMatch.detail;
+
+                  await client.execute({
+                    sql: `UPDATE memories SET confidence = ?, detail = ?, used_count = used_count + 1, last_used_at = ? WHERE id = ?`,
+                    args: [newConfidence, mergedDetail, now(), topMatch.id],
+                  });
+
+                  // Re-embed with updated content
+                  if (vecAvailable) {
+                    try {
+                      const mergedText = topMatch.content + (mergedDetail ? " " + mergedDetail : "");
+                      const mergedEmb = await generateEmbedding(mergedText);
+                      await insertEmbedding(client, topMatch.id, mergedEmb);
+                    } catch { /* non-fatal */ }
+                  }
+
+                  await bumpLastModified(client);
+
+                  return textResult({
+                    status: "auto_merged",
+                    existingId: topMatch.id,
+                    similarity: topMatch.similarity,
+                    newConfidence,
+                    message: `Automatically merged with existing memory (${(topMatch.similarity * 100).toFixed(0)}% similar). Confidence boosted to ${newConfidence.toFixed(2)}.`,
+                  });
+                }
+
                 return textResult({
                   status: "similar_found",
                   proposed: {
@@ -659,10 +701,11 @@ Organize memories by life domain: general, work, health, finance, relationships,
         })();
       }
 
-      // Proactive split detection
+      // Auto-split: if content has 3+ sentences, ask LLM if topics are independent
+      // If yes, delete original and insert parts as separate memories
       const fullText = params.content + (params.detail ? " " + params.detail : "");
       const sentences = fullText.split(/(?<=[.!?])\s+/).filter((s) => s.length > 10);
-      let splitSuggestion: { should_split: boolean; parts?: { content: string; detail?: string }[] } | null = null;
+      let autoSplitIds: string[] | null = null;
 
       if (sentences.length >= 3 && extractionProvider) {
         try {
@@ -676,10 +719,84 @@ Respond with ONLY valid JSON:
 - If it SHOULD be split: {"should_split": true, "parts": [{"content": "...", "detail": "..."}, ...]}
 
 Each part should have a concise "content" (one sentence) and optional "detail". Do not split if the content is a single coherent topic.`;
-          const text = await extractionProvider.complete(splitPrompt, { maxTokens: 512, json: true });
-          splitSuggestion = parseLLMJson(text);
+          const text = await extractionProvider.complete(splitPrompt, { maxTokens: 1024, json: true });
+          const splitResult = parseLLMJson<{ should_split: boolean; parts?: { content: string; detail?: string | null }[] }>(text);
+
+          if (splitResult?.should_split && splitResult.parts && splitResult.parts.length >= 2) {
+            // Auto-split: soft-delete original and insert parts
+            await client.execute({
+              sql: `UPDATE memories SET deleted_at = ? WHERE id = ?`,
+              args: [now(), id],
+            });
+
+            autoSplitIds = [];
+            for (const part of splitResult.parts) {
+              const partId = generateId();
+              const partConfidence = getInitialConfidence(params.sourceType as SourceType);
+              await db.insert(memories).values({
+                id: partId,
+                content: part.content,
+                detail: part.detail ?? null,
+                domain: params.domain ?? "general",
+                sourceAgentId: params.sourceAgentId,
+                sourceAgentName: params.sourceAgentName,
+                sourceType: params.sourceType,
+                sourceDescription: params.sourceDescription ?? null,
+                confidence: partConfidence,
+                learnedAt: now(),
+                hasPiiFlag: detectSensitiveData(part.content + (part.detail ?? "")).length > 0 ? 1 : 0,
+              }).run();
+
+              // Generate embedding for each part
+              if (vecAvailable) {
+                try {
+                  const partEmb = await generateEmbedding(part.content + (part.detail ? " " + part.detail : ""));
+                  await insertEmbedding(client, partId, partEmb);
+                } catch { /* non-fatal */ }
+              }
+
+              // Background entity extraction for each part
+              if (extractionProvider) {
+                const capturedPartId = partId;
+                const capturedContent = part.content;
+                const capturedDetail = part.detail ?? null;
+                (async () => {
+                  try {
+                    const existingNames2 = (await client.execute({
+                      sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL`,
+                      args: [],
+                    })).rows as unknown as { entity_name: string }[];
+
+                    const ext = await extractEntity(extractionProvider!, capturedContent, capturedDetail, existingNames2.map(r => r.entity_name));
+                    const val = validateExtraction(ext);
+                    if (!val.valid) return;
+
+                    await client.execute({
+                      sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ? WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL`,
+                      args: [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), capturedPartId],
+                    });
+
+                    for (const conn of ext.suggested_connections) {
+                      const target = (await client.execute({
+                        sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`,
+                        args: [conn.target_entity_name],
+                      })).rows[0] as { id: string } | undefined;
+                      if (target && target.id !== capturedPartId) {
+                        await client.execute({
+                          sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship) VALUES (?, ?, ?)`,
+                          args: [capturedPartId, target.id, conn.relationship],
+                        });
+                      }
+                    }
+                  } catch { /* non-fatal */ }
+                })();
+              }
+
+              autoSplitIds.push(partId);
+            }
+          }
         } catch {
-          // LLM call failed — skip split suggestion
+          // LLM call failed — keep original memory as-is
         }
       }
 
@@ -690,6 +807,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         sql: "SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL",
         args: [],
       })).rows[0] as unknown as { count: number }).count;
+
+      // If auto-split happened, return the split result
+      if (autoSplitIds) {
+        const result: Record<string, unknown> = {
+          status: "auto_split",
+          originalId: id,
+          splitIds: autoSplitIds,
+          splitCount: autoSplitIds.length,
+          domain: params.domain ?? "general",
+          message: `Memory was automatically split into ${autoSplitIds.length} independent memories for better searchability.`,
+        };
+        return textResult(result);
+      }
 
       const result: Record<string, unknown> = {
         id,
@@ -707,11 +837,6 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
       if (hasPii) {
         result._pii_detected = [...new Set(piiMatches.map((m) => m.type))];
-      }
-      if (splitSuggestion?.should_split && splitSuggestion.parts) {
-        result.split_suggested = true;
-        result.suggested_parts = splitSuggestion.parts;
-        result.message = "This memory appears to contain multiple distinct topics. Consider calling memory_split to separate them.";
       }
 
       return textResult(result);
@@ -1330,11 +1455,35 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             memoryId: params.id,
             eventType: "corrected",
             agentName: "engrams:scrub",
-            oldValue: JSON.stringify({ content: existing.content, detail: existing.detail }),
+            oldValue: JSON.stringify({ content: "[REDACTED]" }),
             newValue: JSON.stringify({ content: redactedContent, detail: redactedDetail }),
             timestamp: now(),
           })
           .run();
+
+        // Scrub PII from event history for this memory
+        const events = await db.select().from(memoryEvents)
+          .where(eq(memoryEvents.memoryId, params.id))
+          .all();
+        for (const evt of events) {
+          let changed = false;
+          let oldVal = evt.oldValue;
+          let newVal = evt.newValue;
+          if (oldVal) {
+            const scrubbed = redactSensitiveData(oldVal).redacted;
+            if (scrubbed !== oldVal) { oldVal = scrubbed; changed = true; }
+          }
+          if (newVal) {
+            const scrubbed = redactSensitiveData(newVal).redacted;
+            if (scrubbed !== newVal) { newVal = scrubbed; changed = true; }
+          }
+          if (changed) {
+            await db.update(memoryEvents)
+              .set({ oldValue: oldVal, newValue: newVal })
+              .where(eq(memoryEvents.id, evt.id))
+              .run();
+          }
+        }
 
         await bumpLastModified(client);
 
@@ -1551,13 +1700,15 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       let classified = 0;
       let errors = 0;
+      const errorDetails: string[] = [];
 
       for (const mem of untyped) {
         try {
-          const extraction = await extractEntity(extractionProvider!, mem.content, mem.detail, nameList);
+          const extraction = await extractEntity(extractionProvider!, mem.content, mem.detail as string | null, nameList);
 
           const validation = validateExtraction(extraction);
           if (!validation.valid) {
+            errorDetails.push(`${(mem.id as string).slice(0, 12)}: validation failed: ${validation.error}`);
             errors++;
             continue;
           }
@@ -1589,7 +1740,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
           classified++;
           if (extraction.entity_name) nameList.push(extraction.entity_name);
-        } catch {
+        } catch (classifyErr) {
+          errorDetails.push(`${(mem.id as string).slice(0, 12)}: ${classifyErr}`);
           errors++;
         }
 
@@ -1611,6 +1763,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         classified,
         errors,
         remaining: Math.max(0, remainingRow.c),
+        ...(errorDetails.length > 0 && { errorDetails }),
       });
     },
   );

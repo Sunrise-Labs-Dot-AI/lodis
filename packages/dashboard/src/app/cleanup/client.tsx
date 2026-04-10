@@ -11,11 +11,13 @@ import {
   applySplitSuggestionAction,
   deleteMemoryAction,
   confirmMemoryAction,
+  scrubMemoryAction,
 } from "../../lib/actions";
-import type { CleanupSuggestion } from "../../lib/cleanup";
-import { Search, CheckCircle, Loader2, ChevronDown } from "lucide-react";
+import type { CleanupSuggestion, HealthScore } from "../../lib/cleanup";
+import { Search, CheckCircle, Loader2, ChevronDown, Shield, Zap } from "lucide-react";
 
 const TYPE_LABELS: Record<CleanupSuggestion["type"], string> = {
+  pii: "Sensitive Data",
   merge: "Duplicate",
   split: "Needs Split",
   contradiction: "Possible Conflict",
@@ -27,6 +29,7 @@ const TYPE_BADGE_VARIANT: Record<
   CleanupSuggestion["type"],
   "accent" | "warning" | "danger" | "neutral" | "success"
 > = {
+  pii: "danger",
   merge: "accent",
   split: "warning",
   contradiction: "danger",
@@ -34,8 +37,82 @@ const TYPE_BADGE_VARIANT: Record<
   update: "success",
 };
 
+function healthColor(score: number): string {
+  if (score >= 80) return "var(--color-success)";
+  if (score >= 60) return "var(--color-accent)";
+  if (score >= 40) return "var(--color-warning)";
+  return "var(--color-danger)";
+}
+
+function HealthScoreCard({ health }: { health: HealthScore }) {
+  return (
+    <Card className="p-6 mb-6">
+      <div className="flex items-start gap-6">
+        {/* Score circle */}
+        <div className="flex-shrink-0 flex flex-col items-center">
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center border-4"
+            style={{ borderColor: healthColor(health.overall) }}
+          >
+            <span
+              className="text-2xl font-bold"
+              style={{ color: healthColor(health.overall) }}
+            >
+              {health.overall}
+            </span>
+          </div>
+          <span className="text-xs mt-1.5" style={{ color: "var(--color-text-muted)" }}>
+            {health.totalMemories} memories
+          </span>
+        </div>
+
+        {/* Factor bars */}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-medium mb-3" style={{ color: "var(--color-text)" }}>
+            Memory Health
+          </h3>
+          <div className="flex flex-col gap-2">
+            {health.factors.map((f) => (
+              <div key={f.name}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{f.name}</span>
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>{f.detail}</span>
+                </div>
+                <div
+                  className="h-1.5 rounded-full overflow-hidden"
+                  style={{ background: "var(--color-bg-soft)" }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${f.score}%`,
+                      background: healthColor(f.score),
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Auto-handled summary */}
+      {(health.autoHandled.temporalDegraded > 0 || health.autoHandled.staleDegrading > 0) && (
+        <div
+          className="mt-4 pt-4 flex items-start gap-2 text-xs"
+          style={{ borderTop: "1px solid var(--color-border)", color: "var(--color-text-muted)" }}
+        >
+          <Zap size={14} className="flex-shrink-0 mt-0.5" style={{ color: "var(--color-accent)" }} />
+          <span>{health.autoHandled.description}</span>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function CleanupClient() {
-  const [suggestions, setSuggestions] = useState<CleanupSuggestion[]>([]);
+  const [actionable, setActionable] = useState<CleanupSuggestion[]>([]);
+  const [health, setHealth] = useState<HealthScore | null>(null);
   const [scanning, setScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +127,8 @@ export function CleanupClient() {
       if ("error" in result) {
         setError(result.error);
       } else {
-        setSuggestions(result.suggestions);
+        setHealth(result.health);
+        setActionable(result.actionable);
       }
       setHasScanned(true);
     } catch {
@@ -61,15 +139,15 @@ export function CleanupClient() {
   }
 
   function dismiss(index: number) {
-    setSuggestions((prev) => prev.filter((_, i) => i !== index));
+    setActionable((prev) => prev.filter((_, i) => i !== index));
   }
 
   function updateSuggestion(index: number, updated: CleanupSuggestion) {
-    setSuggestions((prev) => prev.map((s, i) => (i === index ? updated : s)));
+    setActionable((prev) => prev.map((s, i) => (i === index ? updated : s)));
   }
 
   async function handleExpand(index: number) {
-    const suggestion = suggestions[index];
+    const suggestion = actionable[index];
     if (suggestion.expanded) return;
     setExpandingIndex(index);
     try {
@@ -131,6 +209,20 @@ export function CleanupClient() {
     }
   }
 
+  async function applyScrub(suggestion: CleanupSuggestion, index: number) {
+    setApplyingIndex(index);
+    try {
+      const result = await scrubMemoryAction(suggestion.memoryIds[0]);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        dismiss(index);
+      }
+    } finally {
+      setApplyingIndex(null);
+    }
+  }
+
   async function applyContradictionKeep(
     suggestion: CleanupSuggestion,
     keepId: string,
@@ -156,38 +248,28 @@ export function CleanupClient() {
             className="text-2xl font-bold"
             style={{ color: "var(--color-text)" }}
           >
-            Cleanup
+            Memory Health
           </h1>
           <p
             className="text-sm mt-1"
             style={{ color: "var(--color-text-secondary)" }}
           >
-            Scan for duplicates, conflicts, and stale entries
+            Monitor quality and resolve issues that need your input
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {hasScanned && suggestions.length > 0 && (
-            <span
-              className="text-sm font-medium"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {suggestions.length} suggestion{suggestions.length !== 1 && "s"}
-            </span>
+        <Button onClick={handleScan} disabled={scanning}>
+          {scanning ? (
+            <>
+              <Loader2 size={16} className="animate-spin mr-1.5" />
+              Scanning...
+            </>
+          ) : (
+            <>
+              <Search size={16} className="mr-1.5" />
+              Scan
+            </>
           )}
-          <Button onClick={handleScan} disabled={scanning}>
-            {scanning ? (
-              <>
-                <Loader2 size={16} className="animate-spin mr-1.5" />
-                Scanning...
-              </>
-            ) : (
-              <>
-                <Search size={16} className="mr-1.5" />
-                Scan
-              </>
-            )}
-          </Button>
-        </div>
+        </Button>
       </div>
 
       {error && (
@@ -196,9 +278,13 @@ export function CleanupClient() {
         </Card>
       )}
 
-      {hasScanned && !scanning && suggestions.length === 0 && !error && (
+      {/* Health score */}
+      {health && <HealthScoreCard health={health} />}
+
+      {/* All clear state */}
+      {hasScanned && !scanning && health && actionable.length === 0 && !error && (
         <Card className="p-8 text-center">
-          <CheckCircle
+          <Shield
             size={40}
             className="mx-auto mb-3"
             style={{ color: "var(--color-success)" }}
@@ -207,37 +293,49 @@ export function CleanupClient() {
             className="text-lg font-medium"
             style={{ color: "var(--color-text)" }}
           >
-            No suggestions
+            Nothing needs your attention
           </p>
           <p
             className="text-sm mt-1"
             style={{ color: "var(--color-text-muted)" }}
           >
-            Your memory store looks clean!
+            The system is handling routine maintenance automatically.
           </p>
         </Card>
       )}
 
-      <div className="flex flex-col gap-4">
-        {suggestions.map((suggestion, index) => (
-          <SuggestionCard
-            key={`${suggestion.type}-${suggestion.memoryIds.join("-")}-${index}`}
-            suggestion={suggestion}
-            index={index}
-            expanding={expandingIndex === index}
-            applying={applyingIndex === index}
-            onDismiss={() => dismiss(index)}
-            onExpand={() => handleExpand(index)}
-            onApplyMerge={() => applyMerge(suggestion, index)}
-            onApplySplit={() => applySplit(suggestion, index)}
-            onStaleConfirm={() => applyStaleConfirm(suggestion, index)}
-            onDelete={() => applyDelete(suggestion, index)}
-            onContradictionKeep={(keepId: string) =>
-              applyContradictionKeep(suggestion, keepId, index)
-            }
-          />
-        ))}
-      </div>
+      {/* Actionable items */}
+      {actionable.length > 0 && (
+        <div className="mb-4">
+          <h2
+            className="text-sm font-medium mb-3"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Needs your input ({actionable.length})
+          </h2>
+          <div className="flex flex-col gap-4">
+            {actionable.map((suggestion, index) => (
+              <SuggestionCard
+                key={`${suggestion.type}-${suggestion.memoryIds.join("-")}-${index}`}
+                suggestion={suggestion}
+                index={index}
+                expanding={expandingIndex === index}
+                applying={applyingIndex === index}
+                onDismiss={() => dismiss(index)}
+                onExpand={() => handleExpand(index)}
+                onApplyMerge={() => applyMerge(suggestion, index)}
+                onApplySplit={() => applySplit(suggestion, index)}
+                onStaleConfirm={() => applyStaleConfirm(suggestion, index)}
+                onDelete={() => applyDelete(suggestion, index)}
+                onScrub={() => applyScrub(suggestion, index)}
+                onContradictionKeep={(keepId: string) =>
+                  applyContradictionKeep(suggestion, keepId, index)
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -253,6 +351,7 @@ function SuggestionCard({
   onApplySplit,
   onStaleConfirm,
   onDelete,
+  onScrub,
   onContradictionKeep,
 }: {
   suggestion: CleanupSuggestion;
@@ -265,6 +364,7 @@ function SuggestionCard({
   onApplySplit: () => void;
   onStaleConfirm: () => void;
   onDelete: () => void;
+  onScrub: () => void;
   onContradictionKeep: (keepId: string) => void;
 }) {
   const needsExpand = !suggestion.expanded;
@@ -293,7 +393,6 @@ function SuggestionCard({
         </Button>
       </div>
 
-      {/* Show memory previews */}
       {suggestion.memories && suggestion.memories.length > 0 && (
         <div className="flex flex-col gap-1.5 mb-3">
           {suggestion.memories.map((m) => (
@@ -317,7 +416,6 @@ function SuggestionCard({
         </div>
       )}
 
-      {/* Expand button for suggestions that need LLM */}
       {needsExpand && (
         <Button
           size="sm"
@@ -339,7 +437,6 @@ function SuggestionCard({
         </Button>
       )}
 
-      {/* Expanded action UIs */}
       {suggestion.expanded && suggestion.type === "merge" && (
         <MergeDetail
           suggestion={suggestion}
@@ -361,15 +458,20 @@ function SuggestionCard({
           onKeep={onContradictionKeep}
         />
       )}
+      {suggestion.expanded && suggestion.type === "pii" && (
+        <PiiDetail
+          suggestion={suggestion}
+          applying={applying}
+          onScrub={onScrub}
+          onDelete={onDelete}
+        />
+      )}
       {suggestion.expanded && suggestion.type === "stale" && (
         <StaleDetail
           applying={applying}
           onConfirm={onStaleConfirm}
           onDelete={onDelete}
         />
-      )}
-      {suggestion.expanded && suggestion.type === "update" && (
-        <UpdateDetail applying={applying} onDelete={onDelete} />
       )}
     </Card>
   );
@@ -506,6 +608,47 @@ function ContradictionDetail({
   );
 }
 
+function PiiDetail({
+  suggestion,
+  applying,
+  onScrub,
+  onDelete,
+}: {
+  suggestion: CleanupSuggestion;
+  applying: boolean;
+  onScrub: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="mt-2">
+      {suggestion.piiTypes && suggestion.piiTypes.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {suggestion.piiTypes.map((type) => (
+            <span
+              key={type}
+              className="text-xs px-2 py-0.5 rounded"
+              style={{
+                background: "var(--color-danger-bg)",
+                color: "var(--color-danger)",
+              }}
+            >
+              {type.replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={onScrub} disabled={applying}>
+          {applying ? "Redacting..." : "Redact"}
+        </Button>
+        <Button size="sm" variant="danger" onClick={onDelete} disabled={applying}>
+          {applying ? "..." : "Delete"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function StaleDetail({
   applying,
   onConfirm,
@@ -520,22 +663,6 @@ function StaleDetail({
       <Button size="sm" variant="secondary" onClick={onConfirm} disabled={applying}>
         {applying ? "..." : "Confirm"}
       </Button>
-      <Button size="sm" variant="danger" onClick={onDelete} disabled={applying}>
-        {applying ? "..." : "Delete"}
-      </Button>
-    </div>
-  );
-}
-
-function UpdateDetail({
-  applying,
-  onDelete,
-}: {
-  applying: boolean;
-  onDelete: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2 mt-2">
       <Button size="sm" variant="danger" onClick={onDelete} disabled={applying}>
         {applying ? "..." : "Delete"}
       </Button>

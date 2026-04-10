@@ -23,9 +23,12 @@ export async function extractEntity(
     ? `\n\nExisting entity names in the system (prefer matching these over creating new ones):\n${existingEntityNames.slice(0, 50).map((n) => `- ${n}`).join("\n")}`
     : "";
 
+  // Truncate very long inputs to avoid token budget issues
+  const truncatedDetail = detail && detail.length > 1000 ? detail.slice(0, 1000) + "..." : detail;
+
   const prompt = `Classify this memory and extract structured data.
 
-Memory: ${content}${detail ? `\nDetail: ${detail}` : ""}${existingNamesHint}
+Memory: ${content}${truncatedDetail ? `\nDetail: ${truncatedDetail}` : ""}${existingNamesHint}
 
 Respond with JSON only:
 {
@@ -59,6 +62,28 @@ For structured_data, include relevant fields:
 - goal: what, timeline, status (active/achieved/abandoned)
 - fact: category`;
 
-  const text = await provider.complete(prompt, { maxTokens: 1024, json: true });
-  return parseLLMJson<ExtractionResult>(text);
+  const text = await provider.complete(prompt, { maxTokens: 2048, json: true });
+  let result = parseLLMJson<ExtractionResult>(text);
+
+  // Some models wrap the response in an array — unwrap it
+  if (Array.isArray(result)) {
+    result = result[0] as ExtractionResult;
+  }
+
+  // Normalize: some models return entityType instead of entity_type
+  const raw = result as unknown as Record<string, unknown>;
+  if (!raw.entity_type && raw.entityType) {
+    result.entity_type = raw.entityType as EntityType;
+  }
+  if (!raw.entity_name && raw.entityName !== undefined) {
+    result.entity_name = raw.entityName as string | null;
+  }
+  if (!raw.structured_data && raw.structuredData) {
+    result.structured_data = raw.structuredData as Record<string, unknown>;
+  }
+  if (!raw.suggested_connections && raw.suggestedConnections) {
+    result.suggested_connections = raw.suggestedConnections as ExtractionResult["suggested_connections"];
+  }
+
+  return result;
 }

@@ -62,10 +62,10 @@ export async function triggerMigration(
 
   try {
     if (direction === "to_cloud") {
-      const result = await migrateToCloud(localClient, cloudClient, keys.contentKey);
+      const result = await migrateToCloud(localClient, cloudClient, keys.encryptionKey);
       return { success: true, migrated: result.migrated };
     } else {
-      const result = await migrateToLocal(cloudClient, localClient, keys.contentKey);
+      const result = await migrateToLocal(cloudClient, localClient, keys.encryptionKey);
       return { success: true, migrated: result.migrated };
     }
   } catch (err) {

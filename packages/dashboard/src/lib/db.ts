@@ -187,7 +187,7 @@ export async function getMemories(opts?: {
         sql = applyFilters(sql, args, opts);
         sql = applySort(sql, opts?.sortBy);
         const result = await client.execute({ sql, args });
-        return result.rows.map(r => decryptRow(r as unknown as MemoryRow));
+        return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
       }
     } catch {
       // FTS not available (e.g., hosted mode) — fall back to LIKE
@@ -198,7 +198,7 @@ export async function getMemories(opts?: {
     sql = applyFilters(sql, args, opts);
     sql = applySort(sql, opts?.sortBy);
     const result = await client.execute({ sql, args });
-    return result.rows.map(r => decryptRow(r as unknown as MemoryRow));
+    return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
   }
 
   let sql = `SELECT * FROM memories WHERE deleted_at IS NULL`;
@@ -206,7 +206,7 @@ export async function getMemories(opts?: {
   sql = applyFilters(sql, args, opts);
   sql = applySort(sql, opts?.sortBy);
   const result = await client.execute({ sql, args });
-  return result.rows.map(r => decryptRow(r as unknown as MemoryRow));
+  return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
 }
 
 function applyFilters(sql: string, args: (string | number | null)[], opts?: {
@@ -263,7 +263,7 @@ export async function getMemoryById(id: string): Promise<MemoryRow | undefined> 
     args: [id],
   });
   if (result.rows.length === 0) return undefined;
-  return decryptRow(result.rows[0] as unknown as MemoryRow);
+  return await decryptRow(result.rows[0] as unknown as MemoryRow);
 }
 
 export async function getMemoryEvents(memoryId: string): Promise<EventRow[]> {
@@ -293,14 +293,14 @@ export async function getMemoryConnections(memoryId: string): Promise<{
     args: [memoryId],
   });
 
-  const decryptContent = (r: unknown) => {
+  const decryptContent = async (r: unknown) => {
     const row = r as ConnectionRow & { content: string };
-    return { ...row, content: maybeDecrypt(row.content) };
+    return { ...row, content: await maybeDecrypt(row.content) };
   };
 
   return {
-    outgoing: outgoing.rows.map(decryptContent),
-    incoming: incoming.rows.map(decryptContent),
+    outgoing: await Promise.all(outgoing.rows.map(decryptContent)),
+    incoming: await Promise.all(incoming.rows.map(decryptContent)),
   };
 }
 
@@ -387,10 +387,10 @@ export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: Graph
     LIMIT 200
   `);
 
-  const nodes = nodesResult.rows.map(r => {
+  const nodes = await Promise.all(nodesResult.rows.map(async r => {
     const row = r as unknown as GraphNode & { content: string };
-    return { ...row, content: maybeDecrypt(row.content) };
-  });
+    return { ...row, content: await maybeDecrypt(row.content) };
+  }));
 
   // If no connected nodes, show top memories by confidence
   if (nodes.length === 0) {
@@ -399,10 +399,10 @@ export async function getGraphData(): Promise<{ nodes: GraphNode[]; edges: Graph
       FROM memories m WHERE m.deleted_at IS NULL
       ORDER BY m.confidence DESC LIMIT 50
     `);
-    const fallbackNodes = fallback.rows.map(r => {
+    const fallbackNodes = await Promise.all(fallback.rows.map(async r => {
       const row = r as unknown as GraphNode & { content: string };
-      return { ...row, content: maybeDecrypt(row.content) };
-    });
+      return { ...row, content: await maybeDecrypt(row.content) };
+    }));
     return { nodes: fallbackNodes, edges: [] };
   }
 
@@ -468,10 +468,10 @@ export async function getEntityGraphData(): Promise<{
     ORDER BY confidence DESC LIMIT 30
   `);
 
-  const uncategorized = uncatResult.rows.map(r => {
+  const uncategorized = await Promise.all(uncatResult.rows.map(async r => {
     const row = r as unknown as GraphNode & { content: string };
-    return { ...row, content: maybeDecrypt(row.content) };
-  });
+    return { ...row, content: await maybeDecrypt(row.content) };
+  }));
 
   return { entities, edges, uncategorized };
 }
@@ -497,7 +497,7 @@ export async function getAllMemoriesForExport(): Promise<MemoryRow[]> {
   const result = await client.execute(
     `SELECT * FROM memories WHERE deleted_at IS NULL ORDER BY domain, confidence DESC`,
   );
-  return result.rows.map(r => decryptRow(r as unknown as MemoryRow));
+  return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
 }
 
 // --- Write operations ---

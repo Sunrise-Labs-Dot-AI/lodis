@@ -811,6 +811,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       content: z.string().optional().describe("New content"),
       detail: z.string().optional().describe("New detail"),
       domain: z.string().optional().describe("New domain"),
+      entityType: z.string().optional().describe("Entity type (person, organization, place, project, preference, event, goal, fact)"),
+      entityName: z.string().optional().describe("Canonical entity name"),
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
     },
@@ -834,6 +836,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       if (params.content !== undefined) updates.content = params.content;
       if (params.detail !== undefined) updates.detail = params.detail;
       if (params.domain !== undefined) updates.domain = params.domain;
+      if (params.entityType !== undefined) updates.entityType = params.entityType;
+      if (params.entityName !== undefined) updates.entityName = params.entityName;
 
       if (Object.keys(updates).length === 0) {
         return textResult({ error: "No fields to update" });

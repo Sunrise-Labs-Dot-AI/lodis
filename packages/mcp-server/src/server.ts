@@ -2794,14 +2794,140 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
   server.tool(
     "memory_migrate",
-    "Migrate memories between local and cloud storage. Use 'to_cloud' to upload local memories to Turso (encrypted), or 'to_local' to download cloud memories locally (decrypted).",
+    "Migrate memories between local and cloud storage. Use 'to_cloud' with cloud_api_url and cloud_api_token to upload to the hosted Engrams service, or provide cloud_url/cloud_token for direct Turso access. Use 'to_local' to download cloud memories locally.",
     {
       direction: z.enum(["to_cloud", "to_local"]).describe("Migration direction"),
-      cloud_url: z.string().optional().describe("Turso database URL (required for to_cloud if not already configured)"),
-      cloud_token: z.string().optional().describe("Turso auth token (required for to_cloud if not already configured)"),
-      encryption_key: z.string().optional().describe("Base64 encryption key (generated if not provided for to_cloud)"),
+      cloud_api_url: z.string().optional().describe("Engrams cloud API URL (e.g. https://app.getengrams.com/api/migrate). Preferred for hosted service."),
+      cloud_api_token: z.string().optional().describe("OAuth access token or PAT for the hosted Engrams service"),
+      cloud_url: z.string().optional().describe("Turso database URL (for direct DB access — advanced)"),
+      cloud_token: z.string().optional().describe("Turso auth token (for direct DB access — advanced)"),
+      encryption_key: z.string().optional().describe("Base64 encryption key (only needed for direct Turso mode)"),
     },
     async (params, _extra) => {
+      // --- API-based migration (preferred for hosted service) ---
+      if (params.cloud_api_url) {
+        if (!params.cloud_api_token) {
+          return textResult({
+            error: "cloud_api_token is required when using cloud_api_url. Provide an OAuth access token or PAT from app.getengrams.com/settings.",
+          });
+        }
+
+        try {
+          // Read all local data
+          const allMemories = await client.execute({
+            sql: "SELECT * FROM memories WHERE deleted_at IS NULL",
+            args: [],
+          });
+          const allConnections = await client.execute({
+            sql: "SELECT * FROM memory_connections",
+            args: [],
+          });
+          const allEvents = await client.execute({
+            sql: "SELECT * FROM memory_events",
+            args: [],
+          });
+          const allPermissions = await client.execute({
+            sql: "SELECT * FROM agent_permissions",
+            args: [],
+          });
+
+          const BATCH_SIZE = 100;
+          let totalMigrated = 0;
+          let totalConnections = 0;
+          let totalEvents = 0;
+          let totalPermissions = 0;
+
+          // Convert Row objects to plain objects
+          const memRows = allMemories.rows.map(r => ({ ...r }));
+          const connRows = allConnections.rows.map(r => ({ ...r }));
+          const evtRows = allEvents.rows.map(r => ({ ...r }));
+          const permRows = allPermissions.rows.map(r => ({ ...r }));
+
+          // POST memories in batches of 100
+          for (let i = 0; i < memRows.length; i += BATCH_SIZE) {
+            const batch = memRows.slice(i, i + BATCH_SIZE);
+            // Send connections/events/permissions with the first batch
+            const payload: Record<string, unknown> = { memories: batch };
+            if (i === 0) {
+              if (connRows.length > 0) payload.connections = connRows;
+              if (evtRows.length > 0) payload.events = evtRows;
+              if (permRows.length > 0) payload.permissions = permRows;
+            }
+
+            const res = await fetch(params.cloud_api_url!, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${params.cloud_api_token}`,
+              },
+              body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) {
+              const errBody = await res.text();
+              return textResult({
+                error: `Migration API error (${res.status}): ${errBody}`,
+                migrated_so_far: totalMigrated,
+              });
+            }
+
+            const result = await res.json() as {
+              migrated: number;
+              connections_migrated: number;
+              events_migrated: number;
+              permissions_migrated: number;
+            };
+            totalMigrated += result.migrated;
+            totalConnections += result.connections_migrated;
+            totalEvents += result.events_migrated;
+            totalPermissions += result.permissions_migrated;
+
+            process.stderr.write(`[engrams] migrate: batch ${Math.floor(i / BATCH_SIZE) + 1} — ${totalMigrated}/${memRows.length} memories\n`);
+          }
+
+          // Handle empty memories case (still send connections/events/permissions)
+          if (memRows.length === 0 && (connRows.length > 0 || evtRows.length > 0 || permRows.length > 0)) {
+            const res = await fetch(params.cloud_api_url!, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${params.cloud_api_token}`,
+              },
+              body: JSON.stringify({
+                memories: [],
+                connections: connRows,
+                events: evtRows,
+                permissions: permRows,
+              }),
+            });
+            if (res.ok) {
+              const result = await res.json() as {
+                connections_migrated: number;
+                events_migrated: number;
+                permissions_migrated: number;
+              };
+              totalConnections = result.connections_migrated;
+              totalEvents = result.events_migrated;
+              totalPermissions = result.permissions_migrated;
+            }
+          }
+
+          return textResult({
+            status: "migrated_to_cloud",
+            memories_migrated: totalMigrated,
+            connections_migrated: totalConnections,
+            events_migrated: totalEvents,
+            permissions_migrated: totalPermissions,
+            message: `Successfully migrated ${totalMigrated} memories to the cloud.`,
+          });
+        } catch (err) {
+          return textResult({
+            error: `Migration failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+          });
+        }
+      }
+
+      // --- Direct Turso migration (legacy / advanced) ---
       const creds = loadCredentials();
 
       const cloudUrl = params.cloud_url ?? creds?.tursoUrl;
@@ -2809,7 +2935,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
       if (!cloudUrl || !cloudToken) {
         return textResult({
-          error: "Cloud URL and auth token are required. Provide cloud_url and cloud_token, or configure them in ~/.engrams/credentials.json.",
+          error: "Provide cloud_api_url + cloud_api_token for hosted migration, or cloud_url + cloud_token for direct Turso access.",
         });
       }
 
@@ -2818,12 +2944,10 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       if (params.encryption_key) {
         encryptionKey = Buffer.from(params.encryption_key, "base64");
       } else if (creds?.salt) {
-        // Use a default passphrase with stored salt for convenience
         const salt = Buffer.from(creds.salt, "base64");
         const keys = deriveKeys("engrams-default", salt);
         encryptionKey = keys.encryptionKey;
       } else {
-        // Generate a random key
         encryptionKey = randomBytes(32);
       }
 

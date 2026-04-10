@@ -1,3 +1,4 @@
+import { Header } from "@/components/header";
 import { Hero } from "@/components/hero";
 import { Problem } from "@/components/problem";
 import { Solution } from "@/components/solution";
@@ -9,6 +10,7 @@ import { Footer } from "@/components/footer";
 export default function Home() {
   return (
     <>
+      <Header />
       <Hero />
       <div className="section-divider" />
       <Problem />

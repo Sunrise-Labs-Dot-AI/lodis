@@ -28,4 +28,10 @@ export default defineConfig([
     splitting: false,
     noExternal: ["@engrams/core"],
   },
+  {
+    entry: ["src/serverless.ts"],
+    format: ["esm"],
+    splitting: false,
+    noExternal: ["@engrams/core"],
+  },
 ]);

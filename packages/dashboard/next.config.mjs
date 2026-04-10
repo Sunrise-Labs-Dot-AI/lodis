@@ -6,7 +6,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   outputFileTracingRoot: resolve(__dirname, "../.."),
-  serverExternalPackages: ["onnxruntime-node", "@huggingface/transformers"],
+  serverExternalPackages: [
+    "onnxruntime-node",
+    "@huggingface/transformers",
+    "better-sqlite3",
+    "sqlite-vec",
+  ],
 
   env: {
     NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/sign-in",

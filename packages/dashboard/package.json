@@ -20,6 +20,7 @@
     "@anthropic-ai/sdk": "^0.86.1",
     "@clerk/nextjs": "^7.0.12",
     "@engrams/core": "workspace:*",
+    "engrams": "workspace:*",
     "@libsql/client": "^0.17.2",
     "clsx": "^2.1.0",
     "d3": "^7.9.0",

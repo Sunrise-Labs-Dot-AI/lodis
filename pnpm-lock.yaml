@@ -67,6 +67,9 @@ importers:
       d3:
         specifier: ^7.9.0
         version: 7.9.0
+      engrams:
+        specifier: workspace:*
+        version: link:../mcp-server
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.5)

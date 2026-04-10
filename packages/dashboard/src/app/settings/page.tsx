@@ -8,6 +8,7 @@ import { SettingsActions } from "./actions";
 import { getLLMStatus } from "./llm-actions";
 import { LLMProviderForm } from "@/components/llm-provider-form";
 import { ApiTokens } from "@/components/api-tokens";
+import { ConnectClaude } from "@/components/connect-claude";
 import { listApiTokens } from "./token-actions";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,9 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-semibold">Settings</h1>
+
+      {/* Connect to Claude (hosted only) */}
+      {isHosted && <ConnectClaude baseUrl={process.env.NEXT_PUBLIC_APP_URL || "https://app.getengrams.com"} />}
 
       {/* Account & Tier (hosted only) */}
       {isHosted && userId && (

@@ -15,6 +15,9 @@
     },
     "./cloud": {
       "import": "./dist/cloud.js"
+    },
+    "./serverless": {
+      "import": "./dist/serverless.js"
     }
   },
   "files": [

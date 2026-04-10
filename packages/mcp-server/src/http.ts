@@ -82,7 +82,7 @@ export function startHttpApi(
         const existing = await db
           .select()
           .from(memories)
-          .where(and(eq(memories.id, id), isNull(memories.deletedAt)))
+          .where(and(eq(memories.id, id), isNull(memories.deletedAt), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .get();
         if (!existing) return json(res, { error: "Not found" }, 404);
 
@@ -94,7 +94,7 @@ export function startHttpApi(
             confirmedCount: existing.confirmedCount + 1,
             confirmedAt: timestamp,
           })
-          .where(eq(memories.id, id))
+          .where(and(eq(memories.id, id), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .run();
 
         await db.insert(memoryEvents)
@@ -123,7 +123,7 @@ export function startHttpApi(
         const existing = await db
           .select()
           .from(memories)
-          .where(and(eq(memories.id, id), isNull(memories.deletedAt)))
+          .where(and(eq(memories.id, id), isNull(memories.deletedAt), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .get();
         if (!existing) return json(res, { error: "Not found" }, 404);
 
@@ -135,7 +135,7 @@ export function startHttpApi(
             confidence: newConfidence,
             correctedCount: existing.correctedCount + 1,
           })
-          .where(eq(memories.id, id))
+          .where(and(eq(memories.id, id), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .run();
 
         await db.insert(memoryEvents)
@@ -160,7 +160,7 @@ export function startHttpApi(
         const existing = await db
           .select()
           .from(memories)
-          .where(and(eq(memories.id, id), isNull(memories.deletedAt)))
+          .where(and(eq(memories.id, id), isNull(memories.deletedAt), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .get();
         if (!existing) return json(res, { error: "Not found" }, 404);
 
@@ -171,7 +171,7 @@ export function startHttpApi(
             confidence: newConfidence,
             mistakeCount: existing.mistakeCount + 1,
           })
-          .where(eq(memories.id, id))
+          .where(and(eq(memories.id, id), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .run();
 
         await db.insert(memoryEvents)
@@ -196,7 +196,7 @@ export function startHttpApi(
         const timestamp = now();
         await db.update(memories)
           .set({ deletedAt: timestamp })
-          .where(eq(memories.id, id))
+          .where(and(eq(memories.id, id), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined))
           .run();
 
         await db.insert(memoryEvents)
@@ -226,7 +226,7 @@ export function startHttpApi(
         if (Object.keys(updates).length === 0)
           return json(res, { error: "No fields" }, 400);
 
-        await db.update(memories).set(updates).where(eq(memories.id, id)).run();
+        await db.update(memories).set(updates).where(and(eq(memories.id, id), effectiveUserId ? eq(memories.userId, effectiveUserId) : undefined)).run();
         return json(res, { id, updated: true });
       }
 
@@ -245,6 +245,7 @@ export function startHttpApi(
             and(
               eq(agentPermissions.agentId, agentId),
               eq(agentPermissions.domain, domain),
+              effectiveUserId ? eq(agentPermissions.userId, effectiveUserId) : undefined,
             ),
           )
           .get();
@@ -256,12 +257,13 @@ export function startHttpApi(
               and(
                 eq(agentPermissions.agentId, agentId),
                 eq(agentPermissions.domain, domain),
+                effectiveUserId ? eq(agentPermissions.userId, effectiveUserId) : undefined,
               ),
             )
             .run();
         } else {
           await db.insert(agentPermissions)
-            .values({ agentId, domain, canRead, canWrite })
+            .values({ agentId, domain, canRead, canWrite, userId: effectiveUserId ?? null })
             .run();
         }
 
@@ -280,6 +282,7 @@ export function startHttpApi(
             and(
               eq(agentPermissions.agentId, agentId),
               eq(agentPermissions.domain, domain),
+              effectiveUserId ? eq(agentPermissions.userId, effectiveUserId) : undefined,
             ),
           )
           .run();

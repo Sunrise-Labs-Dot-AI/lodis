@@ -431,8 +431,8 @@ export async function scanForSuggestions(userId?: string | null): Promise<ScanRe
 
 // --- LLM expansion (on-demand, per suggestion) ---
 
-import { parseLLMJson } from "@engrams/core";
-import type { LLMProvider } from "@engrams/core";
+import { parseLLMJson } from "@engrams/core/llm-utils";
+import type { LLMProvider } from "@engrams/core/llm";
 
 export async function expandMergeSuggestion(
   suggestion: CleanupSuggestion,

@@ -119,8 +119,8 @@ let _encryptionKey: Buffer | null = null;
 async function getDecrypt(): Promise<{ fn: (text: string, key: Buffer) => string; key: Buffer } | null> {
   if (!isHosted() || !process.env.ENGRAMS_ENCRYPTION_KEY) return null;
   if (!_decryptFn) {
-    const core = await import("@engrams/core");
-    _decryptFn = core.decrypt;
+    const { decrypt } = await import("@engrams/core/crypto");
+    _decryptFn = decrypt;
   }
   if (!_encryptionKey) {
     _encryptionKey = Buffer.from(process.env.ENGRAMS_ENCRYPTION_KEY, "base64");

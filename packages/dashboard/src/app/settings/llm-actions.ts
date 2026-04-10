@@ -56,12 +56,12 @@ function serverDecrypt(encoded: string): string | null {
 // --- Local config helpers (lazy import to avoid fs errors on Vercel) ---
 
 async function loadLocalConfig() {
-  const { loadConfig } = await import("@engrams/core");
+  const { loadConfig } = await import("@engrams/core/credentials");
   return loadConfig();
 }
 
 async function saveLocalConfig(config: Awaited<ReturnType<typeof loadLocalConfig>>) {
-  const { saveConfig } = await import("@engrams/core");
+  const { saveConfig } = await import("@engrams/core/credentials");
   saveConfig(config);
 }
 
@@ -77,7 +77,7 @@ export async function saveLLMConfig(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Test the connection first
-    const { createLLMProvider } = await import("@engrams/core");
+    const { createLLMProvider } = await import("@engrams/core/llm");
     const llm = createLLMProvider(
       {
         provider: provider as "anthropic" | "openai" | "ollama",
@@ -220,7 +220,7 @@ export async function resolveHostedLLMProvider(
   userId: string,
   task: "extraction" | "analysis" = "extraction",
 ) {
-  const { createLLMProvider } = await import("@engrams/core");
+  const { createLLMProvider } = await import("@engrams/core/llm");
   const client = getClient();
 
   const result = await client.execute({

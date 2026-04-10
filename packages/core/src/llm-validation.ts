@@ -1,5 +1,3 @@
-import { generateEmbedding } from "./embeddings.js";
-
 export interface ValidationResult {
   valid: boolean;
   error?: string;
@@ -156,6 +154,7 @@ export async function checkSemanticPreservation(
   parts: string[],
 ): Promise<{ preserved: boolean; similarities: number[]; avgSimilarity: number }> {
   try {
+    const { generateEmbedding } = await import("./embeddings.js");
     const originalEmb = await generateEmbedding(originalContent);
     if (!originalEmb) return { preserved: true, similarities: [], avgSimilarity: 1.0 };
 

@@ -93,6 +93,8 @@ Features:
 | `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
 | `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
 | `memory_scrub` | Detect and redact PII |
+| `memory_configure` | Configure LLM provider and model settings |
+| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ## Architecture
 

@@ -2,8 +2,15 @@
   "name": "@engrams/landing",
   "version": "0.1.0",
   "private": true,
+  "description": "Landing page for getengrams.com",
   "license": "MIT",
   "author": "Sunrise Labs <hello@sunrise-labs.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunrise-Labs-Dot-AI/engrams.git",
+    "directory": "packages/landing"
+  },
+  "homepage": "https://getengrams.com",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

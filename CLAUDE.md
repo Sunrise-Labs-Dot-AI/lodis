@@ -15,18 +15,20 @@ An open-source MCP server + localhost web dashboard that gives AI agents persist
 
 ## Current State (April 2026)
 
-V1 and V2 are feature complete. 18 MCP tools, 75 tests, hybrid search, entity types, knowledge graph, confidence decay, dedup, PII detection, and a full Next.js dashboard.
+V1 and V2 are feature complete. 20 MCP tools, 92 tests, hybrid search, entity types, knowledge graph, confidence decay, dedup, PII detection, and a full Next.js dashboard.
 
-**In progress (handoffs dispatched):**
+**Shipped:**
 - Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
 - Model abstraction + BYOK (`LLMProvider` interface, per-task routing, `memory_configure`)
 - Permission enforcement (checkPermission on all read/write paths, interactive dashboard agents page)
 - Landing page (`packages/landing`) + dashboard restyle (Pensieve design system)
 - Copyright cleanup (MIT license + metadata on all packages)
+- Pro tier: Clerk auth, BYOK config, API tokens, terms + privacy pages
+- npm published (`engrams` on npm)
+- Cloud migration tool (`memory_migrate`)
 
 **Deferred (handoffs written, not dispatched):**
-- Pro tier: encryption (AES-256-GCM + scrypt), cloud sync (Turso), Clerk auth, hosted dashboard, Vercel deployment (`handoff-pro-tier.md`)
-- npm publish (account created, needs to run publish)
+- Pro tier remaining: encryption (AES-256-GCM + scrypt), cloud sync (Turso), hosted dashboard Vercel deployment (`handoff-pro-tier.md`)
 
 ## Tech Stack
 
@@ -38,7 +40,7 @@ V1 and V2 are feature complete. 18 MCP tools, 75 tests, hybrid search, entity ty
 | LLM | Abstracted `LLMProvider` interface — Anthropic (lazy import), OpenAI, Ollama (raw fetch). Per-task model routing: extraction (cheap) vs analysis (capable) |
 | Dashboard | Next.js 15 (App Router), React 19, Tailwind v4, custom UI components |
 | Landing | Next.js 15, Tailwind v4, Pensieve design system |
-| Testing | Vitest (75 tests across 7 files) |
+| Testing | Vitest (92 tests across 9 files) |
 | Build | pnpm workspaces + Turborepo |
 | Distribution | npm (`engrams` package), npx one-liner install |
 
@@ -74,12 +76,14 @@ All runtime data lives in `~/.engrams/`:
 
 ## Database Schema
 
-Six tables + two virtual tables:
+Eight tables + two virtual tables:
 
 - **memories** — core storage (id, content, detail, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at)
 - **memory_connections** — relationship graph (source_memory_id, target_memory_id, relationship, updated_at)
 - **memory_events** — audit trail (id, memory_id, event_type, agent_id, agent_name, old_value, new_value, timestamp)
 - **agent_permissions** — per-agent read/write by domain (agent_id, domain, can_read, can_write)
+- **user_settings** — BYOK provider config, tier, encrypted API keys (user_id, provider, tier, encrypted_key, settings, updated_at)
+- **api_tokens** — API token management (id, user_id, name, token_hash, scopes, expires_at, revoked_at, created_at)
 - **engrams_meta** — key-value metadata (key, value) — tracks last_modified for cache invalidation
 - **memory_fts** — FTS5 virtual table over content, detail, entity_name, source_agent_name
 - **memory_embeddings** — sqlite-vec virtual table (float[384])
@@ -95,7 +99,7 @@ Memories are classified into 8 entity types: `person`, `organization`, `place`, 
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about).
 
-## MCP Tools (18)
+## MCP Tools (20)
 
 | Tool | Description |
 |------|-------------|
@@ -115,8 +119,10 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 | `memory_list_domains` | List all domains with counts |
 | `memory_set_permissions` | Per-agent read/write access control by domain |
 | `memory_scrub` | Detect and redact PII patterns |
+| `memory_configure` | Configure LLM provider and model settings |
 | `memory_onboard` | Guided onboarding: scan connected tools → informed interview → seed |
 | `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
+| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ## Confidence Engine
 
@@ -125,7 +131,7 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 
 ### Updates
 - confirm: confidence → 0.99
-- correct: confidence → min(max(existing, 0.85), 0.99)
+- correct: confidence → 0.50 (reset to neutral on correction)
 - mistake: max(confidence - 0.15, 0.10)
 - used: min(confidence + 0.02, 0.99)
 - decay: -0.01 per 30 days since last activity, min 0.10, throttled to once per hour on read paths
@@ -159,7 +165,7 @@ Output validation: `validateExtraction()`, `validateSplit()`, `validateCorrectio
 
 ## Dashboard
 
-Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (no HTTP API layer). Server actions handle mutations.
+Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mode) or Turso (hosted mode). Server actions handle mutations. Clerk auth in hosted mode (conditional on `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`).
 
 ### Routes
 | Route | Purpose |
@@ -167,9 +173,11 @@ Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (no HTTP 
 | `/` | Memory browser (search, filter by domain/entity/confidence, inline edit) |
 | `/memory/[id]` | Detail view (provenance, connections, events, edit) |
 | `/agents` | Agent permission management |
-| `/cleanup` | Dedup, merge, split, contradiction detection + LLM expansion |
+| `/cleanup` | Health score, dedup, merge, split, contradiction, PII detection + inline actions |
 | `/graph` | Knowledge graph visualization (D3 force-directed, entity clusters) |
 | `/settings` | DB stats, export, LLM provider config, sync config (Pro) |
+| `/sign-in`, `/sign-up` | Clerk authentication (hosted mode only) |
+| `/api/export` | Memory export API |
 
 ## Design System (Pensieve)
 

@@ -2,8 +2,15 @@
   "name": "@engrams/dashboard",
   "version": "0.1.0",
   "private": true,
+  "description": "Web dashboard for browsing, searching, and managing Engrams memories",
   "license": "MIT",
   "author": "Sunrise Labs <hello@sunrise-labs.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunrise-Labs-Dot-AI/engrams.git",
+    "directory": "packages/dashboard"
+  },
+  "homepage": "https://getengrams.com",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

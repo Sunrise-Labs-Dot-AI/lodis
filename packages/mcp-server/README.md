@@ -63,7 +63,7 @@ Engrams provides 20 MCP tools:
 | `memory_configure` | Configure LLM provider for entity extraction and corrections |
 | `memory_onboard` | Get a personalized onboarding plan to seed your memory |
 | `memory_import` | Import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
-| `memory_sync` | Sync memories with cloud (Pro tier) |
+| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ### Key features
 

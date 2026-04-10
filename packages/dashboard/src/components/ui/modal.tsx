@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 
 interface ModalProps {
@@ -13,6 +14,11 @@ interface ModalProps {
 
 export function Modal({ open, onClose, title, size = "md", children }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -23,9 +29,9 @@ export function Modal({ open, onClose, title, size = "md", children }: ModalProp
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(10,14,26,0.8)] backdrop-blur-sm"
@@ -42,6 +48,7 @@ export function Modal({ open, onClose, title, size = "md", children }: ModalProp
         <h2 className="text-lg font-semibold mb-4">{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

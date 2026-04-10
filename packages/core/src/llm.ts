@@ -102,13 +102,34 @@ class AnthropicProvider implements LLMProvider {
 
   async complete(prompt: string, options?: LLMOptions): Promise<string> {
     const client = await this.getClient();
+
+    // Build system prompt — enforce JSON output when requested
+    let system = options?.system ?? "";
+    if (options?.json) {
+      const jsonDirective = "You MUST respond with ONLY valid JSON. No markdown fences, no preamble, no explanation — just the JSON object.";
+      system = system ? `${system}\n\n${jsonDirective}` : jsonDirective;
+    }
+
+    // Prefill assistant with "{" to force JSON start when json mode is requested
+    const messages: { role: "user" | "assistant"; content: string }[] = [
+      { role: "user", content: prompt },
+    ];
+    if (options?.json) {
+      messages.push({ role: "assistant", content: "{" });
+    }
+
     const response = await client.messages.create({
       model: this.model,
       max_tokens: options?.maxTokens ?? 1024,
-      ...(options?.system ? { system: options.system } : {}),
-      messages: [{ role: "user", content: prompt }],
+      ...(system ? { system } : {}),
+      messages,
     });
     const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+    // If we prefilled with "{", prepend it to the response
+    if (options?.json) {
+      return "{" + text;
+    }
     return text;
   }
 }

@@ -51,19 +51,14 @@ export async function flagMemoryAction(id: string) {
   return result;
 }
 
-export async function correctMemoryAction(id: string, feedback: string): Promise<{ newConfidence: number; content: string; detail: string | null } | null> {
+export async function correctMemoryAction(id: string, feedback: string): Promise<{ newConfidence: number; content: string; detail: string | null } | { error: string } | null> {
   const userId = await getUserId();
   const memory = await getMemoryById(id, userId);
   if (!memory) return null;
 
   const provider = resolveLLMProvider("analysis");
   if (!provider) {
-    const result = await correctMemoryById(id, feedback, undefined, userId);
-    revalidatePath("/");
-    revalidatePath(`/memory/${id}`);
-    if (!result) return null;
-    const updated = await getMemoryById(id, userId);
-    return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
+    return { error: "No LLM provider configured. Semantic correction requires an LLM. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
   }
 
   const prompt = `You are updating a stored memory based on user feedback. Return ONLY valid JSON with "content" and "detail" fields.
@@ -86,12 +81,7 @@ Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
 
     const validation = validateCorrection(memory.content, newContent, feedback);
     if (!validation.valid) {
-      const result = await correctMemoryById(id, feedback, undefined, userId);
-      revalidatePath("/");
-      revalidatePath(`/memory/${id}`);
-      if (!result) return null;
-      const updated = await getMemoryById(id, userId);
-      return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
+      return { error: `LLM correction failed validation: ${validation.error ?? "unknown reason"}. Please try rephrasing your correction.` };
     }
 
     const result = await correctMemoryById(id, newContent, newDetail, userId);
@@ -99,13 +89,8 @@ Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
     revalidatePath(`/memory/${id}`);
     if (!result) return null;
     return { ...result, content: newContent, detail: newDetail ?? null };
-  } catch {
-    const result = await correctMemoryById(id, feedback, undefined, userId);
-    revalidatePath("/");
-    revalidatePath(`/memory/${id}`);
-    if (!result) return null;
-    const updated = await getMemoryById(id, userId);
-    return { ...result, content: updated?.content ?? feedback, detail: updated?.detail ?? null };
+  } catch (e) {
+    return { error: `Correction failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

@@ -75,6 +75,14 @@ export async function startServer(options?: { transport?: Transport; dbUrl?: str
   const dbConfig = options?.dbUrl ? { url: options.dbUrl, authToken: options.dbAuthToken } : undefined;
   const { db, client, vecAvailable } = await createDatabase(dbConfig);
 
+  // Migrate plaintext API keys to encrypted form on startup
+  {
+    const cfg = loadConfig();
+    if (cfg.llm?.apiKey && !cfg.llm.apiKey.startsWith("enc:")) {
+      saveConfig(cfg); // loadConfig returns decrypted, saveConfig encrypts
+    }
+  }
+
   // Throttled confidence decay — runs at most once per hour
   let lastDecayRun = 0;
   const DECAY_THROTTLE_MS = 60 * 60 * 1000;

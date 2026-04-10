@@ -611,7 +611,9 @@ export function CleanupClient() {
     setActionLoading(memoryId);
     try {
       const result = await correctMemoryAction(memoryId, feedback);
-      if (result) {
+      if (result && "error" in result) {
+        setError(result.error);
+      } else if (result) {
         setCorrectingId(null);
         resolve(index, "Corrected", {
           content: result.content,

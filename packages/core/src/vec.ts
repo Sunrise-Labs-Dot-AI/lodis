@@ -91,7 +91,7 @@ export async function searchVec(
   limit = 20,
 ): Promise<{ memory_id: string; distance: number }[]> {
   const result = await client.execute({
-    sql: `SELECT m.id as memory_id, vt.distance
+    sql: `SELECT m.id as memory_id
           FROM vector_top_k('memories_vec_idx', vector(?), ?) AS vt
           JOIN memories m ON m.rowid = vt.id
           WHERE m.deleted_at IS NULL`,
@@ -100,6 +100,6 @@ export async function searchVec(
 
   return result.rows.map((row) => ({
     memory_id: row.memory_id as string,
-    distance: row.distance as number,
+    distance: 0, // libsql vector_top_k does not return distance
   }));
 }

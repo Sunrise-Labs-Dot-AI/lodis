@@ -4,8 +4,6 @@ import { getDbStats } from "@/lib/db";
 import { formatBytes } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { SettingsActions } from "./actions";
-import { SyncSettings } from "./sync-settings";
-import { getSyncStatus } from "./sync-actions";
 import { getLLMStatus } from "./llm-actions";
 import { LLMProviderForm } from "@/components/llm-provider-form";
 
@@ -16,7 +14,6 @@ export default async function SettingsPage() {
   const dbPath = process.env.TURSO_DATABASE_URL
     ? "(hosted — Turso)"
     : resolve(homedir(), ".engrams", "engrams.db");
-  const syncStatus = await getSyncStatus();
   const llmStatus = await getLLMStatus();
 
   return (
@@ -54,8 +51,6 @@ export default async function SettingsPage() {
         </p>
         <LLMProviderForm initialStatus={llmStatus} />
       </Card>
-
-      <SyncSettings syncStatus={syncStatus} />
 
       <SettingsActions />
     </div>

@@ -35,7 +35,12 @@ export async function handleMcpRequest(
   });
 
   // Start MCP server with this transport (registers all 18 tools + resources)
-  await startServer({ transport });
+  // Pass Turso credentials so createDatabase() doesn't try to create a local file
+  await startServer({
+    transport,
+    dbUrl: process.env.TURSO_DATABASE_URL,
+    dbAuthToken: process.env.TURSO_AUTH_TOKEN,
+  });
 
   // Build AuthInfo so tool handlers can extract userId
   const authInfo: AuthInfo = {

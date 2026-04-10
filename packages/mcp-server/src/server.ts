@@ -60,13 +60,14 @@ function getUserId(extra: Record<string, unknown>): string | null {
   return authInfo?.extra?.userId ?? null;
 }
 
-export async function startServer(options?: { transport?: Transport }) {
+export async function startServer(options?: { transport?: Transport; dbUrl?: string; dbAuthToken?: string }) {
   const server = new McpServer({
     name: "engrams",
     version: "0.1.0",
   });
 
-  const { db, client, vecAvailable } = await createDatabase();
+  const dbConfig = options?.dbUrl ? { url: options.dbUrl, authToken: options.dbAuthToken } : undefined;
+  const { db, client, vecAvailable } = await createDatabase(dbConfig);
 
   // Throttled confidence decay — runs at most once per hour
   let lastDecayRun = 0;

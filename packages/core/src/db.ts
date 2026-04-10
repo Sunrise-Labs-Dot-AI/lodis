@@ -207,11 +207,16 @@ export async function createDatabase(config?: {
   url?: string;
   authToken?: string;
 }): Promise<{ db: EngramsDatabase; client: Client; vecAvailable: boolean }> {
-  const dir = resolve(homedir(), ".engrams");
-  mkdirSync(dir, { recursive: true });
-
   const isLocal = !config?.url || config.url.startsWith("file:");
-  const url = config?.url ?? "file:" + resolve(dir, "engrams.db");
+
+  let url: string;
+  if (isLocal) {
+    const dir = resolve(homedir(), ".engrams");
+    mkdirSync(dir, { recursive: true });
+    url = config?.url ?? "file:" + resolve(dir, "engrams.db");
+  } else {
+    url = config.url!;
+  }
 
   const client = createClient({
     url,

@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "echo 'no tests yet'",
+    "test": "vitest run",
     "prepublishOnly": "pnpm run build"
   },
   "keywords": [

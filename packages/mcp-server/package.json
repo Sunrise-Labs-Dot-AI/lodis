@@ -1,6 +1,6 @@
 {
   "name": "engrams",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Universal AI memory layer — MCP server with persistent, cross-tool memory for Claude Code, Cursor, Windsurf, and more",
   "type": "module",
   "bin": {
@@ -12,6 +12,9 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./cloud": {
+      "import": "./dist/cloud.js"
     }
   },
   "files": [
@@ -32,7 +35,10 @@
     "windsurf",
     "model-context-protocol",
     "sqlite",
-    "local-first"
+    "local-first",
+    "cloud",
+    "turso",
+    "multi-tenant"
   ],
   "license": "MIT",
   "repository": {

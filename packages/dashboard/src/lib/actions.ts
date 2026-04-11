@@ -18,6 +18,7 @@ import {
   expandMergeSuggestion,
   expandSplitSuggestion,
   expandContradictionSuggestion,
+  suggestionKey,
   type CleanupSuggestion,
   type ScanResult,
 } from "./cleanup";
@@ -158,16 +159,66 @@ export async function clearAllMemoriesAction() {
 
 // --- Cleanup actions ---
 
-/** Scan: algorithmic only, zero API cost. Returns health score + prioritized suggestions. */
-export async function scanCleanupAction(): Promise<
+/** Scan with cache + dismissal filtering. Auto-invalidates when memories change. */
+export async function scanCleanupAction(forceRefresh?: boolean): Promise<
   ScanResult | { error: string }
 > {
   const userId = await getUserId();
   try {
-    return await scanForSuggestions(userId);
+    const { getLastModified, getCachedScanResult, setCachedScanResult, getDismissedKeys } = await import("./db");
+
+    const currentLastModified = await getLastModified(userId);
+    let scanResult: ScanResult;
+
+    if (!forceRefresh) {
+      const cached = await getCachedScanResult(userId);
+      if (cached && cached.lastModifiedAt === currentLastModified) {
+        scanResult = cached.result;
+      } else {
+        scanResult = await scanForSuggestions(userId);
+        if (currentLastModified) {
+          await setCachedScanResult(scanResult, currentLastModified, userId);
+        }
+      }
+    } else {
+      scanResult = await scanForSuggestions(userId);
+      if (currentLastModified) {
+        await setCachedScanResult(scanResult, currentLastModified, userId);
+      }
+    }
+
+    // Filter out dismissed suggestions
+    const dismissedKeys = await getDismissedKeys(userId);
+    if (dismissedKeys.size > 0) {
+      scanResult = {
+        ...scanResult,
+        actionable: scanResult.actionable.filter(s => !dismissedKeys.has(suggestionKey(s))),
+      };
+    }
+
+    return scanResult;
   } catch (e) {
     console.error("[engrams] Cleanup scan failed:", e);
     return { error: "Cleanup scan failed" };
+  }
+}
+
+/** Persist a suggestion dismissal so it doesn't reappear on re-scan. */
+export async function dismissSuggestionAction(
+  suggestionType: string,
+  memoryIds: string[],
+  action: "dismissed" | "resolved" = "dismissed",
+  resolutionNote?: string,
+): Promise<{ ok: true } | { error: string }> {
+  const userId = await getUserId();
+  try {
+    const { dismissSuggestion } = await import("./db");
+    const key = `${suggestionType}:${[...memoryIds].sort().join(",")}`;
+    await dismissSuggestion(key, suggestionType, action, resolutionNote, userId);
+    return { ok: true };
+  } catch (e) {
+    console.error("[engrams] Dismiss suggestion failed:", e);
+    return { error: "Failed to dismiss suggestion" };
   }
 }
 
@@ -285,6 +336,117 @@ export async function bulkRestoreAction(ids: string[]) {
   revalidatePath("/");
   revalidatePath("/archive");
   return { restored };
+}
+
+// --- Resolve with message ---
+
+export interface ResolveAction {
+  action: "keep_both" | "keep" | "delete" | "correct" | "merge";
+  memoryId?: string;
+  newContent?: string;
+  newDetail?: string | null;
+  reason: string;
+}
+
+export interface ResolveResult {
+  actions: ResolveAction[];
+  summary: string;
+  error?: string;
+}
+
+export async function resolveWithMessageAction(
+  memoryIds: string[],
+  message: string,
+): Promise<ResolveResult | { error: string }> {
+  const userId = await getUserId();
+  const memories = await Promise.all(memoryIds.map(id => getMemoryById(id, userId)));
+  const validMemories = memories.filter(Boolean) as NonNullable<typeof memories[0]>[];
+
+  if (validMemories.length === 0) return { error: "No memories found" };
+
+  const provider = resolveLLMProvider("analysis");
+  if (!provider) {
+    return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
+  }
+
+  const memoryDescriptions = validMemories.map(m =>
+    `- ID: ${m.id}\n  Content: ${JSON.stringify(m.content)}\n  Detail: ${JSON.stringify(m.detail)}\n  Domain: ${m.domain}\n  Confidence: ${m.confidence}`,
+  ).join("\n\n");
+
+  const prompt = `You are managing a memory system. The user wants to resolve an issue with these memories.
+
+Memories:
+${memoryDescriptions}
+
+User's message: ${JSON.stringify(message)}
+
+Based on the user's message, decide what actions to take. Available actions:
+- "keep_both": Both memories are valid, no changes needed (use when user says both are correct/not contradictory)
+- "keep": Keep only this memory, delete others. Requires "memoryId"
+- "delete": Delete this memory. Requires "memoryId"
+- "correct": Update a memory's content. Requires "memoryId", "newContent", and optionally "newDetail"
+- "merge": Combine memories into one. Requires "memoryId" (the one to keep), "newContent", and optionally "newDetail"
+
+Return ONLY a JSON object:
+{
+  "actions": [{"action": "...", "memoryId": "...", "newContent": "...", "newDetail": "..." or null, "reason": "..."}],
+  "summary": "One sentence describing what was done"
+}`;
+
+  try {
+    const text = await provider.complete(prompt, { maxTokens: 1024, json: true });
+    const result = parseLLMJson<ResolveResult>(text);
+
+    if (!result.actions || !Array.isArray(result.actions) || result.actions.length === 0) {
+      return { error: "LLM returned no actions. Try rephrasing your message." };
+    }
+
+    // Apply each action
+    for (const action of result.actions) {
+      switch (action.action) {
+        case "keep_both":
+          // No-op — both are fine
+          break;
+        case "keep": {
+          const deleteIds = memoryIds.filter(id => id !== action.memoryId);
+          for (const id of deleteIds) {
+            await deleteMemoryById(id, userId);
+          }
+          break;
+        }
+        case "delete":
+          if (action.memoryId) {
+            await deleteMemoryById(action.memoryId, userId);
+          }
+          break;
+        case "correct":
+          if (action.memoryId && action.newContent) {
+            await correctMemoryById(action.memoryId, action.newContent, action.newDetail ?? null, userId);
+          }
+          break;
+        case "merge": {
+          if (action.memoryId && action.newContent) {
+            await correctMemoryById(action.memoryId, action.newContent, action.newDetail ?? null, userId);
+            const deleteIds = memoryIds.filter(id => id !== action.memoryId);
+            for (const id of deleteIds) {
+              await deleteMemoryById(id, userId);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    revalidatePath("/");
+    revalidatePath("/cleanup");
+    for (const id of memoryIds) {
+      revalidatePath(`/memory/${id}`);
+    }
+
+    return { actions: result.actions, summary: result.summary };
+  } catch (e) {
+    return { error: `Resolution failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
 
 export { type CleanupSuggestion } from "./cleanup";

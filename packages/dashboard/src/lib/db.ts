@@ -1021,3 +1021,107 @@ export async function getEntityConnections(entityName: string, userId?: string |
   });
   return result.rows.map(r => plainObj<{ name: string; type: string; relationship: string }>(r));
 }
+
+// --- Cleanup persistence ---
+
+let cleanupTableReady = false;
+
+async function ensureCleanupTable(client: Client): Promise<void> {
+  if (cleanupTableReady) return;
+  await client.execute({
+    sql: `CREATE TABLE IF NOT EXISTS cleanup_dismissals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      suggestion_key TEXT NOT NULL,
+      suggestion_type TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resolution_note TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, suggestion_key)
+    )`,
+    args: [],
+  });
+  cleanupTableReady = true;
+}
+
+export async function getLastModified(userId?: string | null): Promise<string | null> {
+  const client = getClient();
+  const key = userId ? `last_modified:${userId}` : "last_modified";
+  const result = await client.execute({
+    sql: `SELECT value FROM engrams_meta WHERE key = ?`,
+    args: [key],
+  });
+  if (result.rows.length > 0) return result.rows[0].value as string;
+  // Fallback to global last_modified
+  const fallback = await client.execute({
+    sql: `SELECT value FROM engrams_meta WHERE key = 'last_modified'`,
+    args: [],
+  });
+  return fallback.rows.length > 0 ? (fallback.rows[0].value as string) : null;
+}
+
+export async function getCachedScanResult(userId?: string | null): Promise<{
+  scannedAt: string;
+  lastModifiedAt: string;
+  result: import("./cleanup").ScanResult;
+} | null> {
+  const client = getClient();
+  const key = userId ? `cleanup_cache:${userId}` : "cleanup_cache:_default";
+  const row = await client.execute({
+    sql: `SELECT value FROM engrams_meta WHERE key = ?`,
+    args: [key],
+  });
+  if (row.rows.length === 0) return null;
+  try {
+    return JSON.parse(row.rows[0].value as string);
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedScanResult(
+  result: import("./cleanup").ScanResult,
+  lastModifiedAt: string,
+  userId?: string | null,
+): Promise<void> {
+  const client = getClient();
+  const key = userId ? `cleanup_cache:${userId}` : "cleanup_cache:_default";
+  const value = JSON.stringify({
+    scannedAt: new Date().toISOString(),
+    lastModifiedAt,
+    result,
+  });
+  await client.execute({
+    sql: `INSERT OR REPLACE INTO engrams_meta (key, value) VALUES (?, ?)`,
+    args: [key, value],
+  });
+}
+
+export async function dismissSuggestion(
+  suggestionKey: string,
+  suggestionType: string,
+  action: "dismissed" | "resolved",
+  resolutionNote?: string,
+  userId?: string | null,
+): Promise<void> {
+  const client = getClient();
+  await ensureCleanupTable(client);
+  const id = generateId();
+  const userVal = userId ?? "_default";
+  await client.execute({
+    sql: `INSERT OR REPLACE INTO cleanup_dismissals (id, user_id, suggestion_key, suggestion_type, action, resolution_note, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [id, userVal, suggestionKey, suggestionType, action, resolutionNote ?? null, new Date().toISOString()],
+  });
+}
+
+export async function getDismissedKeys(userId?: string | null): Promise<Set<string>> {
+  const client = getClient();
+  await ensureCleanupTable(client);
+  const userVal = userId ?? "_default";
+  const result = await client.execute({
+    sql: `SELECT suggestion_key FROM cleanup_dismissals WHERE user_id = ?`,
+    args: [userVal],
+  });
+  return new Set(result.rows.map(r => r.suggestion_key as string));
+}

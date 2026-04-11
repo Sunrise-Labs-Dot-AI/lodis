@@ -666,6 +666,17 @@ async function initSchema(client: Client): Promise<void> {
       value TEXT NOT NULL
     );
     INSERT OR IGNORE INTO engrams_meta (key, value) VALUES ('last_modified', datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS cleanup_dismissals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      suggestion_key TEXT NOT NULL,
+      suggestion_type TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resolution_note TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, suggestion_key)
+    );
   `);
 
   // FTS5

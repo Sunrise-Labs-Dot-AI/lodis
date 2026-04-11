@@ -52,22 +52,22 @@ export default function TermsOfService() {
             </p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
               <li>
-                <span className="text-text font-medium">Free</span> &mdash; A
+                <span className="text-text font-medium">Local</span> &mdash; A
                 local-only MCP server and dashboard. All data stays on your
                 machine. No cloud services are involved unless you configure your
                 own LLM provider (BYOK).
               </li>
               <li>
-                <span className="text-text font-medium">Pro</span> &mdash; A
+                <span className="text-text font-medium">Cloud</span> &mdash; A
                 cloud-hosted MCP server and dashboard. Your memories are stored
                 in our cloud database, encrypted at rest. You supply your own LLM
                 API keys (BYOK).
               </li>
               <li>
-                <span className="text-text font-medium">Pro + AI</span> &mdash;
-                Same as Pro, with LLM processing included. Your memory content is
-                sent to third-party LLM providers (Anthropic, OpenAI) for entity
-                extraction and analysis.
+                <span className="text-text font-medium">Cloud+</span> &mdash;
+                Same as Cloud, with LLM processing included. Your memory content
+                is sent to third-party LLM providers (Anthropic, OpenAI) for
+                entity extraction and analysis.
               </li>
             </ul>
           </section>
@@ -77,7 +77,7 @@ export default function TermsOfService() {
               3. User Accounts and API Tokens
             </h2>
             <p>
-              Pro and Pro + AI tiers require an account, authenticated through
+              Cloud and Cloud+ tiers require an account, authenticated through
               Clerk (our third-party authentication provider). You are
               responsible for maintaining the security of your account
               credentials.
@@ -163,8 +163,8 @@ export default function TermsOfService() {
               your data across each tier.
             </p>
             <p className="mt-3">
-              In summary: the Free tier collects no data and makes no cloud
-              calls. The Pro tiers store your data encrypted at rest in our cloud
+              In summary: the Local tier collects no data and makes no cloud
+              calls. The Cloud tiers store your data encrypted at rest in our cloud
               infrastructure. You can export or delete your data at any time.
             </p>
           </section>
@@ -191,7 +191,7 @@ export default function TermsOfService() {
               </li>
             </ul>
             <p className="mt-3">
-              On the Pro tier, your API keys are encrypted at rest in our
+              On the Cloud tier, your API keys are encrypted at rest in our
               database and only decrypted in server memory when making LLM calls
               on your behalf. See our Privacy Policy for details.
             </p>
@@ -245,7 +245,7 @@ export default function TermsOfService() {
               10. Termination
             </h2>
             <p>
-              You may stop using the Service at any time. For Pro tier accounts,
+              You may stop using the Service at any time. For Cloud tier accounts,
               you can delete your account and all associated data through the
               dashboard settings.
             </p>
@@ -263,7 +263,7 @@ export default function TermsOfService() {
             </h2>
             <p>
               We may update these Terms of Service from time to time. We will
-              notify Pro tier users of material changes via email. Continued use
+              notify Cloud tier users of material changes via email. Continued use
               of the Service after changes take effect constitutes acceptance of
               the revised terms.
             </p>

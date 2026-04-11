@@ -638,7 +638,7 @@ export async function getAllMemoriesForExport(userId?: string | null): Promise<M
 }
 
 export async function getAllConnectionsForExport(userId?: string | null): Promise<ConnectionRow[]> {
-  const client = getClient();
+  const client = await getClient();
   const uf = userFilter(userId);
   const mcuf = { clause: uf.clause.replace("user_id", "mc.user_id"), args: uf.args };
   const result = await client.execute({

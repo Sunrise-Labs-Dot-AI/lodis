@@ -9,6 +9,7 @@ import { getLLMStatus } from "./llm-actions";
 import { LLMProviderForm } from "@/components/llm-provider-form";
 import { ApiTokens } from "@/components/api-tokens";
 import { ConnectClaude } from "@/components/connect-claude";
+import { TierSelector } from "@/components/tier-selector";
 import { listApiTokens } from "./token-actions";
 
 export const dynamic = "force-dynamic";
@@ -30,18 +31,11 @@ export default async function SettingsPage() {
       {/* Connect to Claude (hosted only) */}
       {isHosted && <ConnectClaude baseUrl={process.env.NEXT_PUBLIC_APP_URL || "https://app.getengrams.com"} />}
 
-      {/* Account & Tier (hosted only) */}
-      {isHosted && userId && (
-        <Card className="p-4">
-          <h3 className="text-sm font-semibold mb-3">Account</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-[var(--color-text-muted)]">Plan</span>
-              <TierBadge tier={llmStatus.tier || "free"} />
-            </div>
-          </div>
-        </Card>
-      )}
+      {/* Plan selector */}
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold mb-3">Plan</h3>
+        <TierSelector currentTier={llmStatus.tier || "local"} userId={userId} />
+      </Card>
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold mb-3">Database</h3>
@@ -74,7 +68,7 @@ export default async function SettingsPage() {
         {llmStatus.managed ? (
           <div className="space-y-2">
             <p className="text-xs text-[var(--color-text-muted)]">
-              LLM calls are included with your Pro + AI plan. Powered by Anthropic.
+              LLM calls are included with your Cloud+ plan. Powered by Anthropic.
             </p>
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center rounded-full bg-[rgba(52,211,153,0.1)] border border-[rgba(52,211,153,0.2)] px-2 py-0.5 text-xs text-[var(--color-success)]">
@@ -112,19 +106,3 @@ async function ApiTokensSection({ userId }: { userId: string }) {
   return <ApiTokens userId={userId} tokens={tokens} />;
 }
 
-function TierBadge({ tier }: { tier: string }) {
-  const labels: Record<string, { label: string; color: string }> = {
-    free: { label: "Free", color: "var(--color-text-muted)" },
-    pro: { label: "Pro", color: "var(--color-accent-text)" },
-    pro_ai: { label: "Pro + AI", color: "var(--color-success)" },
-  };
-  const { label, color } = labels[tier] || labels.free;
-  return (
-    <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
-      style={{ color, borderColor: `${color}33` }}
-    >
-      {label}
-    </span>
-  );
-}

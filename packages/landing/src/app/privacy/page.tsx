@@ -41,13 +41,13 @@ export default function PrivacyPolicy() {
             </p>
 
             <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Free Tier (Local Only)
+              Local Tier
             </h3>
             <p>
               <span className="text-text font-medium">
                 We collect nothing.
               </span>{" "}
-              The Free tier runs entirely on your machine. Your memories,
+              The Local tier runs entirely on your machine. Your memories,
               embeddings, configuration, and credentials never leave your
               computer. There is no telemetry, no analytics, and no phone-home
               behavior. The only network calls the software makes are to your own
@@ -55,7 +55,7 @@ export default function PrivacyPolicy() {
             </p>
 
             <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Pro and Pro + AI Tiers
+              Cloud and Cloud+ Tiers
             </h3>
             <p>When you create an account, we collect:</p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
@@ -86,7 +86,7 @@ export default function PrivacyPolicy() {
                 updates, confirmations, corrections).
               </li>
               <li>
-                <span className="text-text">BYOK API keys</span> (Pro tier)
+                <span className="text-text">BYOK API keys</span> (Cloud tier)
                 &mdash; Your LLM provider API keys, if you provide them.
               </li>
             </ul>
@@ -105,8 +105,8 @@ export default function PrivacyPolicy() {
                 To authenticate you and secure your account.
               </li>
               <li>
-                To process LLM requests on your behalf (Pro + AI tier, or BYOK
-                calls on Pro tier).
+                To process LLM requests on your behalf (Cloud+ tier, or BYOK
+                calls on Cloud tier).
               </li>
               <li>
                 To send you service-related communications (account security,
@@ -151,7 +151,7 @@ export default function PrivacyPolicy() {
               zero-knowledge architecture.
             </p>
             <p className="mt-3">
-              If you require zero-knowledge encryption, the Free tier keeps all
+              If you require zero-knowledge encryption, the Local tier keeps all
               data on your own machine under your full control.
             </p>
 
@@ -171,7 +171,7 @@ export default function PrivacyPolicy() {
               BYOK API Keys
             </h3>
             <p>
-              If you provide your own LLM API keys (Pro tier), they are encrypted
+              If you provide your own LLM API keys (Cloud tier), they are encrypted
               at rest in our database using a server-managed encryption key. They
               are decrypted in server memory only when making LLM API calls on
               your behalf. We do not log your API keys.
@@ -183,7 +183,7 @@ export default function PrivacyPolicy() {
               4. Third-Party Services
             </h2>
             <p>
-              The Pro tiers rely on the following third-party services:
+              The Cloud tiers rely on the following third-party services:
             </p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
               <li>
@@ -218,7 +218,7 @@ export default function PrivacyPolicy() {
                 <span className="text-text">
                   Anthropic / OpenAI
                 </span>{" "}
-                (Pro + AI tier only) &mdash; Your memory content is sent to these
+                (Cloud+ tier only) &mdash; Your memory content is sent to these
                 LLM providers for entity extraction, classification, and
                 analysis. This means your plaintext memory content is processed
                 by their systems, subject to their respective privacy policies
@@ -230,7 +230,7 @@ export default function PrivacyPolicy() {
               </li>
             </ul>
             <p className="mt-3">
-              On the Free tier, none of these services are involved unless you
+              On the Local tier, none of these services are involved unless you
               explicitly configure an LLM provider yourself.
             </p>
           </section>
@@ -305,7 +305,7 @@ export default function PrivacyPolicy() {
             </h2>
             <p>
               We may update this Privacy Policy from time to time. We will notify
-              Pro tier users of material changes via email. The &quot;Last
+              Cloud tier users of material changes via email. The &quot;Last
               updated&quot; date at the top of this page indicates when the
               policy was last revised.
             </p>

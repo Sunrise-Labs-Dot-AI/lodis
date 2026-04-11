@@ -24,10 +24,20 @@ import {
 } from "./cleanup";
 import { getUserId } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { resolveLLMProvider } from "@engrams/core/llm-config";
+import { resolveLLMProvider as resolveLocalLLMProvider } from "@engrams/core/llm-config";
+import { resolveHostedLLMProvider } from "@/app/settings/llm-actions";
 import { parseLLMJson } from "@engrams/core/llm-utils";
 import { validateCorrection, validateSplit } from "@engrams/core/llm-validation";
 import type { LLMProvider } from "@engrams/core/llm";
+
+const isHosted = !!process.env.TURSO_DATABASE_URL;
+
+async function resolveLLMProvider(task: "extraction" | "analysis", userId?: string | null): Promise<LLMProvider | null> {
+  if (isHosted && userId) {
+    return resolveHostedLLMProvider(userId, task);
+  }
+  return resolveLocalLLMProvider(task);
+}
 
 export async function deleteMemoryAction(id: string) {
   const userId = await getUserId();
@@ -57,7 +67,7 @@ export async function correctMemoryAction(id: string, feedback: string): Promise
   const memory = await getMemoryById(id, userId);
   if (!memory) return null;
 
-  const provider = resolveLLMProvider("analysis");
+  const provider = await resolveLLMProvider("analysis", userId);
   if (!provider) {
     return { error: "No LLM provider configured. Semantic correction requires an LLM. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
   }
@@ -105,7 +115,7 @@ export async function proposeSplitAction(
   const memory = await getMemoryById(id, userId);
   if (!memory) return { error: "Memory not found" };
 
-  const provider = resolveLLMProvider("analysis");
+  const provider = await resolveLLMProvider("analysis", userId);
   if (!provider) {
     return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
   }
@@ -226,7 +236,8 @@ export async function dismissSuggestionAction(
 export async function expandSuggestionAction(
   suggestion: CleanupSuggestion,
 ): Promise<{ suggestion: CleanupSuggestion } | { error: string }> {
-  const provider = resolveLLMProvider("analysis");
+  const userId = await getUserId();
+  const provider = await resolveLLMProvider("analysis", userId);
   if (!provider) {
     return {
       error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings.",
@@ -364,7 +375,7 @@ export async function resolveWithMessageAction(
 
   if (validMemories.length === 0) return { error: "No memories found" };
 
-  const provider = resolveLLMProvider("analysis");
+  const provider = await resolveLLMProvider("analysis", userId);
   if (!provider) {
     return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
   }

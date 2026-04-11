@@ -221,7 +221,7 @@ export async function resolveHostedLLMProvider(
   task: "extraction" | "analysis" = "extraction",
 ) {
   const { createLLMProvider } = await import("@engrams/core/llm");
-  const client = getClient();
+  const client = await getClient();
 
   const result = await client.execute({
     sql: `SELECT tier, byok_provider, byok_api_key_enc, byok_base_url, byok_extraction_model, byok_analysis_model FROM user_settings WHERE user_id = ?`,

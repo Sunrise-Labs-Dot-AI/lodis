@@ -1157,6 +1157,93 @@ export async function getEntityConnections(entityName: string, userId?: string |
   return result.rows.map(r => plainObj<{ name: string; type: string; relationship: string }>(r));
 }
 
+// --- Document Index ---
+
+export interface IndexedDocumentRow extends MemoryRow {
+  parsed_data?: {
+    source_system: string;
+    location: string;
+    last_indexed_at: string;
+    mime_type?: string;
+    file_size?: number;
+    source_last_modified?: string;
+    tags?: string[];
+    parent_folder?: string;
+    url?: string;
+  };
+}
+
+export async function getIndexedDocuments(opts?: {
+  search?: string;
+  source_system?: string;
+  sortBy?: "indexed" | "title" | "source_modified";
+}, userId?: string | null): Promise<IndexedDocumentRow[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+
+  let sql = `SELECT * FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND structured_data LIKE '%"type":"document"%'${uf.clause}`;
+  const args: (string | number | null)[] = [...uf.args];
+
+  if (opts?.search) {
+    sql += ` AND content LIKE ?`;
+    args.push(`%${opts.search}%`);
+  }
+
+  switch (opts?.sortBy) {
+    case "title": sql += ` ORDER BY entity_name ASC`; break;
+    case "source_modified": sql += ` ORDER BY updated_at DESC`; break;
+    default: sql += ` ORDER BY updated_at DESC`; break;
+  }
+
+  const result = await client.execute({ sql, args });
+  const rows = await Promise.all(result.rows.map(r => decryptRow(plainObj<MemoryRow>(r))));
+
+  // Parse structured_data and filter by source_system
+  const docs: IndexedDocumentRow[] = [];
+  for (const row of rows) {
+    const doc: IndexedDocumentRow = { ...row };
+    if (row.structured_data) {
+      try {
+        const sd = JSON.parse(row.structured_data);
+        if (sd.type === "document") {
+          if (opts?.source_system && sd.source_system !== opts.source_system) continue;
+          doc.parsed_data = {
+            source_system: sd.source_system,
+            location: sd.location,
+            last_indexed_at: sd.last_indexed_at,
+            mime_type: sd.mime_type,
+            file_size: sd.file_size,
+            source_last_modified: sd.source_last_modified,
+            tags: sd.tags,
+            parent_folder: sd.parent_folder,
+            url: sd.url,
+          };
+        }
+      } catch { /* skip malformed */ }
+    }
+    docs.push(doc);
+  }
+
+  return docs;
+}
+
+export async function getIndexSourceSystems(userId?: string | null): Promise<string[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND structured_data LIKE '%"type":"document"%'${uf.clause}`,
+    args: [...uf.args],
+  });
+  const systems = new Set<string>();
+  for (const row of result.rows) {
+    try {
+      const sd = JSON.parse(row.structured_data as string);
+      if (sd.type === "document" && sd.source_system) systems.add(sd.source_system);
+    } catch { /* skip */ }
+  }
+  return [...systems].sort();
+}
+
 // --- Cleanup persistence ---
 
 let cleanupTableReady = false;

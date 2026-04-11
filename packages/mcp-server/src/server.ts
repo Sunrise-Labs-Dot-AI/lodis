@@ -275,7 +275,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_write",
-    "Store a new memory. If a similar memory already exists, returns the existing memory and resolution options instead of writing immediately. Call again with 'resolution' and 'existing_memory_id' to resolve. Pass resolution: 'keep_both' to skip dedup check and force a new memory.",
+    "Store a new memory. If a similar memory already exists, returns the existing memory and resolution options instead of writing immediately. Call again with 'resolution' and 'existing_memory_id' to resolve. Pass resolution: 'keep_both' to skip dedup check and force a new memory. IMPORTANT: Before saving factual content, check if the user has a canonical source for it (style guide, config file, documentation, spec). If so, create a reference memory (entityType: 'resource') pointing to that source instead of duplicating its content — store the location in structuredData (e.g. { path: '/path/to/file' }). Engrams should be a graph of pointers to canonical sources, not a second copy of information that lives elsewhere.",
     {
       content: z.string().describe("The memory content"),
       domain: z.string().optional().describe("Life domain (default: general)"),
@@ -890,6 +890,242 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       }
 
       return textResult(result);
+    },
+  );
+
+  server.tool(
+    "memory_index",
+    "Index documents from external data stores (Google Drive, Notion, filesystem, GitHub, etc.) so they can be found via memory_search. You are the crawler — use your existing MCP connections (Drive, Notion, etc.) to read document metadata, then call this tool to store lightweight index entries. Engrams stores the pointer + summary, not the full content. Supports batch indexing up to 100 documents per call. Re-indexing the same location updates the existing entry.",
+    {
+      documents: z.array(z.object({
+        title: z.string().describe("Document title"),
+        location: z.string().describe("Canonical location: URL, file path, page ID, or resource identifier"),
+        source_system: z.string().describe("Source system (e.g. google_drive, notion, filesystem, github, confluence)"),
+        summary: z.string().describe("1-3 sentence summary of the document content"),
+        mime_type: z.string().optional().describe("MIME type (e.g. application/pdf, text/markdown)"),
+        file_size: z.number().optional().describe("File size in bytes"),
+        source_last_modified: z.string().optional().describe("ISO timestamp of last modification at source"),
+        tags: z.array(z.string()).optional().describe("Tags or labels from the source system"),
+        parent_folder: z.string().optional().describe("Parent folder path or name"),
+        url: z.string().optional().describe("Human-accessible URL (may differ from location)"),
+        related_entities: z.array(z.string()).optional().describe("Entity names this document relates to (will auto-connect)"),
+      })).min(1).max(100).describe("Documents to index (max 100 per call)"),
+      domain: z.string().optional().describe("Domain for all documents (default: 'documents')"),
+      sourceAgentId: z.string().describe("Your agent ID"),
+      sourceAgentName: z.string().describe("Your agent name"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const domain = params.domain ?? "documents";
+      const timestamp = now();
+      let created = 0;
+      let updated = 0;
+      const results: { id: string; title: string; status: "created" | "updated" }[] = [];
+
+      for (const doc of params.documents) {
+        // Dedup by location: find existing index entry with same location
+        const existing = (await client.execute({
+          sql: `SELECT id, structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} AND structured_data IS NOT NULL`,
+          args: userId ? [userId] : [],
+        })).rows as unknown as { id: string; structured_data: string }[];
+
+        let existingId: string | null = null;
+        for (const row of existing) {
+          try {
+            const sd = JSON.parse(row.structured_data);
+            if (sd.type === "document" && sd.location === doc.location) {
+              existingId = row.id;
+              break;
+            }
+          } catch {
+            // skip malformed JSON
+          }
+        }
+
+        const content = `[Document] ${doc.title} — ${doc.summary}`;
+        const structuredData: Record<string, unknown> = {
+          name: doc.title,
+          type: "document",
+          source_system: doc.source_system,
+          location: doc.location,
+          last_indexed_at: timestamp,
+        };
+        if (doc.mime_type) structuredData.mime_type = doc.mime_type;
+        if (doc.file_size != null) structuredData.file_size = doc.file_size;
+        if (doc.source_last_modified) structuredData.source_last_modified = doc.source_last_modified;
+        if (doc.tags?.length) structuredData.tags = doc.tags;
+        if (doc.parent_folder) structuredData.parent_folder = doc.parent_folder;
+        if (doc.url) structuredData.url = doc.url;
+
+        let memoryId: string;
+
+        if (existingId) {
+          // Update existing entry
+          await client.execute({
+            sql: `UPDATE memories SET content = ?, summary = ?, structured_data = ?, updated_at = ? WHERE id = ?${userId ? ' AND user_id = ?' : ''}`,
+            args: userId
+              ? [content, doc.summary, JSON.stringify(structuredData), timestamp, existingId, userId]
+              : [content, doc.summary, JSON.stringify(structuredData), timestamp, existingId],
+          });
+          memoryId = existingId;
+
+          // Re-generate embedding
+          if (vecAvailable) {
+            try {
+              const embeddingText = `${doc.title} ${doc.summary}`;
+              const emb = await generateEmbedding(embeddingText);
+              // Delete old embedding and insert new
+              try { await client.execute({ sql: `DELETE FROM memory_embeddings WHERE rowid IN (SELECT rowid FROM memory_embeddings WHERE id = ?)`, args: [existingId] }); } catch { /* ignore */ }
+              await insertEmbedding(client, existingId, emb);
+            } catch { /* non-fatal */ }
+          }
+
+          updated++;
+          results.push({ id: existingId, title: doc.title, status: "updated" });
+        } else {
+          // Insert new entry
+          memoryId = generateId();
+          await db.insert(memories).values({
+            id: memoryId,
+            content,
+            detail: null,
+            summary: doc.summary,
+            domain,
+            sourceAgentId: params.sourceAgentId,
+            sourceAgentName: params.sourceAgentName,
+            sourceType: "observed",
+            confidence: 0.90,
+            learnedAt: timestamp,
+            hasPiiFlag: 0,
+            entityType: "resource",
+            entityName: doc.title,
+            structuredData: JSON.stringify(structuredData),
+            permanence: "active",
+            userId: userId ?? null,
+          }).run();
+
+          // Generate embedding
+          if (vecAvailable) {
+            try {
+              const embeddingText = `${doc.title} ${doc.summary}`;
+              const emb = await generateEmbedding(embeddingText);
+              await insertEmbedding(client, memoryId, emb);
+            } catch { /* non-fatal */ }
+          }
+
+          // Record creation event
+          await db.insert(memoryEvents).values({
+            id: generateId(),
+            memoryId,
+            eventType: "created",
+            agentId: params.sourceAgentId,
+            agentName: params.sourceAgentName,
+            newValue: JSON.stringify({ content, domain }),
+            timestamp,
+          }).run();
+
+          created++;
+          results.push({ id: memoryId, title: doc.title, status: "created" });
+        }
+
+        // Auto-connect to related entities
+        if (doc.related_entities?.length) {
+          for (const entityName of doc.related_entities) {
+            const target = (await client.execute({
+              sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL AND id != ?${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+              args: userId ? [entityName, memoryId, userId] : [entityName, memoryId],
+            })).rows[0] as { id: string } | undefined;
+
+            if (target) {
+              // Check if connection already exists
+              const existingConn = (await client.execute({
+                sql: `SELECT 1 FROM memory_connections WHERE source_memory_id = ? AND target_memory_id = ?${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+                args: userId ? [memoryId, target.id, userId] : [memoryId, target.id],
+              })).rows[0];
+
+              if (!existingConn) {
+                await client.execute({
+                  sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, 'references', ?)`,
+                  args: [memoryId, target.id, userId ?? null],
+                });
+              }
+            }
+          }
+        }
+      }
+
+      await bumpLastModified(client);
+
+      return textResult({
+        status: "indexed",
+        indexed: created + updated,
+        created,
+        updated,
+        documents: results,
+      });
+    },
+  );
+
+  server.tool(
+    "memory_index_status",
+    "Check the staleness of indexed documents. Returns which documents haven't been re-indexed recently, so you know what to re-crawl via your source MCPs (Drive, Notion, etc.).",
+    {
+      source_system: z.string().optional().describe("Filter by source system (e.g. google_drive, notion, filesystem)"),
+      stale_threshold_hours: z.number().optional().describe("Hours since last index to consider stale (default: 168 = 7 days)"),
+      limit: z.number().optional().describe("Max results (default: 50)"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const thresholdHours = params.stale_threshold_hours ?? 168;
+      const limit = params.limit ?? 50;
+
+      // Query all document index entries
+      const rows = (await client.execute({
+        sql: `SELECT id, entity_name, structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND structured_data IS NOT NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [userId] : [],
+      })).rows as unknown as { id: string; entity_name: string | null; structured_data: string }[];
+
+      const nowMs = Date.now();
+      const stale: { id: string; title: string; location: string; source_system: string; last_indexed_at: string; hours_since_index: number }[] = [];
+      let totalIndexed = 0;
+
+      for (const row of rows) {
+        try {
+          const sd = JSON.parse(row.structured_data);
+          if (sd.type !== "document") continue;
+          totalIndexed++;
+
+          if (params.source_system && sd.source_system !== params.source_system) continue;
+
+          const lastIndexed = sd.last_indexed_at ? new Date(sd.last_indexed_at).getTime() : 0;
+          const hoursSince = Math.round((nowMs - lastIndexed) / (1000 * 60 * 60));
+
+          if (hoursSince >= thresholdHours) {
+            stale.push({
+              id: row.id,
+              title: sd.name || row.entity_name || "Unknown",
+              location: sd.location,
+              source_system: sd.source_system,
+              last_indexed_at: sd.last_indexed_at || "never",
+              hours_since_index: hoursSince,
+            });
+          }
+        } catch {
+          // skip malformed JSON
+        }
+      }
+
+      // Sort by staleness (most stale first) and limit
+      stale.sort((a, b) => b.hours_since_index - a.hours_since_index);
+      const limited = stale.slice(0, limit);
+
+      return textResult({
+        total_indexed: totalIndexed,
+        stale_count: stale.length,
+        fresh_count: totalIndexed - stale.length,
+        threshold_hours: thresholdHours,
+        stale: limited,
+      });
     },
   );
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, Building, MapPin, Folder, Heart, Calendar, Target, BookOpen, RotateCcw, Wrench, Gem, Book, Scale } from "lucide-react";
+import { ArrowLeft, User, Building, MapPin, Folder, Heart, Calendar, Target, BookOpen, RotateCcw, Wrench, Gem, Book, Scale, ExternalLink, Clock, FolderOpen } from "lucide-react";
 import { getEntityProfile, getMemoriesByEntityName, getEntityConnections } from "@/lib/db";
 import { getUserId } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
@@ -101,6 +101,83 @@ export default async function EntityProfilePage({ params }: PageProps) {
           </p>
         </Card>
       )}
+
+      {/* Document Index Metadata */}
+      {(() => {
+        const firstMemory = memories[0];
+        if (!firstMemory?.structured_data) return null;
+        try {
+          const sd = JSON.parse(firstMemory.structured_data);
+          if (sd.type !== "document") return null;
+          const staleness = sd.last_indexed_at
+            ? (() => {
+                const hours = (Date.now() - new Date(sd.last_indexed_at).getTime()) / (1000 * 60 * 60);
+                if (hours < 24) return { label: "Fresh", variant: "success" as const };
+                if (hours < 168) return { label: `${Math.floor(hours / 24)}d ago`, variant: "warning" as const };
+                return { label: `${Math.floor(hours / 24)}d ago`, variant: "danger" as const };
+              })()
+            : null;
+          return (
+            <Card className="p-6">
+              <h2 className="text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+                Document Source
+              </h2>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-[var(--color-text-tertiary)]">Source</span>
+                  <p className="text-[var(--color-text-primary)] capitalize">{sd.source_system?.replace(/_/g, " ") ?? "Unknown"}</p>
+                </div>
+                <div>
+                  <span className="text-[var(--color-text-tertiary)]">Location</span>
+                  <p className="text-[var(--color-text-primary)] truncate">{sd.location}</p>
+                </div>
+                {sd.mime_type && (
+                  <div>
+                    <span className="text-[var(--color-text-tertiary)]">Type</span>
+                    <p className="text-[var(--color-text-primary)]">{sd.mime_type}</p>
+                  </div>
+                )}
+                {sd.file_size != null && (
+                  <div>
+                    <span className="text-[var(--color-text-tertiary)]">Size</span>
+                    <p className="text-[var(--color-text-primary)]">
+                      {sd.file_size < 1024 * 1024
+                        ? `${(sd.file_size / 1024).toFixed(1)} KB`
+                        : `${(sd.file_size / (1024 * 1024)).toFixed(1)} MB`}
+                    </p>
+                  </div>
+                )}
+                {sd.parent_folder && (
+                  <div>
+                    <span className="text-[var(--color-text-tertiary)] flex items-center gap-1"><FolderOpen size={12} /> Folder</span>
+                    <p className="text-[var(--color-text-primary)]">{sd.parent_folder}</p>
+                  </div>
+                )}
+                {sd.last_indexed_at && (
+                  <div>
+                    <span className="text-[var(--color-text-tertiary)] flex items-center gap-1"><Clock size={12} /> Last Indexed</span>
+                    <div className="flex items-center gap-2">
+                      <p className="text-[var(--color-text-primary)]">{formatDate(sd.last_indexed_at)}</p>
+                      {staleness && <StatusBadge variant={staleness.variant}>{staleness.label}</StatusBadge>}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {sd.url && (
+                <a
+                  href={sd.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-3 text-sm text-[var(--color-accent-text)] hover:underline"
+                >
+                  <ExternalLink size={13} />
+                  Open in source
+                </a>
+              )}
+            </Card>
+          );
+        } catch { return null; }
+      })()}
 
       {/* Connected Entities */}
       {connections.length > 0 && (

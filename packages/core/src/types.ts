@@ -22,7 +22,8 @@ export type Relationship =
   | "part_of"
   | "about"
   | "informed_by"
-  | "uses";
+  | "uses"
+  | "references";
 export type EventType =
   | "created"
   | "confirmed"
@@ -116,6 +117,21 @@ export interface ResourceData {
   purpose?: string;
 }
 
+export interface DocumentIndexData {
+  name: string;
+  type: "document";
+  source_system: string;
+  location: string;
+  mime_type?: string;
+  file_size?: number;
+  source_last_modified?: string;
+  last_indexed_at: string;
+  tags?: string[];
+  parent_folder?: string;
+  url?: string;
+  purpose?: string;
+}
+
 export interface DecisionData {
   what: string;
   rationale?: string;
@@ -137,4 +153,5 @@ export type StructuredData =
   | RoutineData
   | SkillData
   | ResourceData
+  | DocumentIndexData
   | DecisionData;

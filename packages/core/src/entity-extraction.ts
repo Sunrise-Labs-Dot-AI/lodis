@@ -54,7 +54,7 @@ Entity type definitions (choose the BEST fit):
 - lesson: something learned from experience — has a "because" or story behind it. NOT a bare fact.
 - routine: a recurring behavior, habit, or workflow the user follows regularly. NOT a one-time event.
 - skill: a proficiency or expertise area the user has. NOT a preference.
-- resource: an external tool, service, document, or URL the user uses. NOT a project.
+- resource: an external tool, service, document, or URL the user uses. NOT a project. Documents indexed from external sources (Drive, Notion, filesystem) are stored as resources with type: 'document' in structured_data.
 - decision: a specific choice the user made, with reasoning. NOT an event (focuses on rationale, not timing).
 
 For entity_name, use the canonical form (e.g. "Sarah Chen" not "my manager Sarah"). If an existing entity name matches, use that exact spelling.

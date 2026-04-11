@@ -239,7 +239,11 @@ export async function hybridSearch(
     return a.localeCompare(b); // Deterministic tie-break
   });
 
-  const topIds = rankedIds.slice(0, limit);
+  // When filters are present, fetch more candidates so post-filter results
+  // aren't starved by higher-ranked results from other domains/types
+  const hasFilters = !!(options.domain || options.entityType || options.entityName || options.minConfidence !== undefined);
+  const candidateLimit = hasFilters ? rankedIds.length : limit;
+  const topIds = rankedIds.slice(0, candidateLimit);
   if (topIds.length === 0) {
     return { results: [], cached: false };
   }
@@ -276,10 +280,11 @@ export async function hybridSearch(
   });
   const rows = rowsResult.rows as unknown as Record<string, unknown>[];
 
-  // Preserve RRF ranking order
+  // Preserve RRF ranking order, then trim to requested limit after filtering
   const rowMap = new Map(rows.map((r) => [r.id as string, r]));
   const searchResults: SearchResult[] = topIds
     .filter((id) => rowMap.has(id))
+    .slice(0, limit)
     .map((id) => ({
       id,
       score: scores.get(id)!,

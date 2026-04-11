@@ -8,7 +8,8 @@ export async function setupFTS(client: Client): Promise<void> {
       source_agent_name,
       entity_name,
       content='memories',
-      content_rowid='rowid'
+      content_rowid='rowid',
+      tokenize='porter unicode61'
     );
   `);
 
@@ -36,14 +37,32 @@ export async function setupFTS(client: Client): Promise<void> {
   `);
 }
 
+/**
+ * Preprocess a search query for FTS5.
+ * - Splits on whitespace into tokens
+ * - Wraps each token in double quotes to escape FTS5 operators
+ * - Joins with OR so any matching token contributes results
+ */
+function preprocessFTSQuery(query: string): string {
+  const tokens = query
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) return query;
+  // Quote each token to prevent FTS5 syntax errors from special chars,
+  // then join with OR for broad matching
+  return tokens.map((t) => `"${t}"`).join(" OR ");
+}
+
 export async function searchFTS(
   client: Client,
   query: string,
   limit = 20,
 ): Promise<{ rowid: number }[]> {
+  const ftsQuery = preprocessFTSQuery(query);
   const result = await client.execute({
     sql: `SELECT rowid FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?`,
-    args: [query, limit],
+    args: [ftsQuery, limit],
   });
   return result.rows.map((row) => ({ rowid: row.rowid as number }));
 }

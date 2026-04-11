@@ -676,7 +676,8 @@ async function initSchema(client: Client): Promise<void> {
       source_agent_name,
       entity_name,
       content='memories',
-      content_rowid='rowid'
+      content_rowid='rowid',
+      tokenize='porter unicode61'
     );
   `);
 

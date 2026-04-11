@@ -260,6 +260,17 @@ async function runMigrations(client: Client): Promise<void> {
     `);
     // setupFTS() will recreate the table and triggers with entity_name included
   });
+
+  await runMigration(client, "fts_porter_stemming", async () => {
+    // Rebuild FTS table with porter stemming tokenizer for better search recall
+    await client.executeMultiple(`
+      DROP TRIGGER IF EXISTS memory_fts_insert;
+      DROP TRIGGER IF EXISTS memory_fts_delete;
+      DROP TRIGGER IF EXISTS memory_fts_update;
+      DROP TABLE IF EXISTS memory_fts;
+    `);
+    // setupFTS() will recreate with tokenize='porter unicode61'
+  });
 }
 
 export async function createDatabase(config?: {

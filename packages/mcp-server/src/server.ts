@@ -895,9 +895,9 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
   server.tool(
     "memory_search",
-    "Search the user's persistent memory for relevant context. Call this at the start of conversations or before answering questions where prior knowledge about the user would help. Also call before asking the user something — the answer may already be in memory.",
+    "Search the user's persistent memory for relevant context. Call this at the start of conversations or before answering questions where prior knowledge about the user would help. Also call before asking the user something — the answer may already be in memory. Tips: use short queries (1-3 key terms) for best results. For browsing by topic, use memory_list with a domain filter instead. For broad context retrieval, use memory_context.",
     {
-      query: z.string().describe("Search query"),
+      query: z.string().describe("Search query — use short, focused terms (e.g. 'job search' not 'job search applications career recruiting')"),
       domain: z.string().optional().describe("Filter by domain"),
       entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Filter by entity type"),
       entityName: z.string().optional().describe("Filter by entity name (case-insensitive)"),

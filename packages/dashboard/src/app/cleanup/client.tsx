@@ -17,6 +17,7 @@ import {
   scrubMemoryAction,
   pinMemoryAction,
   archiveMemoryAction,
+  resolveWithMessageAction,
 } from "../../lib/actions";
 import type { CleanupSuggestion, HealthScore } from "../../lib/cleanup";
 import {
@@ -34,6 +35,8 @@ import {
   Star,
   Archive,
   Clock,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { confidenceColor, formatConfidence } from "../../lib/utils";
 
@@ -709,6 +712,27 @@ export function CleanupClient() {
     }
   }
 
+  async function handleResolveWithMessage(
+    suggestion: CleanupSuggestion,
+    message: string,
+    index: number,
+  ) {
+    setApplyingIndex(index);
+    setError(null);
+    try {
+      const result = await resolveWithMessageAction(suggestion.memoryIds, message);
+      if ("error" in result && !("actions" in result)) {
+        setError(result.error);
+      } else {
+        resolve(index, result.summary);
+      }
+    } catch {
+      setError("Failed to resolve suggestion");
+    } finally {
+      setApplyingIndex(null);
+    }
+  }
+
   async function applyContradictionKeep(
     suggestion: CleanupSuggestion,
     keepId: string,
@@ -849,6 +873,9 @@ export function CleanupClient() {
                   onMemoryPin={(id) => handleMemoryPin(id, index)}
                   onMemoryArchive={(id) => handleMemoryArchive(id, index)}
                   onCorrectToggle={setCorrectingId}
+                  onResolve={(message: string) =>
+                    handleResolveWithMessage(suggestion, message, index)
+                  }
                 />
               );
             })}
@@ -881,6 +908,7 @@ function SuggestionCard({
   onMemoryPin,
   onMemoryArchive,
   onCorrectToggle,
+  onResolve,
 }: {
   suggestion: CleanupSuggestion;
   index: number;
@@ -901,9 +929,12 @@ function SuggestionCard({
   onMemoryPin: (id: string) => void;
   onMemoryArchive: (id: string) => void;
   onCorrectToggle: (id: string | null) => void;
+  onResolve: (message: string) => void;
 }) {
   const needsExpand = !suggestion.expanded;
   const isLoading = applying || actionLoading !== null;
+  const [showResolve, setShowResolve] = useState(false);
+  const [resolveText, setResolveText] = useState("");
 
   return (
     <Card className="p-4">
@@ -919,15 +950,57 @@ function SuggestionCard({
             {suggestion.description}
           </span>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDismiss}
-          disabled={isLoading}
-        >
-          Dismiss
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowResolve(!showResolve)}
+            disabled={isLoading}
+          >
+            <MessageSquare size={14} className="mr-1" />
+            Resolve
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDismiss}
+            disabled={isLoading}
+          >
+            Dismiss
+          </Button>
+        </div>
       </div>
+
+      {showResolve && (
+        <div
+          className="mb-3 p-3 rounded border"
+          style={{ background: "var(--color-bg-soft)", borderColor: "var(--color-border)" }}
+        >
+          <textarea
+            value={resolveText}
+            onChange={(e) => setResolveText(e.target.value)}
+            placeholder="Describe how to resolve this (e.g. 'both are true', 'delete the first one', 'merge them')..."
+            rows={2}
+            className="w-full p-2 text-sm bg-[var(--color-card)] border border-[var(--color-border)] rounded placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+          />
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="ghost" size="sm" onClick={() => { setShowResolve(false); setResolveText(""); }} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!resolveText.trim() || isLoading}
+              onClick={() => { onResolve(resolveText.trim()); setShowResolve(false); setResolveText(""); }}
+            >
+              {isLoading ? (
+                <><Loader2 size={14} className="animate-spin mr-1" />Resolving...</>
+              ) : (
+                <><Send size={14} className="mr-1" />Resolve</>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Memory previews (only when not expanded — detail components show their own) */}
       {!suggestion.expanded &&

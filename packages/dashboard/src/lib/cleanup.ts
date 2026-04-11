@@ -212,8 +212,15 @@ function findDuplicateClusters(memories: MemoryRow[]): CleanupSuggestion[] {
  * moderate text similarity — same topic but different enough to potentially conflict.
  */
 function findContradictionCandidates(memories: MemoryRow[]): CleanupSuggestion[] {
-  function wordSet(text: string): Set<string> {
-    return new Set(text.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  /** Build word set excluding entity names (which inflate overlap for unrelated memories about the same person/org) */
+  function wordSet(text: string, entityName?: string | null): Set<string> {
+    const excludeWords = new Set(
+      (entityName ?? "").toLowerCase().split(/\s+/).filter(w => w.length > 0),
+    );
+    return new Set(
+      text.toLowerCase().split(/\s+/)
+        .filter(w => w.length > 3 && !excludeWords.has(w)),
+    );
   }
 
   function wordOverlap(a: Set<string>, b: Set<string>): number {
@@ -240,7 +247,7 @@ function findContradictionCandidates(memories: MemoryRow[]): CleanupSuggestion[]
 
     const memWords = domainMemories.map(m => ({
       mem: m,
-      words: wordSet(m.content + (m.detail ? " " + m.detail : "")),
+      words: wordSet(m.content + (m.detail ? " " + m.detail : ""), m.entity_name),
     }));
 
     for (let i = 0; i < memWords.length; i++) {
@@ -249,7 +256,9 @@ function findContradictionCandidates(memories: MemoryRow[]): CleanupSuggestion[]
         if (seen.has(key)) continue;
 
         const overlap = wordOverlap(memWords[i].words, memWords[j].words);
-        if (overlap >= 0.3 && overlap < 0.7) {
+        // Raised from 0.3 to 0.45 — lower threshold caused false positives when
+        // memories shared entity names + domain keywords but discussed different topics
+        if (overlap >= 0.45 && overlap < 0.7) {
           seen.add(key);
           results.push({
             type: "contradiction",

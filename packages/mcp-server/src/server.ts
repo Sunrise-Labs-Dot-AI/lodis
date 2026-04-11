@@ -275,7 +275,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_write",
-    "Store a new memory. If a similar memory already exists, returns the existing memory and resolution options instead of writing immediately. Call again with 'resolution' and 'existing_memory_id' to resolve. Pass resolution: 'keep_both' to skip dedup check and force a new memory.",
+    "Store a new memory. If a similar memory already exists, returns the existing memory and resolution options instead of writing immediately. Call again with 'resolution' and 'existing_memory_id' to resolve. Pass resolution: 'keep_both' to skip dedup check and force a new memory. IMPORTANT: Before saving factual content, check if the user has a canonical source for it (style guide, config file, documentation, spec). If so, create a reference memory (entityType: 'resource') pointing to that source instead of duplicating its content — store the location in structuredData (e.g. { path: '/path/to/file' }). Engrams should be a graph of pointers to canonical sources, not a second copy of information that lives elsewhere.",
     {
       content: z.string().describe("The memory content"),
       domain: z.string().optional().describe("Life domain (default: general)"),

@@ -210,7 +210,11 @@ async function getDecrypt(): Promise<{ fn: (text: string, key: Buffer) => string
 async function maybeDecrypt(text: string): Promise<string> {
   const d = await getDecrypt();
   if (!d) return text;
-  return d.fn(text, d.key);
+  try {
+    return d.fn(text, d.key);
+  } catch {
+    return text; // Not encrypted — return as-is
+  }
 }
 
 async function decryptRow<T extends { content: string; detail: string | null; structured_data?: string | null }>(row: T): Promise<T> {
@@ -218,12 +222,21 @@ async function decryptRow<T extends { content: string; detail: string | null; st
   const plain = plainObj<T>(row);
   const d = await getDecrypt();
   if (!d) return plain;
+
+  const tryDecrypt = (text: string): string => {
+    try {
+      return d.fn(text, d.key);
+    } catch {
+      return text; // Not encrypted — return as-is
+    }
+  };
+
   return {
     ...plain,
-    content: d.fn(plain.content, d.key),
-    detail: plain.detail ? d.fn(plain.detail, d.key) : null,
+    content: tryDecrypt(plain.content),
+    detail: plain.detail ? tryDecrypt(plain.detail) : null,
     ...(plain.structured_data !== undefined
-      ? { structured_data: plain.structured_data ? d.fn(plain.structured_data, d.key) : null }
+      ? { structured_data: plain.structured_data ? tryDecrypt(plain.structured_data) : null }
       : {}),
   };
 }

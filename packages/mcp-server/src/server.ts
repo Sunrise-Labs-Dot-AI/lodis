@@ -2514,20 +2514,24 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       plan.push("");
       plan.push("If the dashboard has a review queue or unreviewed filter, mention it specifically.");
 
-      // Log the onboarding event
-      await client.execute({
-        sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_id, agent_name, new_value, timestamp) VALUES (?, 'system', 'onboard_started', ?, ?, ?, ?)`,
-        args: [
-          generateId(),
-          "unknown",
-          "unknown",
-          JSON.stringify({
-            memory_count: totalMemories,
-            tools_detected: { calendar: hasCalendar, email: hasEmail, github: hasGitHub, slack: hasSlack, notes: hasNotes },
-          }),
-          now(),
-        ],
-      });
+      // Log the onboarding event (skip if FK constraints prevent 'system' as memory_id)
+      try {
+        await client.execute({
+          sql: `INSERT INTO memory_events (id, memory_id, event_type, agent_id, agent_name, new_value, timestamp) VALUES (?, 'system', 'onboard_started', ?, ?, ?, ?)`,
+          args: [
+            generateId(),
+            "unknown",
+            "unknown",
+            JSON.stringify({
+              memory_count: totalMemories,
+              tools_detected: { calendar: hasCalendar, email: hasEmail, github: hasGitHub, slack: hasSlack, notes: hasNotes },
+            }),
+            now(),
+          ],
+        });
+      } catch {
+        // Non-fatal — FK constraint on memory_id='system' when foreign_keys is ON
+      }
 
       return textResult(plan.join("\n"));
     },
@@ -2559,7 +2563,14 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             return textResult({ imported: 0, message: "No memories found in the provided export data." });
           }
 
-          const result = await importFromExport(client, exportData, { userId });
+          // Temporarily disable FK checks for bulk import, then re-enable
+          await client.execute({ sql: "PRAGMA foreign_keys = OFF", args: [] });
+          let result: { imported: number; skipped: number; connections: number; events: number };
+          try {
+            result = await importFromExport(client, exportData, { userId });
+          } finally {
+            await client.execute({ sql: "PRAGMA foreign_keys = ON", args: [] });
+          }
 
           // Background embedding generation for imported memories
           if (vecAvailable && result.imported > 0) {
@@ -2572,15 +2583,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             })();
           }
 
-          // Log the import event
-          await client.execute({
-            sql: `INSERT INTO memory_events (id, memory_id, event_type, new_value, timestamp) VALUES (?, 'system', 'import', ?, ?)`,
-            args: [
-              generateId(),
-              JSON.stringify({ source_type: "engrams", imported: result.imported, skipped: result.skipped, connections: result.connections }),
-              now(),
-            ],
-          });
+          // Log the import event (skip if FK constraints prevent 'system' as memory_id)
+          try {
+            await client.execute({
+              sql: `INSERT INTO memory_events (id, memory_id, event_type, new_value, timestamp) VALUES (?, 'system', 'import', ?, ?)`,
+              args: [
+                generateId(),
+                JSON.stringify({ source_type: "engrams", imported: result.imported, skipped: result.skipped, connections: result.connections }),
+                now(),
+              ],
+            });
+          } catch {
+            // Non-fatal — FK constraint on memory_id='system' in hosted mode
+          }
 
           await bumpLastModified(client);
 
@@ -2851,15 +2866,19 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         })();
       }
 
-      // Log the import event
-      await client.execute({
-        sql: `INSERT INTO memory_events (id, memory_id, event_type, new_value, timestamp) VALUES (?, 'system', 'import', ?, ?)`,
-        args: [
-          generateId(),
-          JSON.stringify({ source_type: params.source_type, imported, skipped, total_entries: entries.length }),
-          now(),
-        ],
-      });
+      // Log the import event (skip if FK constraints prevent 'system' as memory_id)
+      try {
+        await client.execute({
+          sql: `INSERT INTO memory_events (id, memory_id, event_type, new_value, timestamp) VALUES (?, 'system', 'import', ?, ?)`,
+          args: [
+            generateId(),
+            JSON.stringify({ source_type: params.source_type, imported, skipped, total_entries: entries.length }),
+            now(),
+          ],
+        });
+      } catch {
+        // Non-fatal — FK constraint on memory_id='system' in hosted mode
+      }
 
       await bumpLastModified(client);
 

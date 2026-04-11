@@ -580,6 +580,128 @@ export async function getAllConnectionsForExport(userId?: string | null): Promis
   return result.rows as unknown as ConnectionRow[];
 }
 
+export async function importMemories(
+  data: { memories: Record<string, unknown>[]; connections?: Record<string, unknown>[] },
+  userId?: string | null,
+): Promise<{ imported: number; skipped: number; connections: number }> {
+  const client = await getClient();
+  let imported = 0;
+  let skipped = 0;
+  let connectionsImported = 0;
+
+  const memories = data.memories ?? [];
+  if (memories.length === 0) return { imported: 0, skipped: 0, connections: 0 };
+
+  // Disable FK checks for bulk import
+  await client.execute({ sql: "PRAGMA foreign_keys = OFF", args: [] });
+
+  try {
+    // Check existing IDs
+    const incomingIds = memories.map((m) => m.id as string).filter(Boolean);
+    const existingIds = new Set<string>();
+    for (let i = 0; i < incomingIds.length; i += 50) {
+      const batch = incomingIds.slice(i, i + 50);
+      const placeholders = batch.map(() => "?").join(", ");
+      const result = await client.execute({
+        sql: `SELECT id FROM memories WHERE id IN (${placeholders})`,
+        args: batch,
+      });
+      for (const row of result.rows) existingIds.add(row.id as string);
+    }
+
+    // Insert memories
+    for (const mem of memories) {
+      const id = mem.id as string;
+      if (!id || existingIds.has(id)) { skipped++; continue; }
+
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO memories
+          (id, content, detail, domain, source_agent_id, source_agent_name,
+           cross_agent_id, cross_agent_name, source_type, source_description,
+           confidence, confirmed_count, corrected_count, mistake_count, used_count,
+           learned_at, confirmed_at, last_used_at, deleted_at,
+           has_pii_flag, entity_type, entity_name, structured_data, summary,
+           permanence, expires_at, archived_at, user_id, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          id,
+          (mem.content as string) ?? "",
+          (mem.detail as string | null) ?? null,
+          (mem.domain as string) ?? "general",
+          (mem.source_agent_id as string) ?? "import",
+          (mem.source_agent_name as string) ?? "dashboard_import",
+          (mem.cross_agent_id as string | null) ?? null,
+          (mem.cross_agent_name as string | null) ?? null,
+          (mem.source_type as string) ?? "inferred",
+          (mem.source_description as string | null) ?? null,
+          (mem.confidence as number) ?? 0.7,
+          (mem.confirmed_count as number) ?? 0,
+          (mem.corrected_count as number) ?? 0,
+          (mem.mistake_count as number) ?? 0,
+          (mem.used_count as number) ?? 0,
+          (mem.learned_at as string | null) ?? null,
+          (mem.confirmed_at as string | null) ?? null,
+          (mem.last_used_at as string | null) ?? null,
+          (mem.deleted_at as string | null) ?? null,
+          (mem.has_pii_flag as number) ?? 0,
+          (mem.entity_type as string | null) ?? null,
+          (mem.entity_name as string | null) ?? null,
+          (mem.structured_data as string | null) ?? null,
+          (mem.summary as string | null) ?? null,
+          (mem.permanence as string | null) ?? null,
+          (mem.expires_at as string | null) ?? null,
+          (mem.archived_at as string | null) ?? null,
+          userId ?? (mem.user_id as string | null) ?? null,
+          (mem.updated_at as string | null) ?? null,
+        ],
+      });
+      imported++;
+    }
+
+    // Import connections where both endpoints exist
+    const connections = data.connections ?? [];
+    if (connections.length > 0) {
+      const refIds = new Set<string>();
+      for (const c of connections) {
+        refIds.add(c.source_memory_id as string);
+        refIds.add(c.target_memory_id as string);
+      }
+      const validIds = new Set<string>();
+      const refArray = [...refIds];
+      for (let i = 0; i < refArray.length; i += 50) {
+        const batch = refArray.slice(i, i + 50);
+        const placeholders = batch.map(() => "?").join(", ");
+        const result = await client.execute({
+          sql: `SELECT id FROM memories WHERE id IN (${placeholders})`,
+          args: batch,
+        });
+        for (const row of result.rows) validIds.add(row.id as string);
+      }
+      for (const conn of connections) {
+        const src = conn.source_memory_id as string;
+        const tgt = conn.target_memory_id as string;
+        if (!validIds.has(src) || !validIds.has(tgt)) continue;
+        await client.execute({
+          sql: `INSERT OR IGNORE INTO memory_connections
+            (source_memory_id, target_memory_id, relationship, user_id, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [
+            src, tgt,
+            (conn.relationship as string) ?? "related",
+            userId ?? (conn.user_id as string | null) ?? null,
+            (conn.updated_at as string | null) ?? null,
+          ],
+        });
+        connectionsImported++;
+      }
+    }
+  } finally {
+    await client.execute({ sql: "PRAGMA foreign_keys = ON", args: [] });
+  }
+
+  return { imported, skipped, connections: connectionsImported };
+}
+
 // --- Write operations ---
 
 export async function deleteMemoryById(id: string, userId?: string | null): Promise<boolean> {

@@ -74,7 +74,7 @@ const CREATE_TABLES_SQL = `
 
   CREATE TABLE IF NOT EXISTS user_settings (
     user_id TEXT PRIMARY KEY,
-    tier TEXT NOT NULL DEFAULT 'free',
+    tier TEXT NOT NULL DEFAULT 'local',
     byok_provider TEXT,
     byok_api_key_enc TEXT,
     byok_base_url TEXT,
@@ -170,7 +170,7 @@ async function runMigrations(client: Client): Promise<void> {
     await client.executeMultiple(`
       CREATE TABLE IF NOT EXISTS user_settings (
         user_id TEXT PRIMARY KEY,
-        tier TEXT NOT NULL DEFAULT 'free',
+        tier TEXT NOT NULL DEFAULT 'local',
         byok_provider TEXT,
         byok_api_key_enc TEXT,
         byok_base_url TEXT,
@@ -231,6 +231,22 @@ async function runMigrations(client: Client): Promise<void> {
         user_id TEXT,
         UNIQUE(entity_name, entity_type, user_id)
       );
+    `);
+  });
+
+  await runMigration(client, "add_cleanup_dismissals", async () => {
+    await client.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS cleanup_dismissals (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        suggestion_key TEXT NOT NULL,
+        suggestion_type TEXT NOT NULL,
+        action TEXT NOT NULL,
+        resolution_note TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(user_id, suggestion_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cleanup_dismissals_user ON cleanup_dismissals(user_id);
     `);
   });
 

@@ -157,10 +157,10 @@ export async function getLLMStatus(userId?: string | null): Promise<{
 
     if (result.rows.length > 0) {
       const row = result.rows[0];
-      const tier = (row.tier as string) || "free";
+      const tier = (row.tier as string) || "local";
 
-      // Pro+AI tier: managed LLM, no BYOK needed
-      if (tier === "pro_ai") {
+      // Cloud+ tier: managed LLM, no BYOK needed
+      if (tier === "cloud+") {
         return {
           configured: true,
           provider: "anthropic",
@@ -183,7 +183,7 @@ export async function getLLMStatus(userId?: string | null): Promise<{
       return { configured: false, tier };
     }
 
-    return { configured: false, tier: "free" };
+    return { configured: false, tier: "local" };
   }
 
   // Local mode: read from config.json
@@ -230,7 +230,7 @@ export async function resolveHostedLLMProvider(
 
   if (result.rows.length === 0) return null;
   const row = result.rows[0];
-  const tier = (row.tier as string) || "free";
+  const tier = (row.tier as string) || "local";
 
   // 1. Check BYOK
   if (row.byok_provider && row.byok_api_key_enc) {
@@ -252,8 +252,8 @@ export async function resolveHostedLLMProvider(
     }
   }
 
-  // 2. Managed tier
-  if (tier === "pro_ai" && process.env.ENGRAMS_MANAGED_ANTHROPIC_KEY) {
+  // 2. Managed tier (cloud+)
+  if (tier === "cloud+" && process.env.ENGRAMS_MANAGED_ANTHROPIC_KEY) {
     return createLLMProvider(
       {
         provider: "anthropic",
@@ -264,4 +264,17 @@ export async function resolveHostedLLMProvider(
   }
 
   return null;
+}
+
+export async function updateTier(
+  userId: string,
+  tier: "local" | "cloud" | "cloud+",
+): Promise<void> {
+  const client = getClient();
+  await client.execute({
+    sql: `INSERT INTO user_settings (user_id, tier, created_at, updated_at)
+          VALUES (?, ?, datetime('now'), datetime('now'))
+          ON CONFLICT(user_id) DO UPDATE SET tier = ?, updated_at = datetime('now')`,
+    args: [userId, tier, tier],
+  });
 }

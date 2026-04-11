@@ -68,7 +68,7 @@ export const agentPermissions = sqliteTable("agent_permissions", {
 
 export const userSettings = sqliteTable("user_settings", {
   userId: text("user_id").primaryKey(),
-  tier: text("tier").notNull().default("free"), // 'free' | 'pro' | 'pro_ai'
+  tier: text("tier").notNull().default("local"), // 'local' | 'cloud' | 'cloud+'
   byokProvider: text("byok_provider"), // 'anthropic' | 'openai' | 'ollama' | null
   byokApiKeyEnc: text("byok_api_key_enc"), // AES-256-GCM encrypted with ENGRAMS_ENCRYPTION_KEY
   byokBaseUrl: text("byok_base_url"),
@@ -100,5 +100,15 @@ export const apiTokens = sqliteTable("api_tokens", {
   lastUsedAt: text("last_used_at"),
   lastIp: text("last_ip"),
   revokedAt: text("revoked_at"),                      // soft revoke
+  createdAt: text("created_at").notNull(),
+});
+
+export const cleanupDismissals = sqliteTable("cleanup_dismissals", {
+  id: text("id").primaryKey(),
+  userId: text("user_id"),
+  suggestionKey: text("suggestion_key").notNull(),
+  suggestionType: text("suggestion_type").notNull(),
+  action: text("action").notNull(), // 'dismissed' | 'resolved'
+  resolutionNote: text("resolution_note"),
   createdAt: text("created_at").notNull(),
 });

@@ -17,7 +17,8 @@
       "import": "./dist/cloud.js"
     },
     "./serverless": {
-      "import": "./dist/serverless.js"
+      "import": "./dist/serverless.js",
+      "types": "./serverless.d.ts"
     }
   },
   "files": [

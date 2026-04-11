@@ -270,7 +270,7 @@ export async function updateTier(
   userId: string,
   tier: "local" | "cloud" | "cloud+",
 ): Promise<void> {
-  const client = getClient();
+  const client = await getClient();
   await client.execute({
     sql: `INSERT INTO user_settings (user_id, tier, created_at, updated_at)
           VALUES (?, ?, datetime('now'), datetime('now'))

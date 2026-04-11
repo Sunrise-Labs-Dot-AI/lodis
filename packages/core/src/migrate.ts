@@ -3,6 +3,296 @@ import { encrypt, decrypt } from "./crypto.js";
 
 const BATCH_SIZE = 100;
 
+// --- Export/Import types ---
+
+export interface EngramsExportData {
+  version: "1.0";
+  exportedAt: string;
+  memories: Record<string, unknown>[];
+  connections: Record<string, unknown>[];
+  events?: Record<string, unknown>[];
+  pagination: { offset: number; limit: number; total: number; hasMore: boolean };
+}
+
+// Columns to include in export (everything except embedding which is binary/model-specific)
+const MEMORY_EXPORT_COLUMNS = [
+  "id", "content", "detail", "domain",
+  "source_agent_id", "source_agent_name", "cross_agent_id", "cross_agent_name",
+  "source_type", "source_description",
+  "confidence", "confirmed_count", "corrected_count", "mistake_count", "used_count",
+  "learned_at", "confirmed_at", "last_used_at", "deleted_at",
+  "has_pii_flag", "entity_type", "entity_name", "structured_data", "summary",
+  "permanence", "expires_at", "archived_at", "user_id", "updated_at",
+] as const;
+
+/**
+ * Export memories as JSON for cross-server migration.
+ * Paginated to keep payloads manageable for MCP tool results.
+ * Excludes embeddings (binary, model-specific — regenerated on import).
+ */
+export async function exportMemories(
+  client: Client,
+  options: {
+    limit?: number;
+    offset?: number;
+    userId?: string | null;
+    includeEvents?: boolean;
+    domain?: string;
+  } = {},
+): Promise<EngramsExportData> {
+  const limit = Math.min(options.limit ?? 100, 500);
+  const offset = options.offset ?? 0;
+
+  // Build WHERE clause
+  const conditions = ["deleted_at IS NULL"];
+  const args: (string | number | null)[] = [];
+
+  if (options.userId) {
+    conditions.push("user_id = ?");
+    args.push(options.userId);
+  }
+  if (options.domain) {
+    conditions.push("domain = ?");
+    args.push(options.domain);
+  }
+
+  const where = conditions.join(" AND ");
+
+  // Get total count
+  const countResult = await client.execute({
+    sql: `SELECT COUNT(*) as cnt FROM memories WHERE ${where}`,
+    args,
+  });
+  const total = (countResult.rows[0]?.cnt as number) ?? 0;
+
+  // Get paginated memories
+  const columns = MEMORY_EXPORT_COLUMNS.join(", ");
+  const memoriesResult = await client.execute({
+    sql: `SELECT ${columns} FROM memories WHERE ${where} ORDER BY learned_at ASC LIMIT ? OFFSET ?`,
+    args: [...args, limit, offset],
+  });
+
+  const memories = memoriesResult.rows.map((row) => {
+    const mem: Record<string, unknown> = {};
+    for (const col of MEMORY_EXPORT_COLUMNS) {
+      mem[col] = row[col] ?? null;
+    }
+    return mem;
+  });
+
+  // Get connections for exported memory IDs
+  const memoryIds = memories.map((m) => m.id as string);
+  let connections: Record<string, unknown>[] = [];
+  if (memoryIds.length > 0) {
+    const placeholders = memoryIds.map(() => "?").join(", ");
+    const connResult = await client.execute({
+      sql: `SELECT source_memory_id, target_memory_id, relationship, user_id, updated_at
+            FROM memory_connections
+            WHERE source_memory_id IN (${placeholders}) OR target_memory_id IN (${placeholders})`,
+      args: [...memoryIds, ...memoryIds],
+    });
+    connections = connResult.rows.map((row) => ({
+      source_memory_id: row.source_memory_id,
+      target_memory_id: row.target_memory_id,
+      relationship: row.relationship,
+      user_id: row.user_id ?? null,
+      updated_at: row.updated_at ?? null,
+    }));
+  }
+
+  // Optionally get events
+  let events: Record<string, unknown>[] | undefined;
+  if (options.includeEvents && memoryIds.length > 0) {
+    const placeholders = memoryIds.map(() => "?").join(", ");
+    const eventsResult = await client.execute({
+      sql: `SELECT id, memory_id, event_type, agent_id, agent_name, old_value, new_value, user_id, timestamp
+            FROM memory_events WHERE memory_id IN (${placeholders})`,
+      args: memoryIds,
+    });
+    events = eventsResult.rows.map((row) => ({
+      id: row.id,
+      memory_id: row.memory_id,
+      event_type: row.event_type,
+      agent_id: row.agent_id ?? null,
+      agent_name: row.agent_name ?? null,
+      old_value: row.old_value ?? null,
+      new_value: row.new_value ?? null,
+      user_id: row.user_id ?? null,
+      timestamp: row.timestamp,
+    }));
+  }
+
+  return {
+    version: "1.0",
+    exportedAt: new Date().toISOString(),
+    memories,
+    connections,
+    ...(events ? { events } : {}),
+    pagination: { offset, limit, total, hasMore: offset + limit < total },
+  };
+}
+
+/**
+ * Import memories from an Engrams export JSON.
+ * Preserves all original metadata faithfully — no confidence reset, no entity re-extraction.
+ * Deduplicates by memory ID (INSERT OR IGNORE). Safe to re-run.
+ * Remaps user_id to the provided userId.
+ */
+export async function importFromExport(
+  client: Client,
+  data: { memories: Record<string, unknown>[]; connections?: Record<string, unknown>[]; events?: Record<string, unknown>[] },
+  options: { userId?: string | null } = {},
+): Promise<{ imported: number; skipped: number; connections: number; events: number }> {
+  let imported = 0;
+  let skipped = 0;
+  let connectionsImported = 0;
+  let eventsImported = 0;
+
+  const memories = data.memories ?? [];
+  if (memories.length === 0) {
+    return { imported: 0, skipped: 0, connections: 0, events: 0 };
+  }
+
+  // Check which IDs already exist
+  const incomingIds = memories.map((m) => m.id as string).filter(Boolean);
+  const existingIds = new Set<string>();
+  for (let i = 0; i < incomingIds.length; i += BATCH_SIZE) {
+    const batch = incomingIds.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => "?").join(", ");
+    const result = await client.execute({
+      sql: `SELECT id FROM memories WHERE id IN (${placeholders})`,
+      args: batch,
+    });
+    for (const row of result.rows) {
+      existingIds.add(row.id as string);
+    }
+  }
+
+  // Insert new memories
+  for (let i = 0; i < memories.length; i += BATCH_SIZE) {
+    const batch = memories.slice(i, i + BATCH_SIZE);
+    for (const mem of batch) {
+      const id = mem.id as string;
+      if (!id || existingIds.has(id)) {
+        skipped++;
+        continue;
+      }
+
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO memories
+          (id, content, detail, domain, source_agent_id, source_agent_name,
+           cross_agent_id, cross_agent_name, source_type, source_description,
+           confidence, confirmed_count, corrected_count, mistake_count, used_count,
+           learned_at, confirmed_at, last_used_at, deleted_at,
+           has_pii_flag, entity_type, entity_name, structured_data, summary,
+           permanence, expires_at, archived_at, user_id, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          id,
+          (mem.content as string) ?? "",
+          (mem.detail as string | null) ?? null,
+          (mem.domain as string) ?? "general",
+          (mem.source_agent_id as string) ?? "import",
+          (mem.source_agent_name as string) ?? "memory_import",
+          (mem.cross_agent_id as string | null) ?? null,
+          (mem.cross_agent_name as string | null) ?? null,
+          (mem.source_type as string) ?? "inferred",
+          (mem.source_description as string | null) ?? null,
+          (mem.confidence as number) ?? 0.7,
+          (mem.confirmed_count as number) ?? 0,
+          (mem.corrected_count as number) ?? 0,
+          (mem.mistake_count as number) ?? 0,
+          (mem.used_count as number) ?? 0,
+          (mem.learned_at as string | null) ?? null,
+          (mem.confirmed_at as string | null) ?? null,
+          (mem.last_used_at as string | null) ?? null,
+          (mem.deleted_at as string | null) ?? null,
+          (mem.has_pii_flag as number) ?? 0,
+          (mem.entity_type as string | null) ?? null,
+          (mem.entity_name as string | null) ?? null,
+          (mem.structured_data as string | null) ?? null,
+          (mem.summary as string | null) ?? null,
+          (mem.permanence as string | null) ?? null,
+          (mem.expires_at as string | null) ?? null,
+          (mem.archived_at as string | null) ?? null,
+          options.userId ?? (mem.user_id as string | null) ?? null,
+          (mem.updated_at as string | null) ?? null,
+        ],
+      });
+      imported++;
+    }
+  }
+
+  // Import connections — only where both endpoints exist
+  const connections = data.connections ?? [];
+  if (connections.length > 0) {
+    // Build set of all memory IDs in the DB that are referenced by connections
+    const referencedIds = new Set<string>();
+    for (const conn of connections) {
+      referencedIds.add(conn.source_memory_id as string);
+      referencedIds.add(conn.target_memory_id as string);
+    }
+    const refArray = [...referencedIds];
+    const validIds = new Set<string>();
+    for (let i = 0; i < refArray.length; i += BATCH_SIZE) {
+      const batch = refArray.slice(i, i + BATCH_SIZE);
+      const placeholders = batch.map(() => "?").join(", ");
+      const result = await client.execute({
+        sql: `SELECT id FROM memories WHERE id IN (${placeholders})`,
+        args: batch,
+      });
+      for (const row of result.rows) {
+        validIds.add(row.id as string);
+      }
+    }
+
+    for (const conn of connections) {
+      const src = conn.source_memory_id as string;
+      const tgt = conn.target_memory_id as string;
+      if (!validIds.has(src) || !validIds.has(tgt)) continue;
+
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO memory_connections
+          (source_memory_id, target_memory_id, relationship, user_id, updated_at)
+          VALUES (?, ?, ?, ?, ?)`,
+        args: [
+          src, tgt,
+          (conn.relationship as string) ?? "related",
+          options.userId ?? (conn.user_id as string | null) ?? null,
+          (conn.updated_at as string | null) ?? null,
+        ],
+      });
+      connectionsImported++;
+    }
+  }
+
+  // Import events
+  const events = data.events ?? [];
+  if (events.length > 0) {
+    for (const evt of events) {
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO memory_events
+          (id, memory_id, event_type, agent_id, agent_name, old_value, new_value, user_id, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          (evt.id as string) ?? null,
+          (evt.memory_id as string) ?? null,
+          (evt.event_type as string) ?? "imported",
+          (evt.agent_id as string | null) ?? null,
+          (evt.agent_name as string | null) ?? null,
+          (evt.old_value as string | null) ?? null,
+          (evt.new_value as string | null) ?? null,
+          options.userId ?? (evt.user_id as string | null) ?? null,
+          (evt.timestamp as string) ?? new Date().toISOString(),
+        ],
+      });
+      eventsImported++;
+    }
+  }
+
+  return { imported, skipped, connections: connectionsImported, events: eventsImported };
+}
+
 /**
  * Migrate all data from a local database to a cloud (Turso) database.
  * Encrypts content, detail, and structured_data fields.

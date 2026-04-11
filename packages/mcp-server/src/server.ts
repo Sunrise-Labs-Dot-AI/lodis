@@ -35,6 +35,8 @@ import {
   saveCredentials,
   migrateToCloud,
   migrateToLocal,
+  exportMemories,
+  importFromExport,
   resolveLLMProvider,
   parseLLMJson,
   validateExtraction,
@@ -1841,6 +1843,28 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
   );
 
   server.tool(
+    "memory_export",
+    "Export memories as JSON for migration to another Engrams instance. Returns paginated results — call repeatedly with increasing offset until hasMore is false. Use with memory_import (source_type: 'engrams') on the destination server to complete migration.",
+    {
+      limit: z.number().optional().describe("Memories per page (default 100, max 500)"),
+      offset: z.number().optional().describe("Pagination offset (default 0)"),
+      include_events: z.boolean().optional().describe("Include event history (default false)"),
+      domain: z.string().optional().describe("Filter export to a specific domain"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const result = await exportMemories(client, {
+        limit: params.limit,
+        offset: params.offset,
+        userId,
+        includeEvents: params.include_events,
+        domain: params.domain,
+      });
+      return textResult(result);
+    },
+  );
+
+  server.tool(
     "memory_classify",
     "Batch-classify untyped memories using entity extraction. Runs in the background and returns progress. Use this to backfill entity types on existing memories.",
     {
@@ -2511,15 +2535,68 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
   server.tool(
     "memory_import",
-    "Import memories from a known format. Parses the source, deduplicates against existing memories, and writes new ones. Supported sources: claude-memory (MEMORY.md files), chatgpt-export (OpenAI memory export JSON), cursorrules (.cursorrules files), gitconfig (.gitconfig), plaintext (one memory per line).",
+    "Import memories from a known format. Parses the source, deduplicates against existing memories, and writes new ones. Supported sources: engrams (full Engrams JSON export — preserves all metadata faithfully), claude-memory (MEMORY.md files), chatgpt-export (OpenAI memory export JSON), cursorrules (.cursorrules files), gitconfig (.gitconfig), plaintext (one memory per line).",
     {
-      source_type: z.enum(["claude-memory", "chatgpt-export", "cursorrules", "gitconfig", "plaintext"]).describe("The format of the source data"),
+      source_type: z.enum(["engrams", "claude-memory", "chatgpt-export", "cursorrules", "gitconfig", "plaintext"]).describe("The format of the source data"),
       content: z.string().describe("The raw content to import. For file-based sources, pass the file contents."),
       domain: z.string().optional().describe("Domain to assign to imported memories. Default: 'general'."),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
       const domain = params.domain ?? "general";
+
+      // Engrams native format — faithful bulk import, bypasses standard pipeline
+      if (params.source_type === "engrams") {
+        try {
+          const parsed = JSON.parse(params.content);
+          const exportData = {
+            memories: parsed.memories ?? (Array.isArray(parsed) ? parsed : []),
+            connections: parsed.connections ?? [],
+            events: parsed.events,
+          };
+
+          if (exportData.memories.length === 0) {
+            return textResult({ imported: 0, message: "No memories found in the provided export data." });
+          }
+
+          const result = await importFromExport(client, exportData, { userId });
+
+          // Background embedding generation for imported memories
+          if (vecAvailable && result.imported > 0) {
+            (async () => {
+              try {
+                await backfillEmbeddings(client, vecAvailable);
+              } catch {
+                // Non-fatal
+              }
+            })();
+          }
+
+          // Log the import event
+          await client.execute({
+            sql: `INSERT INTO memory_events (id, memory_id, event_type, new_value, timestamp) VALUES (?, 'system', 'import', ?, ?)`,
+            args: [
+              generateId(),
+              JSON.stringify({ source_type: "engrams", imported: result.imported, skipped: result.skipped, connections: result.connections }),
+              now(),
+            ],
+          });
+
+          await bumpLastModified(client);
+
+          return textResult({
+            imported: result.imported,
+            skipped_existing: result.skipped,
+            connections: result.connections,
+            events: result.events,
+            note: result.imported > 0
+              ? `Imported ${result.imported} memories with original metadata preserved. ${result.skipped} already existed (skipped). ${result.connections} connections imported.`
+              : "All memories already exist in this instance (skipped).",
+          });
+        } catch (err) {
+          return textResult({ error: `Failed to parse Engrams export JSON: ${err instanceof Error ? err.message : String(err)}` });
+        }
+      }
 
       // Parse into individual memory strings based on source type
       let entries: { content: string; detail?: string }[] = [];

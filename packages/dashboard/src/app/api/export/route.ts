@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllMemoriesForExport } from "@/lib/db";
+import { getAllMemoriesForExport, getAllConnectionsForExport } from "@/lib/db";
 import { getUserId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +11,9 @@ export async function GET() {
     return new NextResponse("Unauthorized", { status: 401 });
   }
   const memories = await getAllMemoriesForExport(userId);
+  const connections = await getAllConnectionsForExport(userId);
   const data = JSON.stringify(
-    { exportedAt: new Date().toISOString(), count: memories.length, memories },
+    { version: "1.0", exportedAt: new Date().toISOString(), count: memories.length, memories, connections },
     null,
     2,
   );

@@ -566,6 +566,20 @@ export async function getAllMemoriesForExport(userId?: string | null): Promise<M
   return Promise.all(result.rows.map(r => decryptRow(r as unknown as MemoryRow)));
 }
 
+export async function getAllConnectionsForExport(userId?: string | null): Promise<ConnectionRow[]> {
+  const client = getClient();
+  const uf = userFilter(userId);
+  const mcuf = { clause: uf.clause.replace("user_id", "mc.user_id"), args: uf.args };
+  const result = await client.execute({
+    sql: `SELECT mc.source_memory_id, mc.target_memory_id, mc.relationship
+          FROM memory_connections mc
+          JOIN memories m1 ON m1.id = mc.source_memory_id AND m1.deleted_at IS NULL
+          JOIN memories m2 ON m2.id = mc.target_memory_id AND m2.deleted_at IS NULL${mcuf.clause}`,
+    args: [...mcuf.args],
+  });
+  return result.rows as unknown as ConnectionRow[];
+}
+
 // --- Write operations ---
 
 export async function deleteMemoryById(id: string, userId?: string | null): Promise<boolean> {

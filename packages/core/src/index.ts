@@ -18,7 +18,8 @@ export { encrypt, decrypt, deriveKeys, generateSalt, encryptMemory, decryptMemor
 export type { EncryptionKeys } from "./crypto.js";
 export { loadCredentials, saveCredentials, initCredentials, loadConfig, saveConfig } from "./credentials.js";
 export type { Credentials, EngramsConfig } from "./credentials.js";
-export { migrateToCloud, migrateToLocal } from "./migrate.js";
+export { migrateToCloud, migrateToLocal, exportMemories, importFromExport } from "./migrate.js";
+export type { EngramsExportData } from "./migrate.js";
 export { getOrGenerateProfile, getProfile, isProfileStale, listProfiles } from "./entity-profiles.js";
 export type { EntityProfile } from "./entity-profiles.js";
 export { createLLMProvider } from "./llm.js";

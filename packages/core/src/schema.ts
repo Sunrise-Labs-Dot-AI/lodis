@@ -68,9 +68,10 @@ export const agentPermissions = sqliteTable("agent_permissions", {
 
 export const userSettings = sqliteTable("user_settings", {
   userId: text("user_id").primaryKey(),
-  tier: text("tier").notNull().default("local"), // 'local' | 'cloud' | 'cloud+'
-  byokProvider: text("byok_provider"), // 'anthropic' | 'openai' | 'ollama' | null
-  byokApiKeyEnc: text("byok_api_key_enc"), // AES-256-GCM encrypted with ENGRAMS_ENCRYPTION_KEY
+  tier: text("tier").notNull().default("local"), // 'local' | 'cloud'
+  // DEPRECATED: byok_* columns retained to avoid migration; no longer used after LLM removal
+  byokProvider: text("byok_provider"),
+  byokApiKeyEnc: text("byok_api_key_enc"),
   byokBaseUrl: text("byok_base_url"),
   byokExtractionModel: text("byok_extraction_model"),
   byokAnalysisModel: text("byok_analysis_model"),

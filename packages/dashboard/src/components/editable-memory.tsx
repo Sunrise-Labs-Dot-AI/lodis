@@ -56,7 +56,7 @@ export function EditableMemory({ id, content, detail }: EditableMemoryProps) {
 
   async function saveEdit(newContent: string, newDetail: string | null) {
     const { directUpdateMemory } = await import("@/lib/db-actions");
-    await directUpdateMemory(id, newContent, newDetail);
+    await directUpdateMemory(id, { content: newContent, detail: newDetail });
     router.refresh();
   }
 

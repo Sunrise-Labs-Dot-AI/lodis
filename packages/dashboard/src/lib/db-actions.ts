@@ -1,12 +1,12 @@
 "use server";
 
-import { directUpdateMemory as _directUpdateMemory } from "./db";
+import { directUpdateMemory as _directUpdateMemory, type MemoryUpdateFields } from "./db";
 import { revalidatePath } from "next/cache";
 import { getUserId } from "@/lib/auth";
 
-export async function directUpdateMemory(id: string, content: string, detail: string | null) {
+export async function directUpdateMemory(id: string, fields: MemoryUpdateFields) {
   const userId = await getUserId();
-  await _directUpdateMemory(id, content, detail, userId);
+  await _directUpdateMemory(id, fields, userId);
   revalidatePath("/");
   revalidatePath(`/memory/${id}`);
 }

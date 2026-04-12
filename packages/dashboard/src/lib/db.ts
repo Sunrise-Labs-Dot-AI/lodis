@@ -990,12 +990,41 @@ export async function clearAllMemories(userId?: string | null): Promise<void> {
   });
 }
 
-export async function directUpdateMemory(id: string, content: string, detail: string | null, userId?: string | null): Promise<void> {
+export interface MemoryUpdateFields {
+  content?: string;
+  detail?: string | null;
+  domain?: string;
+  entityType?: string | null;
+  entityName?: string | null;
+  structuredData?: string | null;
+}
+
+const fieldColumnMap: Record<keyof MemoryUpdateFields, string> = {
+  content: "content",
+  detail: "detail",
+  domain: "domain",
+  entityType: "entity_type",
+  entityName: "entity_name",
+  structuredData: "structured_data",
+};
+
+export async function directUpdateMemory(id: string, fields: MemoryUpdateFields, userId?: string | null): Promise<void> {
+  const setClauses: string[] = [];
+  const args: (string | null)[] = [];
+  for (const [key, col] of Object.entries(fieldColumnMap)) {
+    if (key in fields) {
+      setClauses.push(`${col} = ?`);
+      const val = (fields as Record<string, string | null | undefined>)[key];
+      args.push(val ?? null);
+    }
+  }
+  if (setClauses.length === 0) return;
+  args.push(id);
   const client = await getClient();
   const uf = userFilter(userId);
   await client.execute({
-    sql: `UPDATE memories SET content = ?, detail = ? WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
-    args: [content, detail, id, ...uf.args],
+    sql: `UPDATE memories SET ${setClauses.join(", ")} WHERE id = ? AND deleted_at IS NULL${uf.clause}`,
+    args: [...args, ...uf.args],
   });
 }
 

@@ -1,19 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ShieldAlert, Star, Clock, Archive } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { getMemoryById, getMemoryEvents, getMemoryConnections } from "@/lib/db";
 import { getUserId } from "@/lib/auth";
 import {
   formatDate,
   formatConfidence,
-  sourceTypeLabel,
 } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/confidence-bar";
 import { EventTimeline } from "@/components/event-timeline";
 import { ConnectionGraph } from "@/components/connection-graph";
 import { EditableMemory } from "@/components/editable-memory";
+import { EditableMetadata } from "@/components/editable-metadata";
+import { EditableStructuredData } from "@/components/editable-structured-data";
 import { MemoryActions } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -45,49 +45,17 @@ export default async function MemoryDetailPage({ params }: PageProps) {
         <div className="space-y-4">
           <EditableMemory id={memory.id} content={memory.content} detail={memory.detail} />
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge variant="accent">{memory.domain}</StatusBadge>
-            <StatusBadge variant="neutral">
-              {sourceTypeLabel(memory.source_type)}
-            </StatusBadge>
-            {memory.permanence === "canonical" && (
-              <StatusBadge variant="accent">
-                <Star size={12} className="mr-0.5 inline fill-current" />
-                Canonical
-              </StatusBadge>
-            )}
-            {memory.permanence === "ephemeral" && (
-              <StatusBadge variant="warning">
-                <Clock size={12} className="mr-0.5 inline" />
-                Ephemeral
-              </StatusBadge>
-            )}
-            {memory.permanence === "archived" && (
-              <StatusBadge variant="neutral">
-                <Archive size={12} className="mr-0.5 inline" />
-                Archived
-              </StatusBadge>
-            )}
-            {memory.entity_type && (
-              <StatusBadge variant="neutral">
-                {memory.entity_type}{memory.entity_name ? `: ${memory.entity_name}` : ""}
-              </StatusBadge>
-            )}
-            {!!memory.has_pii_flag && (
-              <StatusBadge variant="warning">
-                <ShieldAlert size={12} className="mr-0.5 inline" />
-                Contains sensitive data
-              </StatusBadge>
-            )}
-            <span className="text-xs text-[var(--color-text-muted)]">
-              by {memory.source_agent_name}
-            </span>
-            {memory.source_description && (
-              <span className="text-xs text-[var(--color-text-muted)] italic">
-                — {memory.source_description}
-              </span>
-            )}
-          </div>
+          <EditableMetadata
+            id={memory.id}
+            domain={memory.domain}
+            entityType={memory.entity_type}
+            entityName={memory.entity_name}
+            sourceType={memory.source_type}
+            sourceAgentName={memory.source_agent_name}
+            sourceDescription={memory.source_description}
+            permanence={memory.permanence}
+            hasPiiFlag={!!memory.has_pii_flag}
+          />
 
           <div className="max-w-xs">
             <ConfidenceBar confidence={memory.confidence} />
@@ -132,27 +100,11 @@ export default async function MemoryDetailPage({ params }: PageProps) {
         </Card>
       </div>
 
-      {memory.structured_data && (() => {
-        let parsed: Record<string, unknown> | null = null;
-        try {
-          parsed = JSON.parse(memory.structured_data);
-        } catch {
-          // Invalid JSON — skip structured data display
-        }
-        return parsed ? (
-          <Card className="p-4">
-            <h3 className="text-sm font-semibold mb-3">Structured Data</h3>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              {Object.entries(parsed).map(([key, value]) => (
-                <div key={key}>
-                  <span className="text-[var(--color-text-muted)]">{key}</span>
-                  <p className="font-medium">{String(value ?? "—")}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-        ) : null;
-      })()}
+      <EditableStructuredData
+        id={memory.id}
+        entityType={memory.entity_type}
+        structuredData={memory.structured_data}
+      />
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold mb-3">Connections</h3>

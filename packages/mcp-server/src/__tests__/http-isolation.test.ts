@@ -65,8 +65,12 @@ const SETUP_SQL = `
     entity_type TEXT,
     entity_name TEXT,
     structured_data TEXT,
-    updated_at TEXT,
-    user_id TEXT
+    summary TEXT,
+    permanence TEXT,
+    expires_at TEXT,
+    archived_at TEXT,
+    user_id TEXT,
+    updated_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS memory_events (

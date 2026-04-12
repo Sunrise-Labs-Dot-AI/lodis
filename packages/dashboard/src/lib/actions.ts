@@ -15,29 +15,12 @@ import {
 } from "./db";
 import {
   scanForSuggestions,
-  expandMergeSuggestion,
-  expandSplitSuggestion,
-  expandContradictionSuggestion,
   suggestionKey,
   type CleanupSuggestion,
   type ScanResult,
 } from "./cleanup";
 import { getUserId } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { resolveLLMProvider as resolveLocalLLMProvider } from "@engrams/core/llm-config";
-import { resolveHostedLLMProvider } from "@/app/settings/llm-actions";
-import { parseLLMJson } from "@engrams/core/llm-utils";
-import { validateCorrection, validateSplit } from "@engrams/core/llm-validation";
-import type { LLMProvider } from "@engrams/core/llm";
-
-const isHosted = !!process.env.TURSO_DATABASE_URL;
-
-async function resolveLLMProvider(task: "extraction" | "analysis", userId?: string | null): Promise<LLMProvider | null> {
-  if (isHosted && userId) {
-    return resolveHostedLLMProvider(userId, task);
-  }
-  return resolveLocalLLMProvider(task);
-}
 
 export async function deleteMemoryAction(id: string) {
   const userId = await getUserId();
@@ -62,91 +45,37 @@ export async function flagMemoryAction(id: string) {
   return result;
 }
 
-export async function correctMemoryAction(id: string, feedback: string): Promise<{ newConfidence: number; content: string; detail: string | null } | { error: string } | null> {
+export async function correctMemoryAction(id: string, newContent: string, newDetail?: string | null): Promise<{ newConfidence: number; content: string; detail: string | null } | { error: string } | null> {
   const userId = await getUserId();
   const memory = await getMemoryById(id, userId);
   if (!memory) return null;
 
-  const provider = await resolveLLMProvider("analysis", userId);
-  if (!provider) {
-    return { error: "No LLM provider configured. Semantic correction requires an LLM. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
-  }
-
-  const prompt = `You are updating a stored memory based on user feedback. Return ONLY valid JSON with "content" and "detail" fields.
-
-Current memory:
-- Content: ${JSON.stringify(memory.content)}
-- Detail: ${JSON.stringify(memory.detail)}
-
-User's correction: ${JSON.stringify(feedback)}
-
-Apply the user's correction to produce updated content and detail. The "content" field is a short summary (one sentence). The "detail" field is optional additional context. If the correction only applies to one field, keep the other unchanged. If detail should be empty, set it to null.
-
-Respond with ONLY a JSON object: {"content": "...", "detail": "..." or null}`;
-
-  try {
-    const text = await provider.complete(prompt, { maxTokens: 512, json: true });
-    const parsed = parseLLMJson<{ content: string; detail: string | null }>(text);
-    const newContent = typeof parsed.content === "string" ? parsed.content : memory.content;
-    const newDetail = parsed.detail === null ? null : (typeof parsed.detail === "string" ? parsed.detail : memory.detail);
-
-    const validation = validateCorrection(memory.content, newContent, feedback);
-    if (!validation.valid) {
-      return { error: `LLM correction failed validation: ${validation.error ?? "unknown reason"}. Please try rephrasing your correction.` };
-    }
-
-    const result = await correctMemoryById(id, newContent, newDetail, userId);
-    revalidatePath("/");
-    revalidatePath(`/memory/${id}`);
-    if (!result) return null;
-    return { ...result, content: newContent, detail: newDetail ?? null };
-  } catch (e) {
-    return { error: `Correction failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
+  const result = await correctMemoryById(id, newContent, newDetail ?? memory.detail, userId);
+  revalidatePath("/");
+  revalidatePath(`/memory/${id}`);
+  if (!result) return null;
+  return { ...result, content: newContent, detail: newDetail ?? memory.detail };
 }
 
 export type SplitPart = { content: string; detail: string | null };
 
 export async function proposeSplitAction(
   id: string,
-  guidance?: string,
 ): Promise<{ parts: SplitPart[] } | { error: string }> {
   const userId = await getUserId();
   const memory = await getMemoryById(id, userId);
   if (!memory) return { error: "Memory not found" };
 
-  const provider = await resolveLLMProvider("analysis", userId);
-  if (!provider) {
-    return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
+  // Algorithmic sentence splitting — no LLM needed
+  const fullText = memory.content + (memory.detail ? " " + memory.detail : "");
+  const sentences = fullText.split(/(?<=[.!?])\s+/).filter(s => s.length > 10);
+
+  if (sentences.length < 2) {
+    return { error: "Memory doesn't contain enough distinct sentences to split." };
   }
 
-  const prompt = `You are managing a memory system that stores facts about a user. This memory contains multiple distinct topics that should be stored separately so they can be independently searched, confirmed, corrected, or removed.
-
-Current memory:
-- Content: ${JSON.stringify(memory.content)}
-- Detail: ${JSON.stringify(memory.detail)}
-${guidance ? `\nUser's guidance on how to split: ${JSON.stringify(guidance)}` : ""}
-
-Split this into the minimum number of independent memories. Each memory should:
-- Have a clear, specific "content" field (the core fact, one sentence)
-- Have an optional "detail" field for supporting context that aids retrieval
-- Be independently useful — searchable on its own without the other parts
-
-Return ONLY a JSON array: [{"content": "...", "detail": "..." or null}, ...]`;
-
-  try {
-    const text = await provider.complete(prompt, { maxTokens: 1024, json: true });
-    const parts = parseLLMJson<SplitPart[]>(text);
-
-    const validation = validateSplit(memory.content, parts);
-    if (!validation.valid) {
-      return { error: validation.error || "Split analysis failed" };
-    }
-
-    return { parts };
-  } catch (e) {
-    return { error: "Failed to analyze memory for splitting" };
-  }
+  const parts: SplitPart[] = sentences.map(s => ({ content: s.trim(), detail: null }));
+  return { parts };
 }
 
 export async function confirmSplitAction(
@@ -232,40 +161,6 @@ export async function dismissSuggestionAction(
   }
 }
 
-/** Expand: on-demand LLM call for a single suggestion. Requires LLM provider. */
-export async function expandSuggestionAction(
-  suggestion: CleanupSuggestion,
-): Promise<{ suggestion: CleanupSuggestion } | { error: string }> {
-  const userId = await getUserId();
-  const provider = await resolveLLMProvider("analysis", userId);
-  if (!provider) {
-    return {
-      error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings.",
-    };
-  }
-
-  try {
-    let expanded: CleanupSuggestion;
-    switch (suggestion.type) {
-      case "merge":
-        expanded = await expandMergeSuggestion(suggestion, provider);
-        break;
-      case "split":
-        expanded = await expandSplitSuggestion(suggestion, provider);
-        break;
-      case "contradiction":
-        expanded = await expandContradictionSuggestion(suggestion, provider);
-        break;
-      default:
-        expanded = { ...suggestion, expanded: true };
-    }
-    return { suggestion: expanded };
-  } catch (e) {
-    console.error("[engrams] Expand suggestion failed:", e);
-    return { error: "Failed to analyze this suggestion" };
-  }
-}
-
 export async function applyMergeSuggestionAction(
   keepId: string,
   deleteIds: string[],
@@ -347,117 +242,6 @@ export async function bulkRestoreAction(ids: string[]) {
   revalidatePath("/");
   revalidatePath("/archive");
   return { restored };
-}
-
-// --- Resolve with message ---
-
-export interface ResolveAction {
-  action: "keep_both" | "keep" | "delete" | "correct" | "merge";
-  memoryId?: string;
-  newContent?: string;
-  newDetail?: string | null;
-  reason: string;
-}
-
-export interface ResolveResult {
-  actions: ResolveAction[];
-  summary: string;
-  error?: string;
-}
-
-export async function resolveWithMessageAction(
-  memoryIds: string[],
-  message: string,
-): Promise<ResolveResult | { error: string }> {
-  const userId = await getUserId();
-  const memories = await Promise.all(memoryIds.map(id => getMemoryById(id, userId)));
-  const validMemories = memories.filter(Boolean) as NonNullable<typeof memories[0]>[];
-
-  if (validMemories.length === 0) return { error: "No memories found" };
-
-  const provider = await resolveLLMProvider("analysis", userId);
-  if (!provider) {
-    return { error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure in Settings." };
-  }
-
-  const memoryDescriptions = validMemories.map(m =>
-    `- ID: ${m.id}\n  Content: ${JSON.stringify(m.content)}\n  Detail: ${JSON.stringify(m.detail)}\n  Domain: ${m.domain}\n  Confidence: ${m.confidence}`,
-  ).join("\n\n");
-
-  const prompt = `You are managing a memory system. The user wants to resolve an issue with these memories.
-
-Memories:
-${memoryDescriptions}
-
-User's message: ${JSON.stringify(message)}
-
-Based on the user's message, decide what actions to take. Available actions:
-- "keep_both": Both memories are valid, no changes needed (use when user says both are correct/not contradictory)
-- "keep": Keep only this memory, delete others. Requires "memoryId"
-- "delete": Delete this memory. Requires "memoryId"
-- "correct": Update a memory's content. Requires "memoryId", "newContent", and optionally "newDetail"
-- "merge": Combine memories into one. Requires "memoryId" (the one to keep), "newContent", and optionally "newDetail"
-
-Return ONLY a JSON object:
-{
-  "actions": [{"action": "...", "memoryId": "...", "newContent": "...", "newDetail": "..." or null, "reason": "..."}],
-  "summary": "One sentence describing what was done"
-}`;
-
-  try {
-    const text = await provider.complete(prompt, { maxTokens: 1024, json: true });
-    const result = parseLLMJson<ResolveResult>(text);
-
-    if (!result.actions || !Array.isArray(result.actions) || result.actions.length === 0) {
-      return { error: "LLM returned no actions. Try rephrasing your message." };
-    }
-
-    // Apply each action
-    for (const action of result.actions) {
-      switch (action.action) {
-        case "keep_both":
-          // No-op — both are fine
-          break;
-        case "keep": {
-          const deleteIds = memoryIds.filter(id => id !== action.memoryId);
-          for (const id of deleteIds) {
-            await deleteMemoryById(id, userId);
-          }
-          break;
-        }
-        case "delete":
-          if (action.memoryId) {
-            await deleteMemoryById(action.memoryId, userId);
-          }
-          break;
-        case "correct":
-          if (action.memoryId && action.newContent) {
-            await correctMemoryById(action.memoryId, action.newContent, action.newDetail ?? null, userId);
-          }
-          break;
-        case "merge": {
-          if (action.memoryId && action.newContent) {
-            await correctMemoryById(action.memoryId, action.newContent, action.newDetail ?? null, userId);
-            const deleteIds = memoryIds.filter(id => id !== action.memoryId);
-            for (const id of deleteIds) {
-              await deleteMemoryById(id, userId);
-            }
-          }
-          break;
-        }
-      }
-    }
-
-    revalidatePath("/");
-    revalidatePath("/cleanup");
-    for (const id of memoryIds) {
-      revalidatePath(`/memory/${id}`);
-    }
-
-    return { actions: result.actions, summary: result.summary };
-  } catch (e) {
-    return { error: `Resolution failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
 }
 
 export { type CleanupSuggestion } from "./cleanup";

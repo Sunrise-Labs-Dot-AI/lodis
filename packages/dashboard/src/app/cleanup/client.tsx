@@ -8,7 +8,6 @@ import { StatusBadge } from "../../components/ui/status-badge";
 import {
   scanCleanupAction,
   dismissSuggestionAction,
-  expandSuggestionAction,
   applyMergeSuggestionAction,
   applySplitSuggestionAction,
   deleteMemoryAction,
@@ -18,7 +17,6 @@ import {
   scrubMemoryAction,
   pinMemoryAction,
   archiveMemoryAction,
-  resolveWithMessageAction,
 } from "../../lib/actions";
 import type { CleanupSuggestion, HealthScore } from "../../lib/cleanup";
 import {
@@ -36,8 +34,6 @@ import {
   Star,
   Archive,
   Clock,
-  MessageSquare,
-  Send,
 } from "lucide-react";
 import { confidenceColor, formatConfidence } from "../../lib/utils";
 
@@ -514,7 +510,6 @@ export function CleanupClient() {
   const [scanning, setScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandingIndex, setExpandingIndex] = useState<number | null>(null);
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -569,24 +564,6 @@ export function CleanupClient() {
 
   function updateSuggestion(index: number, updated: CleanupSuggestion) {
     setActionable((prev) => prev.map((s, i) => (i === index ? updated : s)));
-  }
-
-  async function handleExpand(index: number) {
-    const suggestion = actionable[index];
-    if (suggestion.expanded) return;
-    setExpandingIndex(index);
-    try {
-      const result = await expandSuggestionAction(suggestion);
-      if ("error" in result) {
-        setError(result.error);
-      } else {
-        updateSuggestion(index, result.suggestion);
-      }
-    } catch {
-      setError("Failed to expand suggestion");
-    } finally {
-      setExpandingIndex(null);
-    }
   }
 
   // --- Memory-level actions ---
@@ -725,27 +702,6 @@ export function CleanupClient() {
     }
   }
 
-  async function handleResolveWithMessage(
-    suggestion: CleanupSuggestion,
-    message: string,
-    index: number,
-  ) {
-    setApplyingIndex(index);
-    setError(null);
-    try {
-      const result = await resolveWithMessageAction(suggestion.memoryIds, message);
-      if ("error" in result && !("actions" in result)) {
-        setError(result.error);
-      } else {
-        resolve(index, result.summary);
-      }
-    } catch {
-      setError("Failed to resolve suggestion");
-    } finally {
-      setApplyingIndex(null);
-    }
-  }
-
   async function applyContradictionKeep(
     suggestion: CleanupSuggestion,
     keepId: string,
@@ -865,12 +821,10 @@ export function CleanupClient() {
                   key={`${suggestion.type}-${suggestion.memoryIds.join("-")}-${index}`}
                   suggestion={suggestion}
                   index={index}
-                  expanding={expandingIndex === index}
                   applying={applyingIndex === index}
                   actionLoading={actionLoading}
                   correctingId={correctingId}
                   onDismiss={() => dismiss(index)}
-                  onExpand={() => handleExpand(index)}
                   onApplyMerge={() => applyMerge(suggestion, index)}
                   onApplySplit={() => applySplit(suggestion, index)}
                   onContradictionKeep={(keepId: string) =>
@@ -886,9 +840,6 @@ export function CleanupClient() {
                   onMemoryPin={(id) => handleMemoryPin(id, index)}
                   onMemoryArchive={(id) => handleMemoryArchive(id, index)}
                   onCorrectToggle={setCorrectingId}
-                  onResolve={(message: string) =>
-                    handleResolveWithMessage(suggestion, message, index)
-                  }
                 />
               );
             })}
@@ -904,12 +855,10 @@ export function CleanupClient() {
 function SuggestionCard({
   suggestion,
   index,
-  expanding,
   applying,
   actionLoading,
   correctingId,
   onDismiss,
-  onExpand,
   onApplyMerge,
   onApplySplit,
   onContradictionKeep,
@@ -921,16 +870,13 @@ function SuggestionCard({
   onMemoryPin,
   onMemoryArchive,
   onCorrectToggle,
-  onResolve,
 }: {
   suggestion: CleanupSuggestion;
   index: number;
-  expanding: boolean;
   applying: boolean;
   actionLoading: string | null;
   correctingId: string | null;
   onDismiss: () => void;
-  onExpand: () => void;
   onApplyMerge: () => void;
   onApplySplit: () => void;
   onContradictionKeep: (keepId: string) => void;
@@ -942,12 +888,8 @@ function SuggestionCard({
   onMemoryPin: (id: string) => void;
   onMemoryArchive: (id: string) => void;
   onCorrectToggle: (id: string | null) => void;
-  onResolve: (message: string) => void;
 }) {
-  const needsExpand = !suggestion.expanded;
   const isLoading = applying || actionLoading !== null;
-  const [showResolve, setShowResolve] = useState(false);
-  const [resolveText, setResolveText] = useState("");
 
   return (
     <Card className="p-4">
@@ -967,15 +909,6 @@ function SuggestionCard({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowResolve(!showResolve)}
-            disabled={isLoading}
-          >
-            <MessageSquare size={14} className="mr-1" />
-            Resolve
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
             onClick={onDismiss}
             disabled={isLoading}
           >
@@ -984,40 +917,8 @@ function SuggestionCard({
         </div>
       </div>
 
-      {showResolve && (
-        <div
-          className="mb-3 p-3 rounded border"
-          style={{ background: "var(--color-bg-soft)", borderColor: "var(--color-border)" }}
-        >
-          <textarea
-            value={resolveText}
-            onChange={(e) => setResolveText(e.target.value)}
-            placeholder="Describe how to resolve this (e.g. 'both are true', 'delete the first one', 'merge them')..."
-            rows={2}
-            className="w-full p-2 text-sm bg-[var(--color-card)] border border-[var(--color-border)] rounded placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
-          />
-          <div className="flex justify-end gap-2 mt-2">
-            <Button variant="ghost" size="sm" onClick={() => { setShowResolve(false); setResolveText(""); }} disabled={isLoading}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={!resolveText.trim() || isLoading}
-              onClick={() => { onResolve(resolveText.trim()); setShowResolve(false); setResolveText(""); }}
-            >
-              {isLoading ? (
-                <><Loader2 size={14} className="animate-spin mr-1" />Resolving...</>
-              ) : (
-                <><Send size={14} className="mr-1" />Resolve</>
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Memory previews (only when not expanded — detail components show their own) */}
-      {!suggestion.expanded &&
-        suggestion.memories &&
+      {/* Memory previews */}
+      {suggestion.memories &&
         suggestion.memories.length > 0 && (
           <div className="flex flex-col gap-1.5 mb-3">
             {suggestion.memories.map((m) => (
@@ -1026,28 +927,7 @@ function SuggestionCard({
           </div>
         )}
 
-      {needsExpand && (
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={onExpand}
-          disabled={expanding}
-        >
-          {expanding ? (
-            <>
-              <Loader2 size={14} className="animate-spin mr-1.5" />
-              Analyzing...
-            </>
-          ) : (
-            <>
-              <ChevronDown size={14} className="mr-1.5" />
-              Expand
-            </>
-          )}
-        </Button>
-      )}
-
-      {suggestion.expanded && suggestion.type === "merge" && (
+      {suggestion.type === "merge" && (
         <MergeDetail
           suggestion={suggestion}
           applying={isLoading}
@@ -1059,8 +939,7 @@ function SuggestionCard({
           onFlag={onMemoryFlag}
         />
       )}
-      {suggestion.expanded &&
-        suggestion.type === "split" &&
+      {suggestion.type === "split" &&
         suggestion.parts && (
           <SplitDetail
             suggestion={suggestion}
@@ -1069,9 +948,7 @@ function SuggestionCard({
             onFlag={onMemoryFlag}
           />
         )}
-      {suggestion.expanded &&
-        suggestion.type === "contradiction" &&
-        suggestion.conflicts && (
+      {suggestion.type === "contradiction" && (
           <ContradictionDetail
             suggestion={suggestion}
             applying={isLoading}
@@ -1083,7 +960,7 @@ function SuggestionCard({
             onFlag={onMemoryFlag}
           />
         )}
-      {suggestion.expanded && suggestion.type === "pii" && (
+      {suggestion.type === "pii" && (
         <PiiDetail
           suggestion={suggestion}
           applying={isLoading}
@@ -1094,7 +971,7 @@ function SuggestionCard({
           onCorrect={onMemoryCorrect}
         />
       )}
-      {suggestion.expanded && suggestion.type === "stale" && (
+      {suggestion.type === "stale" && (
         <StaleDetail
           suggestion={suggestion}
           applying={isLoading}
@@ -1106,7 +983,7 @@ function SuggestionCard({
           onDelete={onMemoryDelete}
         />
       )}
-      {suggestion.expanded && suggestion.type === "promote" && (
+      {suggestion.type === "promote" && (
         <PromoteDetail
           suggestion={suggestion}
           applying={isLoading}
@@ -1114,7 +991,7 @@ function SuggestionCard({
           onDelete={onMemoryDelete}
         />
       )}
-      {suggestion.expanded && suggestion.type === "expired" && (
+      {suggestion.type === "expired" && (
         <ExpiredDetail
           suggestion={suggestion}
           applying={isLoading}
@@ -1122,7 +999,7 @@ function SuggestionCard({
           onConfirm={onMemoryConfirm}
         />
       )}
-      {suggestion.expanded && suggestion.type === "stale_project" && (
+      {suggestion.type === "stale_project" && (
         <StaleProjectDetail
           suggestion={suggestion}
           applying={isLoading}

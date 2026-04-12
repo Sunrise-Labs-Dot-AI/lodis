@@ -1,6 +1,4 @@
 import type { Client } from "@libsql/client";
-import type { LLMProvider } from "./llm.js";
-import { parseLLMJson } from "./llm-utils.js";
 
 export interface EntityProfile {
   id: string;
@@ -14,88 +12,45 @@ export interface EntityProfile {
 }
 
 /**
- * Generate or retrieve an entity profile — a pre-computed summary of all
- * memories related to a specific entity.
+ * Retrieve an existing entity profile, or return null if none exists.
+ * No longer generates profiles server-side — the client LLM should
+ * generate summaries and store them via saveProfile().
  */
 export async function getOrGenerateProfile(
   client: Client,
-  provider: LLMProvider | null,
   entityName: string,
   entityType?: string,
   options?: { regenerate?: boolean; userId?: string },
 ): Promise<EntityProfile | null> {
   const userId = options?.userId ?? null;
 
-  // Check for existing profile
-  if (!options?.regenerate) {
-    const existing = await getProfile(client, entityName, entityType, userId);
-    if (existing) return existing;
-  }
+  if (options?.regenerate) return null; // caller should generate + saveProfile
 
-  // Need LLM to generate
-  if (!provider) return null;
+  return getProfile(client, entityName, entityType, userId);
+}
 
-  // Fetch all memories for this entity
-  const typeFilter = entityType
-    ? `AND entity_type = ?`
-    : ``;
-  const args: (string | null)[] = [entityName];
-  if (entityType) args.push(entityType);
-
-  const userFilter = userId ? `AND user_id = ?` : `AND (user_id IS NULL OR user_id = '')`;
-  if (userId) args.push(userId);
-
-  const result = await client.execute({
-    sql: `SELECT id, content, detail, entity_type, confidence, permanence, learned_at
-          FROM memories
-          WHERE entity_name = ? ${typeFilter} ${userFilter}
-            AND deleted_at IS NULL
-          ORDER BY confidence DESC, learned_at DESC
-          LIMIT 50`,
-    args,
-  });
-
-  if (result.rows.length === 0) return null;
-
-  const memories = result.rows;
-  const memoryIds = memories.map((m) => m.id as string);
-  const resolvedEntityType = entityType ?? (memories[0].entity_type as string);
-
-  // Build context for LLM
-  const memoryList = memories
-    .map((m) => {
-      const parts = [`- ${m.content}`];
-      if (m.detail) parts[0] += ` — ${(m.detail as string).slice(0, 200)}`;
-      if (m.permanence === "canonical") parts[0] += " [canonical]";
-      return parts[0];
-    })
-    .join("\n");
-
-  const prompt = `Summarize everything known about "${entityName}" (${resolvedEntityType}) based on these memories. Write a concise profile paragraph (2-4 sentences) that captures the most important facts, relationships, and context. Focus on actionable information an AI assistant would need.
-
-Memories:
-${memoryList}
-
-Respond with JSON only:
-{
-  "summary": "the profile paragraph"
-}`;
-
-  const text = await provider.complete(prompt, { maxTokens: 512, json: true });
-  const parsed = parseLLMJson<{ summary: string }>(text);
-
+/**
+ * Save a client-generated entity profile summary.
+ */
+export async function saveProfile(
+  client: Client,
+  entityName: string,
+  entityType: string,
+  summary: string,
+  memoryIds: string[],
+  userId?: string | null,
+): Promise<EntityProfile> {
   const profile: EntityProfile = {
     id: generateHexId(),
     entityName,
-    entityType: resolvedEntityType,
-    summary: parsed.summary,
+    entityType,
+    summary,
     memoryIds,
-    tokenCount: Math.ceil(parsed.summary.length / 4),
+    tokenCount: Math.ceil(summary.length / 4),
     generatedAt: new Date().toISOString(),
-    userId,
+    userId: userId ?? null,
   };
 
-  // Upsert into memory_summaries
   await client.execute({
     sql: `INSERT INTO memory_summaries (id, entity_name, entity_type, summary, memory_ids, token_count, generated_at, user_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)

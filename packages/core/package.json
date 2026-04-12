@@ -17,23 +17,7 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./llm": {
-      "import": "./dist/llm.js",
-      "types": "./dist/llm.d.ts"
-    },
-    "./llm-config": {
-      "import": "./dist/llm-config.js",
-      "types": "./dist/llm-config.d.ts"
-    },
-    "./llm-utils": {
-      "import": "./dist/llm-utils.js",
-      "types": "./dist/llm-utils.d.ts"
-    },
-    "./llm-validation": {
-      "import": "./dist/llm-validation.js",
-      "types": "./dist/llm-validation.d.ts"
-    },
-    "./crypto": {
+"./crypto": {
       "import": "./dist/crypto.js",
       "types": "./dist/crypto.d.ts"
     },
@@ -66,8 +50,7 @@
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.86.1",
-    "drizzle-kit": "^0.31.10",
+"drizzle-kit": "^0.31.10",
     "typescript": "^5.8.3",
     "vitest": "^4.1.1"
   }

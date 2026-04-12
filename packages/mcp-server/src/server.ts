@@ -25,7 +25,6 @@ import {
   bumpLastModified,
   detectSensitiveData,
   redactSensitiveData,
-  extractEntity,
   applyConfidenceDecay,
   applyTemporalDecay,
   sweepExpiredMemories,
@@ -37,17 +36,13 @@ import {
   migrateToLocal,
   exportMemories,
   importFromExport,
-  resolveLLMProvider,
-  parseLLMJson,
-  validateExtraction,
-  loadConfig,
-  saveConfig,
   contextSearch,
   getOrGenerateProfile,
+  saveProfile,
   listProfiles,
   isProfileStale,
 } from "@engrams/core";
-import type { SourceType, Relationship, EntityType, Permanence, LLMProvider, Client } from "@engrams/core";
+import type { SourceType, Relationship, EntityType, Permanence, Client } from "@engrams/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -76,14 +71,6 @@ export async function startServer(options?: { transport?: Transport; dbUrl?: str
 
   const dbConfig = options?.dbUrl ? { url: options.dbUrl, authToken: options.dbAuthToken } : undefined;
   const { db, client, vecAvailable } = await createDatabase(dbConfig);
-
-  // Migrate plaintext API keys to encrypted form on startup
-  {
-    const cfg = loadConfig();
-    if (cfg.llm?.apiKey && !cfg.llm.apiKey.startsWith("enc:")) {
-      saveConfig(cfg); // loadConfig returns decrypted, saveConfig encrypts
-    }
-  }
 
   // Throttled confidence decay — runs at most once per hour
   let lastDecayRun = 0;
@@ -209,10 +196,6 @@ export async function startServer(options?: { transport?: Transport; dbUrl?: str
     return { query, params: queryParams };
   }
 
-  // Resolve LLM providers — separate tiers for extraction (cheap) vs analysis (capable)
-  let extractionProvider: LLMProvider | null = resolveLLMProvider("extraction");
-  let analysisProvider: LLMProvider | null = resolveLLMProvider("analysis");
-
   // Backfill embeddings for existing memories (async, best-effort)
   if (vecAvailable) {
     backfillEmbeddings(client).then((count) => {
@@ -270,8 +253,6 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   // Similarity threshold for dedup (cosine similarity, 0-1). 0.7 catches near-duplicates.
   const WRITE_SIMILARITY_THRESHOLD = 0.7;
-  // Above this threshold + same entity: auto-merge without asking the agent
-  const AUTO_MERGE_THRESHOLD = 0.85;
 
   server.tool(
     "memory_write",
@@ -474,44 +455,6 @@ Organize memories by life domain: general, work, health, finance, relationships,
               )).filter(Boolean);
 
               if (matchedMemories.length > 0) {
-                // Auto-merge: if top match is very similar and same entity, update silently
-                const topMatch = matchedMemories[0]!;
-                const sameEntity = topMatch.entityName && params.entityName
-                  && topMatch.entityName.toLowerCase() === params.entityName.toLowerCase();
-                const veryHighSimilarity = topMatch.similarity >= AUTO_MERGE_THRESHOLD;
-
-                if (veryHighSimilarity || (topMatch.similarity >= WRITE_SIMILARITY_THRESHOLD && sameEntity)) {
-                  // Auto-update: keep existing memory, boost confidence, append any new detail
-                  const newConfidence = Math.min(topMatch.confidence + 0.02, 0.99);
-                  const mergedDetail = params.detail
-                    ? (topMatch.detail ? topMatch.detail + "\n" + params.detail : params.detail)
-                    : topMatch.detail;
-
-                  await client.execute({
-                    sql: `UPDATE memories SET confidence = ?, detail = ?, used_count = used_count + 1, last_used_at = ? WHERE id = ?`,
-                    args: [newConfidence, mergedDetail, now(), topMatch.id],
-                  });
-
-                  // Re-embed with updated content
-                  if (vecAvailable) {
-                    try {
-                      const mergedText = topMatch.content + (mergedDetail ? " " + mergedDetail : "");
-                      const mergedEmb = await generateEmbedding(mergedText);
-                      await insertEmbedding(client, topMatch.id, mergedEmb);
-                    } catch { /* non-fatal */ }
-                  }
-
-                  await bumpLastModified(client);
-
-                  return textResult({
-                    status: "auto_merged",
-                    existingId: topMatch.id,
-                    similarity: topMatch.similarity,
-                    newConfidence,
-                    message: `Automatically merged with existing memory (${(topMatch.similarity * 100).toFixed(0)}% similar). Confidence boosted to ${newConfidence.toFixed(2)}.`,
-                  });
-                }
-
                 return textResult({
                   status: "similar_found",
                   proposed: {
@@ -687,169 +630,6 @@ Organize memories by life domain: general, work, health, finance, relationships,
         })
         .run();
 
-      // Background entity extraction (fire-and-forget) when entityType not provided
-      if (!params.entityType && extractionProvider) {
-        (async () => {
-          try {
-            // Gather existing entity names for normalization
-            const existingNames = (await client.execute({
-              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-              args: userId ? [userId] : [],
-            })).rows as unknown as { entity_name: string }[];
-
-            const extraction = await extractEntity(
-              extractionProvider!,
-              params.content,
-              params.detail ?? null,
-              existingNames.map((r) => r.entity_name),
-            );
-
-            const validation = validateExtraction(extraction);
-            if (!validation.valid) {
-              process.stderr.write(`[engrams] Entity extraction failed validation: ${validation.error}\n`);
-              return;
-            }
-
-            // Race condition guard: only update if entity_type hasn't been set yet
-            const current = (await client.execute({
-              sql: `SELECT entity_type FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-              args: userId ? [id, userId] : [id],
-            })).rows[0] as { entity_type: string | null } | undefined;
-
-            if (!current || current.entity_type) return;
-
-            // Update entity type + summary
-            await client.execute({
-              sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ?, summary = COALESCE(?, summary) WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-              args: userId
-                ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, id, userId]
-                : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, id],
-            });
-
-            // Auto-create suggested connections
-            for (const conn of extraction.suggested_connections) {
-              const target = (await client.execute({
-                sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
-                args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
-              })).rows[0] as { id: string } | undefined;
-
-              if (target && target.id !== id) {
-                await client.execute({
-                  sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
-                  args: [id, target.id, conn.relationship, userId ?? null],
-                });
-              }
-            }
-
-            await bumpLastModified(client);
-          } catch {
-            // Background extraction failure is non-fatal
-          }
-        })();
-      }
-
-      // Auto-split: if content has 3+ sentences, ask LLM if topics are independent
-      // If yes, delete original and insert parts as separate memories
-      const fullText = params.content + (params.detail ? " " + params.detail : "");
-      const sentences = fullText.split(/(?<=[.!?])\s+/).filter((s) => s.length > 10);
-      let autoSplitIds: string[] | null = null;
-
-      if (sentences.length >= 3 && extractionProvider) {
-        try {
-          const splitPrompt = `Analyze this memory and determine if it contains multiple distinct topics that should be stored separately. Only suggest splitting if the topics are genuinely independent (would be searched for separately).
-
-Memory content: ${JSON.stringify(params.content)}
-Memory detail: ${JSON.stringify(params.detail ?? null)}
-
-Respond with ONLY valid JSON:
-- If it should NOT be split: {"should_split": false}
-- If it SHOULD be split: {"should_split": true, "parts": [{"content": "...", "detail": "..."}, ...]}
-
-Each part should have a concise "content" (one sentence) and optional "detail". Do not split if the content is a single coherent topic.`;
-          const text = await extractionProvider.complete(splitPrompt, { maxTokens: 1024, json: true });
-          const splitResult = parseLLMJson<{ should_split: boolean; parts?: { content: string; detail?: string | null }[] }>(text);
-
-          if (splitResult?.should_split && splitResult.parts && splitResult.parts.length >= 2) {
-            // Auto-split: soft-delete original and insert parts
-            await client.execute({
-              sql: `UPDATE memories SET deleted_at = ? WHERE id = ?${userId ? ' AND user_id = ?' : ''}`,
-              args: userId ? [now(), id, userId] : [now(), id],
-            });
-
-            autoSplitIds = [];
-            for (const part of splitResult.parts) {
-              const partId = generateId();
-              const partConfidence = getInitialConfidence(params.sourceType as SourceType);
-              await db.insert(memories).values({
-                id: partId,
-                content: part.content,
-                detail: part.detail ?? null,
-                domain: params.domain ?? "general",
-                sourceAgentId: params.sourceAgentId,
-                sourceAgentName: params.sourceAgentName,
-                sourceType: params.sourceType,
-                sourceDescription: params.sourceDescription ?? null,
-                confidence: partConfidence,
-                learnedAt: now(),
-                hasPiiFlag: detectSensitiveData(part.content + (part.detail ?? "")).length > 0 ? 1 : 0,
-                userId: userId ?? null,
-              }).run();
-
-              // Generate embedding for each part
-              if (vecAvailable) {
-                try {
-                  const partEmb = await generateEmbedding(part.content + (part.detail ? " " + part.detail : ""));
-                  await insertEmbedding(client, partId, partEmb);
-                } catch { /* non-fatal */ }
-              }
-
-              // Background entity extraction for each part
-              if (extractionProvider) {
-                const capturedPartId = partId;
-                const capturedContent = part.content;
-                const capturedDetail = part.detail ?? null;
-                (async () => {
-                  try {
-                    const existingNames2 = (await client.execute({
-                      sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-                      args: userId ? [userId] : [],
-                    })).rows as unknown as { entity_name: string }[];
-
-                    const ext = await extractEntity(extractionProvider!, capturedContent, capturedDetail, existingNames2.map(r => r.entity_name));
-                    const val = validateExtraction(ext);
-                    if (!val.valid) return;
-
-                    await client.execute({
-                      sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ?, summary = COALESCE(?, summary) WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-                      args: userId
-                        ? [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), ext.summary ?? null, capturedPartId, userId]
-                        : [ext.entity_type, ext.entity_name, JSON.stringify(ext.structured_data), ext.summary ?? null, capturedPartId],
-                    });
-
-                    for (const conn of ext.suggested_connections) {
-                      const target = (await client.execute({
-                        sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
-                        args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
-                      })).rows[0] as { id: string } | undefined;
-                      if (target && target.id !== capturedPartId) {
-                        await client.execute({
-                          sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
-                          args: [capturedPartId, target.id, conn.relationship, userId ?? null],
-                        });
-                      }
-                    }
-                  } catch { /* non-fatal */ }
-                })();
-              }
-
-              autoSplitIds.push(partId);
-            }
-          }
-        } catch {
-          // LLM call failed — keep original memory as-is
-        }
-      }
-
       await bumpLastModified(client);
 
       // Check if onboarding hint should be added for near-empty databases
@@ -857,19 +637,6 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         sql: `SELECT COUNT(*) as count FROM memories WHERE deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
         args: userId ? [userId] : [],
       })).rows[0] as unknown as { count: number }).count;
-
-      // If auto-split happened, return the split result
-      if (autoSplitIds) {
-        const result: Record<string, unknown> = {
-          status: "auto_split",
-          originalId: id,
-          splitIds: autoSplitIds,
-          splitCount: autoSplitIds.length,
-          domain: params.domain ?? "general",
-          message: `Memory was automatically split into ${autoSplitIds.length} independent memories for better searchability.`,
-        };
-        return textResult(result);
-      }
 
       const result: Record<string, unknown> = {
         id,
@@ -882,8 +649,8 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
       if (totalAfterWrite <= 3) {
         result.onboarding_hint = "Memory saved! Your database is just getting started. Call memory_onboard to run a guided setup — it will configure your agent to use Engrams by default and seed your memory with context from connected tools.";
       }
-      if (!params.entityType && extractionProvider) {
-        result._background_classification = "running";
+      if (!params.entityType) {
+        result.classify_hint = "entity_type not provided. Use memory_update to set entity_type and entity_name for better search and organization.";
       }
       if (hasPii) {
         result._pii_detected = [...new Set(piiMatches.map((m) => m.type))];
@@ -1278,50 +1045,64 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
   server.tool(
     "memory_briefing",
-    "Generate or retrieve a pre-computed entity profile — a concise summary paragraph about a person, project, organization, or other entity based on all related memories. Profiles are cached and auto-regenerated when stale (>24h). Use this to get a quick briefing before meetings, when context-switching between projects, or to understand what you know about an entity.",
+    "Retrieve a cached entity profile — a concise summary paragraph about a person, project, organization, or other entity based on all related memories. If no cached profile exists, returns the raw memories so you can synthesize a summary yourself and save it back with save_summary. Use this to get a quick briefing before meetings, when context-switching between projects, or to understand what you know about an entity.",
     {
       entity_name: z.string().describe("Entity name to get a profile for (e.g., 'Sarah Chen', 'Project Alpha')"),
       entity_type: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Entity type filter (optional — inferred from memories if omitted)"),
-      regenerate: z.boolean().optional().describe("Force regenerate the profile even if cached (default false)"),
+      save_summary: z.string().optional().describe("If provided, saves this as the entity's profile summary (you generate the summary, Engrams stores it)"),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
 
-      const analysisProvider = resolveLLMProvider("analysis");
-      if (!analysisProvider && !params.regenerate) {
-        // Try to return cached profile without LLM
-        const { getProfile } = await import("@engrams/core");
-        const cached = await getProfile(client, params.entity_name, params.entity_type, userId);
-        if (cached) return textResult(cached);
-        return textResult({ error: "No LLM provider configured and no cached profile exists. Set ANTHROPIC_API_KEY or configure a provider via memory_configure." });
+      // If caller is saving a summary, store it
+      if (params.save_summary) {
+        const entityType = params.entity_type ?? "person";
+        // Get memory IDs for this entity
+        const memRows = (await client.execute({
+          sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 50`,
+          args: userId ? [params.entity_name, userId] : [params.entity_name],
+        })).rows as unknown as { id: string }[];
+        const memoryIds = memRows.map(r => r.id);
+
+        const profile = await saveProfile(client, params.entity_name, entityType, params.save_summary, memoryIds, userId);
+        return textResult(profile);
       }
 
-      const shouldRegenerate = params.regenerate === true;
-      const profile = await getOrGenerateProfile(
-        client,
-        analysisProvider,
-        params.entity_name,
-        params.entity_type,
-        { regenerate: shouldRegenerate, userId: userId ?? undefined },
-      );
+      // Try cached profile
+      const profile = await getOrGenerateProfile(client, params.entity_name, params.entity_type, { userId: userId ?? undefined });
 
-      if (!profile) {
+      if (profile) {
+        const stale = isProfileStale(profile);
+        return textResult({ ...profile, stale });
+      }
+
+      // No cached profile — return raw memories for the entity so the client can synthesize
+      const typeFilter = params.entity_type ? `AND entity_type = ?` : ``;
+      const args: (string | null)[] = [params.entity_name];
+      if (params.entity_type) args.push(params.entity_type);
+      const userFilter = userId ? `AND user_id = ?` : `AND (user_id IS NULL OR user_id = '')`;
+      if (userId) args.push(userId);
+
+      const result = await client.execute({
+        sql: `SELECT id, content, detail, entity_type, confidence, permanence, learned_at
+              FROM memories
+              WHERE entity_name = ? COLLATE NOCASE ${typeFilter} ${userFilter}
+                AND deleted_at IS NULL
+              ORDER BY confidence DESC, learned_at DESC
+              LIMIT 50`,
+        args,
+      });
+
+      if (result.rows.length === 0) {
         return textResult({ error: `No memories found for entity "${params.entity_name}"` });
       }
 
-      // Check staleness and auto-regenerate if needed
-      if (!shouldRegenerate && isProfileStale(profile) && analysisProvider) {
-        const refreshed = await getOrGenerateProfile(
-          client,
-          analysisProvider,
-          params.entity_name,
-          params.entity_type,
-          { regenerate: true, userId: userId ?? undefined },
-        );
-        if (refreshed) return textResult(refreshed);
-      }
-
-      return textResult(profile);
+      return textResult({
+        cached_profile: null,
+        entity_name: params.entity_name,
+        memories: result.rows,
+        hint: "No cached profile. Synthesize a summary from these memories and call memory_briefing again with save_summary to cache it.",
+      });
     },
   );
 
@@ -2103,19 +1884,16 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
 
   server.tool(
     "memory_classify",
-    "Batch-classify untyped memories using entity extraction. Runs in the background and returns progress. Use this to backfill entity types on existing memories.",
+    "List unclassified memories that need entity_type assignment. Returns memories without entity types so you can classify them using memory_update. Use this to find memories that need classification.",
     {
-      limit: z.number().optional().describe("Max memories to classify (default 50)"),
-      domain: z.string().optional().describe("Only classify memories in this domain"),
+      limit: z.number().optional().describe("Max memories to return (default 50)"),
+      domain: z.string().optional().describe("Only list memories in this domain"),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
-      if (!extractionProvider) {
-        return textResult({ error: "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure ~/.engrams/config.json" });
-      }
 
       const classifyLimit = params.limit ?? 50;
-      let query = `SELECT id, content, detail FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`;
+      let query = `SELECT id, content, detail, domain, confidence FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL`;
       const queryParams: unknown[] = [];
 
       if (userId) {
@@ -2127,88 +1905,30 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         query += ` AND domain = ?`;
         queryParams.push(params.domain);
       }
-      query += ` LIMIT ?`;
+      query += ` ORDER BY confidence DESC LIMIT ?`;
       queryParams.push(classifyLimit);
 
       const untyped = (await client.execute({
         sql: query,
         args: queryParams as (string | number | null)[],
-      })).rows as unknown as { id: string; content: string; detail: string | null }[];
+      })).rows as unknown as { id: string; content: string; detail: string | null; domain: string; confidence: number }[];
 
       if (untyped.length === 0) {
-        return textResult({ status: "complete", classified: 0, message: "No untyped memories found" });
+        return textResult({ status: "complete", total: 0, message: "All memories are classified." });
       }
 
-      // Gather existing entity names for normalization
-      const existingNames = (await client.execute({
-        sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-        args: userId ? [userId] : [],
-      })).rows as unknown as { entity_name: string }[];
-      const nameList = existingNames.map((r) => r.entity_name);
-
-      let classified = 0;
-      let errors = 0;
-      const errorDetails: string[] = [];
-
-      for (const mem of untyped) {
-        try {
-          const extraction = await extractEntity(extractionProvider!, mem.content, mem.detail as string | null, nameList);
-
-          const validation = validateExtraction(extraction);
-          if (!validation.valid) {
-            errorDetails.push(`${(mem.id as string).slice(0, 12)}: validation failed: ${validation.error}`);
-            errors++;
-            continue;
-          }
-
-          await client.execute({
-            sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ?, summary = COALESCE(?, summary) WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-            args: userId
-              ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, mem.id, userId]
-              : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, mem.id],
-          });
-
-          // Auto-create connections
-          for (const conn of extraction.suggested_connections) {
-            const target = (await client.execute({
-              sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
-              args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
-            })).rows[0] as { id: string } | undefined;
-
-            if (target && target.id !== mem.id) {
-              await client.execute({
-                sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
-                args: [mem.id, target.id, conn.relationship, userId ?? null],
-              });
-            }
-          }
-
-          classified++;
-          if (extraction.entity_name) nameList.push(extraction.entity_name);
-        } catch (classifyErr) {
-          errorDetails.push(`${(mem.id as string).slice(0, 12)}: ${classifyErr}`);
-          errors++;
-        }
-
-        // Rate limiting: 200ms delay between API calls
-        if (classified + errors < untyped.length) {
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-      }
-
-      if (classified > 0) await bumpLastModified(client);
-
-      const remainingRow = (await client.execute({
+      const totalRow = (await client.execute({
         sql: `SELECT COUNT(*) as c FROM memories WHERE entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
         args: userId ? [userId] : [],
       })).rows[0] as { c: number };
 
       return textResult({
-        status: "complete",
-        classified,
-        errors,
-        remaining: Math.max(0, remainingRow.c),
-        ...(errorDetails.length > 0 && { errorDetails }),
+        status: "found",
+        unclassified: untyped,
+        returned: untyped.length,
+        total: totalRow.c,
+        message: `${totalRow.c} memories need classification. Use memory_update to set entity_type and entity_name on each.`,
+        valid_entity_types: ["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"],
       });
     },
   );
@@ -2417,54 +2137,6 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
   );
 
   // --- LLM Configuration ---
-
-  server.tool(
-    "memory_configure",
-    "Configure Engrams settings. Currently supports LLM provider setup for entity extraction, correction, and splitting.",
-    {
-      llm_provider: z.enum(["anthropic", "openai", "ollama"]).describe("LLM provider to use"),
-      llm_api_key: z.string().optional().describe("API key for the provider. Not needed for Ollama."),
-      llm_base_url: z.string().optional().describe("Custom base URL for OpenAI-compatible endpoints or Ollama."),
-      llm_extraction_model: z.string().optional().describe("Model for entity extraction (high-volume, cheap). Defaults: anthropic=claude-haiku-4-5, openai=gpt-4o-mini, ollama=llama3.2"),
-      llm_analysis_model: z.string().optional().describe("Model for correction/splitting (user-initiated, capable). Defaults: anthropic=claude-sonnet-4-5, openai=gpt-4o, ollama=llama3.2"),
-    },
-    async (params, _extra) => {
-      const config = loadConfig();
-      config.llm = {
-        provider: params.llm_provider,
-        apiKey: params.llm_api_key || undefined,
-        baseUrl: params.llm_base_url || undefined,
-        models: {
-          extraction: params.llm_extraction_model || undefined,
-          analysis: params.llm_analysis_model || undefined,
-        },
-      };
-      saveConfig(config);
-
-      // Re-resolve providers with new config
-      extractionProvider = resolveLLMProvider("extraction");
-      analysisProvider = resolveLLMProvider("analysis");
-
-      // Test connection
-      try {
-        if (extractionProvider) {
-          await extractionProvider.complete("Say ok", { maxTokens: 10 });
-        }
-        return textResult({
-          status: "configured",
-          provider: params.llm_provider,
-          extraction_model: params.llm_extraction_model || "(default)",
-          analysis_model: params.llm_analysis_model || "(default)",
-        });
-      } catch (err) {
-        return textResult({
-          status: "configured_with_error",
-          provider: params.llm_provider,
-          error: `Config saved but connection test failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-        });
-      }
-    },
-  );
 
   // --- Onboarding ---
 
@@ -3018,7 +2690,7 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
             question: `This memory doesn't have a type assigned: "${truncate(m.content, 100)}". What kind of thing is this — a person, project, preference, fact, or something else?`,
             issue: "untyped",
             memoryIds: [m.id],
-            action: "memory_classify to auto-classify, or memory_update to set entity_type manually",
+            action: "memory_classify to list unclassified memories, then memory_update to set entity_type on each",
           });
         }
 
@@ -3600,68 +3272,6 @@ Each part should have a concise "content" (one sentence) and optional "detail". 
         imported++;
         importedIds.push(id);
         results.push({ content: entry.content.slice(0, 80), status: "imported" });
-      }
-
-      // Fire-and-forget entity extraction for imported memories
-      if (extractionProvider && importedIds.length > 0) {
-        (async () => {
-          try {
-            const existingNames = (await client.execute({
-              sql: `SELECT DISTINCT entity_name FROM memories WHERE entity_name IS NOT NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-              args: userId ? [userId] : [],
-            })).rows as unknown as { entity_name: string }[];
-            const names = existingNames.map((r) => r.entity_name);
-
-            for (const id of importedIds) {
-              try {
-                const mem = (await client.execute({
-                  sql: `SELECT content, detail, entity_type FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-                  args: userId ? [id, userId] : [id],
-                })).rows[0] as { content: string; detail: string | null; entity_type: string | null } | undefined;
-
-                if (!mem || mem.entity_type) continue;
-
-                const extraction = await extractEntity(
-                  extractionProvider!,
-                  mem.content,
-                  mem.detail,
-                  names,
-                );
-
-                const validation = validateExtraction(extraction);
-                if (!validation.valid) continue;
-
-                await client.execute({
-                  sql: `UPDATE memories SET entity_type = ?, entity_name = ?, structured_data = ?, summary = COALESCE(?, summary) WHERE id = ? AND entity_type IS NULL AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-                  args: userId
-                    ? [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, id, userId]
-                    : [extraction.entity_type, extraction.entity_name, JSON.stringify(extraction.structured_data), extraction.summary ?? null, id],
-                });
-
-                for (const conn of extraction.suggested_connections) {
-                  const target = (await client.execute({
-                    sql: `SELECT id FROM memories WHERE entity_name = ? COLLATE NOCASE AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
-                    args: userId ? [conn.target_entity_name, userId] : [conn.target_entity_name],
-                  })).rows[0] as { id: string } | undefined;
-
-                  if (target && target.id !== id) {
-                    await client.execute({
-                      sql: `INSERT INTO memory_connections (source_memory_id, target_memory_id, relationship, user_id) VALUES (?, ?, ?, ?)`,
-                      args: [id, target.id, conn.relationship, userId ?? null],
-                    });
-                  }
-                }
-
-                if (extraction.entity_name) names.push(extraction.entity_name);
-              } catch {
-                // Individual extraction failure is non-fatal
-              }
-            }
-            await bumpLastModified(client);
-          } catch {
-            // Background extraction failure is non-fatal
-          }
-        })();
       }
 
       // Log the import event (skip if FK constraints prevent 'system' as memory_id)

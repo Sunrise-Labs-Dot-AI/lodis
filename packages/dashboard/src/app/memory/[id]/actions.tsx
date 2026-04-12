@@ -31,8 +31,8 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
   const [correctModalOpen, setCorrectModalOpen] = useState(false);
   const [splitModalOpen, setSplitModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  const [splitGuidance, setSplitGuidance] = useState("");
+  const [editContent, setEditContent] = useState(currentContent);
+  const [editDetail, setEditDetail] = useState(currentDetail ?? "");
   const [splitParts, setSplitParts] = useState<SplitPart[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +58,7 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
     setLoading(true);
     setError(null);
     try {
-      const result = await proposeSplitAction(id, splitGuidance.trim() || undefined);
+      const result = await proposeSplitAction(id);
       if ("error" in result) {
         setError(result.error);
       } else {
@@ -125,7 +125,6 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
           disabled={loading}
           onClick={() => {
             setSplitParts(null);
-            setSplitGuidance("");
             setError(null);
             setSplitModalOpen(true);
           }}
@@ -183,15 +182,20 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
         title="Correct Memory"
       >
         <div className="space-y-3">
-          <div className="text-sm text-[var(--color-text-secondary)] bg-[var(--color-bg-soft)] rounded-lg p-3 space-y-1">
-            <p className="font-medium text-[var(--color-text)]">{currentContent}</p>
-            {currentDetail && <p className="text-xs">{currentDetail}</p>}
-          </div>
+          <label className="text-xs font-medium text-[var(--color-text-muted)]">Content</label>
           <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Describe what's wrong or what should change..."
-            rows={3}
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            placeholder="Memory content..."
+            rows={2}
+            className="w-full p-3 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+          />
+          <label className="text-xs font-medium text-[var(--color-text-muted)]">Detail (optional)</label>
+          <textarea
+            value={editDetail}
+            onChange={(e) => setEditDetail(e.target.value)}
+            placeholder="Additional context..."
+            rows={2}
             className="w-full p-3 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
           />
         </div>
@@ -206,12 +210,11 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
           <Button
             variant="primary"
             size="sm"
-            disabled={!feedback.trim() || loading}
+            disabled={!editContent.trim() || loading}
             onClick={() =>
               handleAction(async () => {
-                await correctMemoryAction(id, feedback.trim());
+                await correctMemoryAction(id, editContent.trim(), editDetail.trim() || null);
                 setCorrectModalOpen(false);
-                setFeedback("");
               })
             }
           >
@@ -233,13 +236,9 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
                 <p className="font-medium text-[var(--color-text)]">{currentContent}</p>
                 {currentDetail && <p className="text-xs">{currentDetail}</p>}
               </div>
-              <textarea
-                value={splitGuidance}
-                onChange={(e) => setSplitGuidance(e.target.value)}
-                placeholder="Optional: describe how to split (e.g. 'separate the schedule from the calendar instructions')..."
-                rows={2}
-                className="w-full p-3 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
-              />
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Splits the memory by sentences. You can edit each part in the next step.
+              </p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <Button variant="ghost" size="sm" onClick={() => setSplitModalOpen(false)}>
@@ -251,7 +250,7 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
                 disabled={loading}
                 onClick={handleProposeSplit}
               >
-                {loading ? "Analyzing..." : "Propose Split"}
+                {loading ? "Splitting..." : "Propose Split"}
               </Button>
             </div>
           </>

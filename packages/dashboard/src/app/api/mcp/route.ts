@@ -1,3 +1,4 @@
+import { validateApiToken } from "@/app/settings/token-actions";
 import { validateAccessToken } from "@/lib/oauth";
 import { handleMcpRequest, unauthorizedResponse } from "engrams/serverless";
 
@@ -45,7 +46,11 @@ async function handleAuthedRequest(req: Request): Promise<Response> {
   }
 
   const token = authHeader.slice(7);
-  const validation = await validateAccessToken(token);
+
+  // Try OAuth tokens first, then fall back to API tokens
+  const validation = await validateAccessToken(token)
+    ?? await validateApiToken(token, req.headers.get("x-forwarded-for") ?? undefined);
+
   if (!validation) {
     return new Response(
       JSON.stringify({ error: "Invalid or expired token" }),

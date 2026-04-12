@@ -40,6 +40,7 @@ export async function handleMcpRequest(
     transport,
     dbUrl: process.env.TURSO_DATABASE_URL,
     dbAuthToken: process.env.TURSO_AUTH_TOKEN,
+    skipEmbeddings: true,
   });
 
   // Build AuthInfo so tool handlers can extract userId

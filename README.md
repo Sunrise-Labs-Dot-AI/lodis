@@ -51,7 +51,11 @@ The `memory_import` tool handles parsing, deduplication, and entity classificati
 - **Knows what it knows.** Confidence scoring, source attribution, and entity classification on every memory.
 - **Lets you correct it.** Confirm, correct, split, or remove memories through the dashboard or MCP tools.
 - **Deduplicates on write.** Similar memories are detected and surfaced to the agent for resolution.
-- **Builds a knowledge graph.** Memories connect to each other with typed relationships. Entities (people, organizations, projects) are automatically extracted and linked.
+- **Builds a knowledge graph.** Memories connect to each other with typed relationships. 13 entity types (people, organizations, projects, preferences, and more) are automatically extracted and linked.
+- **Manages memory permanence.** Four tiers — canonical, active, ephemeral (TTL), and archived — control confidence decay and search ranking.
+- **Packs context efficiently.** Token-budget-aware retrieval via `memory_context` delivers the right amount of context for any LLM window.
+- **Generates entity profiles.** On-demand summaries of known people, projects, and organizations via `memory_briefing`.
+- **Indexes external documents.** Pull in context from Google Drive, Notion, or local files for unified search.
 
 ## Dashboard
 
@@ -70,18 +74,25 @@ Features:
 - LLM-powered correction and splitting (requires `ANTHROPIC_API_KEY`)
 - Knowledge graph visualization
 - Cleanup page for deduplication and maintenance
+- Archive page for browsing archived memories with restore actions
+- Entity profile pages with LLM-generated summaries
+- Settings page with LLM provider configuration
 
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with filters |
-| `memory_write` | Store a memory (with dedup detection) |
+| `memory_context` | Token-budget-aware context retrieval |
+| `memory_briefing` | LLM-generated entity profile summaries |
+| `memory_write` | Store a memory (with dedup detection and permanence tiers) |
 | `memory_update` | Modify content, detail, or metadata |
 | `memory_confirm` | Mark a memory as verified (confidence → 0.99) |
-| `memory_correct` | Fix a memory with semantic diff |
+| `memory_correct` | LLM-powered semantic diff correction |
 | `memory_flag_mistake` | Degrade confidence |
 | `memory_remove` | Soft-delete |
+| `memory_pin` | Pin as canonical (decay-immune, high confidence) |
+| `memory_archive` | Archive for reference (deprioritize, freeze confidence) |
 | `memory_connect` | Link memories with typed relationships |
 | `memory_get_connections` | Traverse the relationship graph |
 | `memory_split` | Break compound memories into atomic parts |
@@ -90,10 +101,13 @@ Features:
 | `memory_list` | Browse by domain, type, or confidence |
 | `memory_list_domains` | List all domains |
 | `memory_set_permissions` | Per-agent access control |
-| `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
-| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
 | `memory_scrub` | Detect and redact PII |
-| `memory_configure` | Configure LLM provider and model settings |
+| `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
+| `memory_interview` | Agent-driven cleanup and gap-fill |
+| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
+| `memory_export` | Export memories as portable JSON |
+| `memory_index` | Index external docs (Drive, Notion, filesystem) |
+| `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ## Architecture

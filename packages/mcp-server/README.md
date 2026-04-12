@@ -40,17 +40,21 @@ The assistant will scan your connected tools (calendar, email, GitHub), ask a fe
 
 ## What You Get
 
-Engrams provides 20 MCP tools:
+Engrams provides 27 MCP tools:
 
 | Tool | Description |
 |------|-------------|
-| `memory_write` | Create a new memory with dedup detection and resolution |
-| `memory_search` | Full-text search across all memories (FTS5) |
-| `memory_update` | Modify a memory's content, detail, or domain |
+| `memory_search` | Hybrid semantic + keyword search with filters |
+| `memory_context` | Token-budget-aware context retrieval |
+| `memory_briefing` | LLM-generated entity profile summaries |
+| `memory_write` | Create a new memory with dedup detection and permanence tiers |
+| `memory_update` | Modify a memory's content, detail, or metadata |
 | `memory_remove` | Soft-delete a memory |
-| `memory_confirm` | Confirm a memory is correct (boosts confidence) |
-| `memory_correct` | Replace content and reset confidence |
+| `memory_confirm` | Confirm a memory is correct (boosts confidence to 0.99) |
+| `memory_correct` | LLM-powered semantic diff correction |
 | `memory_flag_mistake` | Flag a memory as incorrect (degrades confidence) |
+| `memory_pin` | Pin as canonical (decay-immune, high confidence) |
+| `memory_archive` | Archive for reference (deprioritize, freeze confidence) |
 | `memory_connect` | Create typed relationships between memories |
 | `memory_get_connections` | View a memory's relationship graph |
 | `memory_split` | Break compound memories into atomic units |
@@ -60,18 +64,25 @@ Engrams provides 20 MCP tools:
 | `memory_list_entities` | List extracted entities grouped by type |
 | `memory_classify` | Batch-classify untyped memories using entity extraction |
 | `memory_set_permissions` | Configure per-agent read/write access |
-| `memory_configure` | Configure LLM provider for entity extraction and corrections |
-| `memory_onboard` | Get a personalized onboarding plan to seed your memory |
+| `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
+| `memory_interview` | Agent-driven cleanup and gap-fill |
 | `memory_import` | Import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
+| `memory_export` | Export memories as portable JSON |
+| `memory_index` | Index external docs (Drive, Notion, filesystem) |
+| `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ### Key features
 
 - **Hybrid search** — FTS5 full-text + vector embeddings (all-MiniLM-L6-v2, local) merged via Reciprocal Rank Fusion
-- **Entity types** — Memories auto-classified as person, organization, place, project, preference, event, goal, or fact
+- **Entity types** — Memories auto-classified into 13 types: person, organization, place, project, preference, event, goal, fact, lesson, routine, skill, resource, decision
 - **Knowledge graph** — Typed relationships between memories, auto-connected entities
+- **Memory permanence** — Four tiers (canonical, active, ephemeral, archived) control confidence decay and search ranking
+- **Context-packed search** — Token-budget-aware retrieval via `memory_context` for efficient LLM context windows
+- **Entity profiles** — LLM-generated summaries of known entities via `memory_briefing` with 24h cache
 - **Confidence scoring** — 0-1 scale based on confirmations, corrections, mistakes, usage, and time decay
 - **Dedup on write** — Similar memories detected and surfaced to the agent for resolution
+- **Document indexing** — Index external documents (Drive, Notion, filesystem) for unified search
 - **PII detection** — Regex-based pattern detection with `memory_scrub` for redaction
 - **Source attribution** — Every memory tracks which agent learned it and how
 
@@ -143,7 +154,7 @@ In `~/.windsurf/mcp.json`:
 - **Hybrid search**: FTS5 keyword search + sqlite-vec vector embeddings, merged with Reciprocal Rank Fusion (k=60). Confidence-weighted scoring and recency boost.
 - **Embeddings**: all-MiniLM-L6-v2 via Transformers.js — runs locally, no API calls, no cost. ~22MB model cached on first search.
 - **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost to 99%, corrections reset, mistakes degrade. Unused memories decay over time.
-- **Entity extraction**: Memories auto-classified into 8 entity types with structured data. Connections auto-created between related entities.
+- **Entity extraction**: Memories auto-classified into 13 entity types with structured data. Connections auto-created between related entities.
 - **Source attribution**: Every memory tracks which agent wrote it and how it was acquired.
 - **Audit trail**: All changes logged in an event timeline.
 - **Cross-tool**: Every MCP-compatible tool shares the same memory database.
@@ -183,7 +194,7 @@ cd engrams && pnpm install && pnpm build
 cd packages/dashboard && pnpm dev
 ```
 
-Open [localhost:3838](http://localhost:3838) to browse memories, search, confirm, correct, manage agent permissions, explore the knowledge graph, and run cleanup operations.
+Open [localhost:3838](http://localhost:3838) to browse memories, search, confirm, correct, manage agent permissions, explore the knowledge graph, view entity profiles, browse archived memories, and run cleanup operations.
 
 ## Contributing
 

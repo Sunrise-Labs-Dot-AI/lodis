@@ -15,7 +15,7 @@ An open-source MCP server + localhost web dashboard that gives AI agents persist
 
 ## Current State (April 2026)
 
-V1–V3 feature complete. 25 MCP tools, 105 tests (92 core + 13 server), hybrid search, 13 entity types, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
+V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid search, 13 entity types, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
 
 **Shipped:**
 - Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
@@ -105,7 +105,7 @@ Memories are classified into 13 entity types: `person`, `organization`, `place`,
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about, informed_by, uses).
 
-## MCP Tools (26)
+## MCP Tools (27)
 
 | Tool | Description |
 |------|-------------|
@@ -129,10 +129,12 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 | `memory_list_domains` | List all domains with counts |
 | `memory_set_permissions` | Per-agent read/write access control by domain |
 | `memory_scrub` | Detect and redact PII patterns |
-| `memory_configure` | Configure LLM provider and model settings |
 | `memory_onboard` | Guided onboarding: scan connected tools → informed interview → seed |
 | `memory_interview` | Agent-driven cleanup + gap-fill: analyzes health, generates targeted question plan |
 | `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig, plaintext |
+| `memory_export` | Export memories as portable JSON |
+| `memory_index` | Index external documents (Drive, Notion, filesystem) for unified search |
+| `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
 
 ## Memory Permanence

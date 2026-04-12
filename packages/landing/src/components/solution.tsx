@@ -4,7 +4,7 @@ const features = [
   {
     title: "Search & Retrieve",
     description:
-      "Full-text search finds the right memory even when the wording differs. Filter by domain, confidence, entity type, or just ask.",
+      "Hybrid search finds the right memory even when the wording differs. Context-packed retrieval delivers token-budget-aware results. Filter by domain, confidence, entity type, or just ask.",
     visual: (
       <div className="glass p-2 overflow-hidden rounded-xl">
         <img
@@ -48,7 +48,7 @@ const features = [
   {
     title: "Connect & Understand",
     description:
-      "Memories form a knowledge graph. People, projects, and preferences are automatically linked. Entity types extracted. Contradictions detected.",
+      "Memories form a knowledge graph across 13 entity types. People, projects, and preferences are automatically linked. Entity profiles generate summaries on demand. Contradictions detected.",
     visual: (
       <div className="glass p-2 overflow-hidden rounded-xl">
         <img

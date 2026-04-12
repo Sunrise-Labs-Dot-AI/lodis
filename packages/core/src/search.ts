@@ -22,27 +22,17 @@ export interface ExpandedResult extends SearchResult {
 
 // --- Helpers ---
 
-async function getStoredEmbedding(client: Client, memoryId: string): Promise<Float32Array | null> {
+async function getEmbeddingDistance(
+  client: Client,
+  memoryId: string,
+  queryEmbedding: Float32Array,
+): Promise<number | null> {
   const result = await client.execute({
-    sql: `SELECT embedding FROM memories WHERE id = ?`,
-    args: [memoryId],
+    sql: `SELECT vector_distance_cos(embedding, vector(?)) as distance FROM memories WHERE id = ? AND embedding IS NOT NULL`,
+    args: [JSON.stringify(Array.from(queryEmbedding)), memoryId],
   });
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0];
-  if (!row.embedding) return null;
-  // libsql returns F32_BLOB as ArrayBuffer
-  const buf = row.embedding as ArrayBuffer;
-  return new Float32Array(buf);
-}
-
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  if (result.rows.length === 0 || result.rows[0].distance == null) return null;
+  return result.rows[0].distance as number;
 }
 
 function recencyBoost(learnedAt: string | null): number {
@@ -104,11 +94,11 @@ async function expandConnections(
         if (seen.has(conn.id)) continue;
         seen.add(conn.id);
 
-        // Check semantic similarity to query
-        const embedding = await getStoredEmbedding(client, conn.id);
-        if (!embedding) continue;
+        // Check semantic similarity to query via SQL distance function
+        const distance = await getEmbeddingDistance(client, conn.id, queryEmbedding);
+        if (distance == null) continue;
 
-        const similarity = cosineSimilarity(queryEmbedding, embedding);
+        const similarity = 1 - distance;
         if (similarity < similarityThreshold) continue;
 
         connected.push({

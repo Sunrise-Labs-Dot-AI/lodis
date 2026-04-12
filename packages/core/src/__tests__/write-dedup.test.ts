@@ -4,6 +4,7 @@ import { resolve } from "path";
 import { tmpdir } from "os";
 import { randomBytes } from "crypto";
 import { createDatabase, bumpLastModified } from "../db.js";
+import { searchFTS } from "../fts.js";
 import type { Client } from "@libsql/client";
 
 function tempDbPath(): string {
@@ -244,5 +245,39 @@ describe("write dedup resolution", () => {
     const id = await insertMemory(client, { content: "Test" });
     const mem = (await getMemory(client, id))!;
     expect(mem.has_pii_flag).toBe(0);
+  });
+
+  describe("dedup detection via FTS", () => {
+    it("searchFTS finds existing memory with identical content", async () => {
+      await insertMemory(client, { content: "User prefers dark mode in all editors" });
+
+      const results = await searchFTS(client, "User prefers dark mode in all editors", 3);
+      expect(results.length).toBeGreaterThanOrEqual(1);
+
+      // Verify the rowid resolves to the actual memory
+      const rowids = results.map((r) => r.rowid);
+      const placeholders = rowids.map(() => "?").join(",");
+      const existing = (await client.execute({
+        sql: `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL`,
+        args: rowids,
+      })).rows;
+
+      expect(existing.length).toBeGreaterThanOrEqual(1);
+      expect(existing[0].content).toBe("User prefers dark mode in all editors");
+    });
+
+    it("searchFTS finds memory with overlapping content", async () => {
+      await insertMemory(client, { content: "James works at Sunrise Labs on AI projects" });
+
+      const results = await searchFTS(client, "James is at Sunrise Labs building AI tools", 3);
+      expect(results.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("searchFTS does not find unrelated content", async () => {
+      await insertMemory(client, { content: "The weather in San Francisco is foggy" });
+
+      const results = await searchFTS(client, "quantum computing research papers", 3);
+      expect(results.length).toBe(0);
+    });
   });
 });

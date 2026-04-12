@@ -2569,11 +2569,11 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       // ========== CLEANUP DETECTION ==========
       if (focus !== "gaps") {
-        type MemRow = { id: string; content: string; detail: string | null; domain: string; confidence: number; entity_type: string | null; entity_name: string | null; learned_at: string | null; confirmed_count: number; used_count: number; permanence: string | null; expires_at: string | null; has_pii_flag: number; structured_data: string | null };
+        type MemRow = { id: string; content: string; detail: string | null; domain: string; confidence: number; entity_type: string | null; entity_name: string | null; learned_at: string | null; confirmed_count: number; used_count: number; permanence: string | null; expires_at: string | null; has_pii_flag: number; structured_data: string | null; confirmed_at: string | null };
 
         // Load memories for JS-side analysis (cap at 500 most recent)
         const allMems = (await client.execute({
-          sql: `SELECT id, content, detail, domain, confidence, entity_type, entity_name, learned_at, confirmed_count, used_count, permanence, expires_at, has_pii_flag, structured_data FROM memories WHERE ${whereClause} ORDER BY learned_at DESC LIMIT 500`,
+          sql: `SELECT id, content, detail, domain, confidence, entity_type, entity_name, learned_at, confirmed_count, used_count, permanence, expires_at, has_pii_flag, structured_data, confirmed_at FROM memories WHERE ${whereClause} ORDER BY learned_at DESC LIMIT 500`,
           args: filterArgs,
         })).rows as unknown as MemRow[];
 
@@ -2627,6 +2627,11 @@ Organize memories by life domain: general, work, health, finance, relationships,
           for (const item of a) { if (b.has(item)) intersection++; }
           return intersection / Math.min(a.size, b.size);
         }
+        function isDocumentIndex(m: MemRow): boolean {
+          if (!m.structured_data) return false;
+          try { return JSON.parse(m.structured_data).type === "document"; }
+          catch { return false; }
+        }
 
         const contradictionSeen = new Set<string>();
         for (const [, domainMems] of byDomain) {
@@ -2641,6 +2646,10 @@ Organize memories by life domain: general, work, health, finance, relationships,
               if (contradictionSeen.has(key)) continue;
               const overlap = wordOverlap(memWords[i].words, memWords[j].words);
               if (overlap >= 0.45 && overlap < 0.7) {
+                // Skip if both memories were already confirmed (user reviewed them)
+                if (memWords[i].mem.confirmed_at && memWords[j].mem.confirmed_at) continue;
+                // Skip document index entries — catalog entries, not factual claims
+                if (isDocumentIndex(memWords[i].mem) && isDocumentIndex(memWords[j].mem)) continue;
                 contradictionSeen.add(key);
                 items.push({
                   priority: 2,

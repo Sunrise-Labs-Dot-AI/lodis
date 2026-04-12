@@ -1,14 +1,25 @@
 import { createClient, type Client } from "@libsql/client";
 import { createHash } from "crypto";
+import { resolve } from "path";
+import { homedir } from "os";
 
 let _client: Client | null = null;
+
+/** Inject an existing libSQL client for token validation. */
+export function initAuthClient(client: Client): void {
+  _client = client;
+}
 
 function getClient(): Client {
   if (!_client) {
     const url = process.env.TURSO_DATABASE_URL;
-    const authToken = process.env.TURSO_AUTH_TOKEN;
-    if (!url) throw new Error("TURSO_DATABASE_URL is required in cloud mode");
-    _client = createClient({ url, authToken });
+    if (url) {
+      _client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+    } else {
+      _client = createClient({
+        url: "file:" + resolve(homedir(), ".engrams", "engrams.db"),
+      });
+    }
   }
   return _client;
 }

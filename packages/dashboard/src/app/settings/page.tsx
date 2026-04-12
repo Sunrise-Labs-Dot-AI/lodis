@@ -53,12 +53,10 @@ export default async function SettingsPage() {
         </div>
       </Card>
 
-      {/* API Tokens (hosted only) */}
-      {isHosted && userId && (
-        <Card className="p-4">
-          <ApiTokensSection userId={userId} />
-        </Card>
-      )}
+      {/* API Tokens */}
+      <Card className="p-4">
+        <ApiTokensSection userId={isHosted ? userId! : "local"} />
+      </Card>
 
       <SettingsActions />
     </div>

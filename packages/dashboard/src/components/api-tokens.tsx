@@ -133,6 +133,17 @@ export function ApiTokens({ userId, tokens }: Props) {
         </div>
       )}
 
+      {tokens.length > 0 && (
+        <div className="mt-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+          <h4 className="text-xs font-semibold mb-1.5">Connect a remote MCP client</h4>
+          <p className="text-[10px] text-[var(--color-text-muted)] mb-2">
+            Start the server with <code className="font-mono">engrams --serve</code>, then configure your client:
+          </p>
+          <pre className="text-[10px] font-mono bg-black/20 rounded px-2 py-1.5 overflow-x-auto">{`ENGRAMS_MCP_URL=http://<host>:3939/mcp
+ENGRAMS_API_KEY=<your-token>`}</pre>
+        </div>
+      )}
+
       {/* Create token modal */}
       <Modal open={createOpen} onClose={handleCloseCreate} title="Create API Token">
         {createdToken ? (
@@ -184,9 +195,8 @@ export function ApiTokens({ userId, tokens }: Props) {
                 className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm"
               >
                 <option value="30">30 days</option>
+                <option value="60">60 days</option>
                 <option value="90">90 days</option>
-                <option value="180">180 days</option>
-                <option value="365">1 year</option>
                 <option value="">No expiration</option>
               </select>
             </div>

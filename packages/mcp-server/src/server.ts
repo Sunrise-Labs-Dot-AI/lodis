@@ -63,14 +63,18 @@ function getUserId(extra: Record<string, unknown>): string | null {
   return authInfo?.extra?.userId ?? null;
 }
 
-export async function startServer(options?: { transport?: Transport; dbUrl?: string; dbAuthToken?: string }) {
+export async function startServer(options?: { transport?: Transport; dbUrl?: string; dbAuthToken?: string; skipEmbeddings?: boolean }) {
   const server = new McpServer({
     name: "engrams",
     version: "0.1.0",
   });
 
   const dbConfig = options?.dbUrl ? { url: options.dbUrl, authToken: options.dbAuthToken } : undefined;
-  const { db, client, vecAvailable } = await createDatabase(dbConfig);
+  const { db, client, vecAvailable: rawVecAvailable } = await createDatabase(dbConfig);
+  // In serverless mode, vec storage works (Turso supports it) but we cannot load
+  // the HuggingFace transformer model to generate embeddings — skip all embedding
+  // generation to avoid 30s+ model load that causes timeouts.
+  const vecAvailable = rawVecAvailable && !options?.skipEmbeddings;
 
   // Throttled confidence decay — runs at most once per hour
   let lastDecayRun = 0;
@@ -197,7 +201,8 @@ export async function startServer(options?: { transport?: Transport; dbUrl?: str
   }
 
   // Backfill embeddings for existing memories (async, best-effort)
-  if (vecAvailable) {
+  // Skip in serverless — backfill is a background task that makes no sense per-request
+  if (vecAvailable && !options?.skipEmbeddings) {
     backfillEmbeddings(client).then((count) => {
       if (count > 0) process.stderr.write(`[engrams] Backfilled embeddings for ${count} memories\n`);
     }).catch(() => {})
@@ -699,23 +704,12 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       for (const doc of params.documents) {
         // Dedup by location: find existing index entry with same location
-        const existing = (await client.execute({
-          sql: `SELECT id, structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''} AND structured_data IS NOT NULL`,
-          args: userId ? [userId] : [],
-        })).rows as unknown as { id: string; structured_data: string }[];
+        const existingRow = (await client.execute({
+          sql: `SELECT id FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND json_extract(structured_data, '$.type') = 'document' AND json_extract(structured_data, '$.location') = ?${userId ? ' AND user_id = ?' : ''} LIMIT 1`,
+          args: userId ? [doc.location, userId] : [doc.location],
+        })).rows[0] as { id: string } | undefined;
 
-        let existingId: string | null = null;
-        for (const row of existing) {
-          try {
-            const sd = JSON.parse(row.structured_data);
-            if (sd.type === "document" && sd.location === doc.location) {
-              existingId = row.id;
-              break;
-            }
-          } catch {
-            // skip malformed JSON
-          }
-        }
+        const existingId = existingRow?.id ?? null;
 
         const content = `[Document] ${doc.title} — ${doc.summary}`;
         const structuredData: Record<string, unknown> = {
@@ -854,23 +848,26 @@ Organize memories by life domain: general, work, health, finance, relationships,
       const thresholdHours = params.stale_threshold_hours ?? 168;
       const limit = params.limit ?? 50;
 
-      // Query all document index entries
+      // Query document index entries filtered at the SQL level
+      const sourceFilter = params.source_system
+        ? ` AND json_extract(structured_data, '$.source_system') = ?`
+        : '';
+      const baseArgs: unknown[] = [];
+      if (params.source_system) baseArgs.push(params.source_system);
+      if (userId) baseArgs.push(userId);
+
       const rows = (await client.execute({
-        sql: `SELECT id, entity_name, structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND structured_data IS NOT NULL${userId ? ' AND user_id = ?' : ''}`,
-        args: userId ? [userId] : [],
+        sql: `SELECT id, entity_name, structured_data FROM memories WHERE entity_type = 'resource' AND deleted_at IS NULL AND json_extract(structured_data, '$.type') = 'document'${sourceFilter}${userId ? ' AND user_id = ?' : ''}`,
+        args: baseArgs,
       })).rows as unknown as { id: string; entity_name: string | null; structured_data: string }[];
 
       const nowMs = Date.now();
       const stale: { id: string; title: string; location: string; source_system: string; last_indexed_at: string; hours_since_index: number }[] = [];
-      let totalIndexed = 0;
+      const totalIndexed = rows.length;
 
       for (const row of rows) {
         try {
           const sd = JSON.parse(row.structured_data);
-          if (sd.type !== "document") continue;
-          totalIndexed++;
-
-          if (params.source_system && sd.source_system !== params.source_system) continue;
 
           const lastIndexed = sd.last_indexed_at ? new Date(sd.last_indexed_at).getTime() : 0;
           const hoursSince = Math.round((nowMs - lastIndexed) / (1000 * 60 * 60));

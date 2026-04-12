@@ -26,7 +26,7 @@ export default function AppleIcon() {
             color: "transparent",
           }}
         >
-          E
+          e
         </span>
       </div>
     ),

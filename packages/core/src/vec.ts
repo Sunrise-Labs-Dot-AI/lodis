@@ -91,30 +91,15 @@ export async function searchVec(
   limit = 20,
 ): Promise<{ memory_id: string; distance: number }[]> {
   const result = await client.execute({
-    sql: `SELECT m.id as memory_id, m.embedding
+    sql: `SELECT m.id as memory_id, vt.distance
           FROM vector_top_k('memories_vec_idx', vector(?), ?) AS vt
           JOIN memories m ON m.rowid = vt.id
           WHERE m.deleted_at IS NULL`,
     args: [JSON.stringify(Array.from(queryEmbedding)), limit],
   });
 
-  return result.rows.map((row) => {
-    // Compute actual cosine distance from stored embedding
-    let distance = 0;
-    if (row.embedding) {
-      const stored = new Float32Array(row.embedding as ArrayBuffer);
-      let dot = 0, normA = 0, normB = 0;
-      for (let i = 0; i < queryEmbedding.length; i++) {
-        dot += queryEmbedding[i] * stored[i];
-        normA += queryEmbedding[i] * queryEmbedding[i];
-        normB += stored[i] * stored[i];
-      }
-      const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-      distance = 1 - similarity; // cosine distance
-    }
-    return {
-      memory_id: row.memory_id as string,
-      distance,
-    };
-  });
+  return result.rows.map((row) => ({
+    memory_id: row.memory_id as string,
+    distance: row.distance as number,
+  }));
 }

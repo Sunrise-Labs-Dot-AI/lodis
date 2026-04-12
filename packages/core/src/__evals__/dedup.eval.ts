@@ -33,26 +33,13 @@ afterAll(() => {
   if (cleanup) cleanup();
 });
 
-async function getStoredEmbedding(memoryId: string): Promise<Float32Array | null> {
+async function getEmbeddingSimilarity(memoryId: string, queryEmbedding: Float32Array): Promise<number | null> {
   const result = await client.execute({
-    sql: `SELECT embedding FROM memories WHERE id = ?`,
-    args: [memoryId],
+    sql: `SELECT vector_distance_cos(embedding, vector(?)) as distance FROM memories WHERE id = ? AND embedding IS NOT NULL`,
+    args: [JSON.stringify(Array.from(queryEmbedding)), memoryId],
   });
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0];
-  if (!row.embedding) return null;
-  const buf = row.embedding as ArrayBuffer;
-  return new Float32Array(buf);
-}
-
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  if (result.rows.length === 0 || result.rows[0].distance == null) return null;
+  return 1 - (result.rows[0].distance as number);
 }
 
 describe("dedup evals", () => {
@@ -62,14 +49,13 @@ describe("dedup evals", () => {
         if (!available) return;
 
         const newEmbedding = await generateEmbedding(testCase.newContent);
-        const existingEmbedding = await getStoredEmbedding(testCase.existingId);
+        const similarity = await getEmbeddingSimilarity(testCase.existingId, newEmbedding);
 
-        if (!existingEmbedding) {
+        if (similarity == null) {
           console.warn(`[dedup] No embedding for ${testCase.existingId}, skipping`);
           return;
         }
 
-        const similarity = cosineSimilarity(newEmbedding, existingEmbedding);
         console.log(
           `[dedup] ${testCase.name}: similarity=${similarity.toFixed(4)} threshold=${WRITE_SIMILARITY_THRESHOLD}`,
         );
@@ -88,14 +74,13 @@ describe("dedup evals", () => {
         if (!available) return;
 
         const newEmbedding = await generateEmbedding(testCase.newContent);
-        const existingEmbedding = await getStoredEmbedding(testCase.existingId);
+        const similarity = await getEmbeddingSimilarity(testCase.existingId, newEmbedding);
 
-        if (!existingEmbedding) {
+        if (similarity == null) {
           console.warn(`[dedup] No embedding for ${testCase.existingId}, skipping`);
           return;
         }
 
-        const similarity = cosineSimilarity(newEmbedding, existingEmbedding);
         console.log(
           `[dedup] ${testCase.name}: similarity=${similarity.toFixed(4)} threshold=${WRITE_SIMILARITY_THRESHOLD}`,
         );
@@ -114,14 +99,13 @@ describe("dedup evals", () => {
         if (!available) return;
 
         const newEmbedding = await generateEmbedding(testCase.newContent);
-        const existingEmbedding = await getStoredEmbedding(testCase.existingId);
+        const similarity = await getEmbeddingSimilarity(testCase.existingId, newEmbedding);
 
-        if (!existingEmbedding) {
+        if (similarity == null) {
           console.warn(`[dedup] No embedding for ${testCase.existingId}, skipping`);
           return;
         }
 
-        const similarity = cosineSimilarity(newEmbedding, existingEmbedding);
         console.log(
           `[dedup] ${testCase.name}: similarity=${similarity.toFixed(4)} shouldMatch=${testCase.shouldMatch}`,
         );

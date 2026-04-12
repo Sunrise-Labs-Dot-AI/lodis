@@ -428,7 +428,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       if (!skipDedup) {
         const embeddingText = params.content + (params.detail ? " " + params.detail : "");
+        let vecFoundMatch = false;
 
+        // --- Vec dedup (primary) ---
         if (vecAvailable) {
           try {
             embedding = await generateEmbedding(embeddingText);
@@ -455,6 +457,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
               )).filter(Boolean);
 
               if (matchedMemories.length > 0) {
+                vecFoundMatch = true;
                 return textResult({
                   status: "similar_found",
                   proposed: {
@@ -475,44 +478,50 @@ Organize memories by life domain: general, work, health, finance, relationships,
               }
             }
           } catch {
-            // Vector search failed — fall through to insert
+            // Vec search failure is non-fatal — FTS fallback below
           }
-        } else {
-          // FTS5 fallback dedup
-          const dedupResults = await searchFTS(client, params.content, 3);
-          if (dedupResults.length > 0) {
-            const rowids = dedupResults.map((r) => r.rowid);
-            const placeholders = rowids.map(() => "?").join(",");
-            const existing = (await client.execute({
-              sql: `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-              args: userId ? [...rowids, userId] : rowids,
-            })).rows as unknown as Record<string, unknown>[];
+        }
 
-            if (existing.length > 0) {
-              return textResult({
-                status: "similar_found",
-                proposed: {
-                  content: params.content,
-                  detail: params.detail ?? null,
-                  domain: params.domain ?? "general",
-                },
-                similar: existing.map((e) => ({
-                  id: e.id as string,
-                  content: e.content as string,
-                  detail: e.detail as string | null,
-                  confidence: e.confidence as number,
-                  similarity: null, // FTS5 doesn't provide cosine similarity
-                })),
-                options: [
-                  "update — replace the existing memory's content with the new content",
-                  "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
-                  "add_detail — append new content to the existing memory's detail field",
-                  "keep_both — store as a new memory (not a duplicate)",
-                  "skip — existing memory is already accurate, don't write anything",
-                ],
-                message: "Similar memory found. Respond with memory_write again including resolution and existingMemoryId to proceed.",
-              });
+        // --- FTS dedup (fallback — always runs when vec didn't match) ---
+        if (!vecFoundMatch) {
+          try {
+            const dedupResults = await searchFTS(client, params.content, 3);
+            if (dedupResults.length > 0) {
+              const rowids = dedupResults.map((r) => r.rowid);
+              const placeholders = rowids.map(() => "?").join(",");
+              const existing = (await client.execute({
+                sql: `SELECT * FROM memories WHERE rowid IN (${placeholders}) AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+                args: userId ? [...rowids, userId] : rowids,
+              })).rows as unknown as Record<string, unknown>[];
+
+              if (existing.length > 0) {
+                return textResult({
+                  status: "similar_found",
+                  proposed: {
+                    content: params.content,
+                    detail: params.detail ?? null,
+                    domain: params.domain ?? "general",
+                  },
+                  similar: existing.map((e) => ({
+                    id: e.id as string,
+                    content: e.content as string,
+                    detail: e.detail as string | null,
+                    confidence: e.confidence as number,
+                    similarity: null,
+                  })),
+                  options: [
+                    "update — replace the existing memory's content with the new content",
+                    "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                    "add_detail — append new content to the existing memory's detail field",
+                    "keep_both — store as a new memory (not a duplicate)",
+                    "skip — existing memory is already accurate, don't write anything",
+                  ],
+                  message: "Similar memory found. Respond with memory_write again including resolution and existingMemoryId to proceed.",
+                });
+              }
             }
+          } catch {
+            // FTS search failure is non-fatal
           }
         }
 
@@ -655,7 +664,6 @@ Organize memories by life domain: general, work, health, finance, relationships,
       if (hasPii) {
         result._pii_detected = [...new Set(piiMatches.map((m) => m.type))];
       }
-
       return textResult(result);
     },
   );

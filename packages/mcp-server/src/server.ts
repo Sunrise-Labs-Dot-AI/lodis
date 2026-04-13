@@ -2650,6 +2650,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
                 if (memWords[i].mem.confirmed_at && memWords[j].mem.confirmed_at) continue;
                 // Skip document index entries — catalog entries, not factual claims
                 if (isDocumentIndex(memWords[i].mem) && isDocumentIndex(memWords[j].mem)) continue;
+                // Skip if both memories have different entity_name values — they're about different entities
+                if (memWords[i].mem.entity_name && memWords[j].mem.entity_name &&
+                    memWords[i].mem.entity_name.toLowerCase() !== memWords[j].mem.entity_name.toLowerCase()) continue;
                 contradictionSeen.add(key);
                 items.push({
                   priority: 2,

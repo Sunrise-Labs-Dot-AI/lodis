@@ -128,6 +128,18 @@ export async function GET(req: Request) {
       color: #e2e8f0;
       border: 1px solid rgba(255, 255, 255, 0.12);
     }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(10, 14, 26, 0.3);
+      border-top-color: #0a0e1a;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -140,7 +152,7 @@ export async function GET(req: Request) {
       <li>Manage memory connections</li>
       <li>Set agent permissions</li>
     </ul>
-    <form method="POST" action="${BASE_URL}/api/oauth/authorize">
+    <form method="POST" action="${BASE_URL}/api/oauth/authorize" onsubmit="handleSubmit(event)">
       <input type="hidden" name="client_id" value="${escapeHtml(clientId)}" />
       <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}" />
       <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}" />
@@ -149,10 +161,21 @@ export async function GET(req: Request) {
       <input type="hidden" name="scope" value="${escapeHtml(scope)}" />
       <div class="buttons">
         <button type="submit" name="action" value="deny" class="deny">Deny</button>
-        <button type="submit" name="action" value="approve" class="approve">Allow Access</button>
+        <button type="submit" name="action" value="approve" class="approve" id="approve-btn">Allow Access</button>
       </div>
     </form>
   </div>
+  <script>
+    function handleSubmit(e) {
+      var clicked = e.submitter;
+      if (clicked && clicked.value === 'approve') {
+        var btn = document.getElementById('approve-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Authorizing\u2026';
+        document.querySelector('.deny').disabled = true;
+      }
+    }
+  </script>
 </body>
 </html>`;
 
@@ -185,27 +208,40 @@ export async function POST(req: Request) {
   // User approved — get their Clerk userId
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json(
-      { error: "unauthorized", error_description: "Session expired" },
-      { status: 401 },
-    );
+    return new NextResponse(renderMessagePage(
+      "Session Expired",
+      "Your session has expired. Please close this tab and try connecting again.",
+    ), { status: 401, headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
   // Generate auth code
-  const code = await createAuthCode({
-    clientId,
-    userId,
-    redirectUri,
-    codeChallenge,
-    codeChallengeMethod,
-    scopes: scope,
-  });
+  let code: string;
+  try {
+    code = await createAuthCode({
+      clientId,
+      userId,
+      redirectUri,
+      codeChallenge,
+      codeChallengeMethod,
+      scopes: scope,
+    });
+  } catch {
+    return new NextResponse(renderMessagePage(
+      "Something Went Wrong",
+      "Authorization failed. Please close this tab and try again.",
+    ), { status: 500, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
 
   const callbackUrl = new URL(redirectUri);
   callbackUrl.searchParams.set("code", code);
   if (state) callbackUrl.searchParams.set("state", state);
 
-  return NextResponse.redirect(callbackUrl.toString(), 302);
+  // Show success interstitial before redirecting
+  return new NextResponse(renderMessagePage(
+    "Authorization Successful",
+    "Redirecting back to your application\u2026",
+    callbackUrl.toString(),
+  ), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 function escapeHtml(str: string): string {
@@ -215,4 +251,61 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+/**
+ * Render a styled message page (success interstitial, error, or session expired).
+ * If redirectUrl is provided, auto-redirects after 1.5s.
+ */
+function renderMessagePage(title: string, message: string, redirectUrl?: string): string {
+  const redirectMeta = redirectUrl
+    ? `<meta http-equiv="refresh" content="1;url=${escapeHtml(redirectUrl)}" />`
+    : "";
+  const redirectScript = redirectUrl
+    ? `<script>setTimeout(function(){window.location.href=${JSON.stringify(redirectUrl)};},1500);</script>`
+    : "";
+  const isSuccess = !!redirectUrl;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)} — Engrams</title>
+  ${redirectMeta}
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0e1a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(125, 211, 252, 0.15);
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 420px;
+      width: 100%;
+      backdrop-filter: blur(20px);
+      text-align: center;
+    }
+    .icon { font-size: 2.5rem; margin-bottom: 1rem; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .msg { font-size: 0.875rem; color: #94a3b8; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${isSuccess ? "&#10003;" : "&#9888;"}</div>
+    <h1>${escapeHtml(title)}</h1>
+    <p class="msg">${escapeHtml(message)}</p>
+  </div>
+  ${redirectScript}
+</body>
+</html>`;
 }

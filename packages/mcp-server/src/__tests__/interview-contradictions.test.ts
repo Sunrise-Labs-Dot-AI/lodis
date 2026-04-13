@@ -86,6 +86,9 @@ function findContradictions(mems: MemRow[]): Array<[string, string]> {
           if (memWords[i].mem.confirmed_at && memWords[j].mem.confirmed_at) continue;
           // Skip document index entries — catalog entries, not factual claims
           if (isDocumentIndex(memWords[i].mem) && isDocumentIndex(memWords[j].mem)) continue;
+          // Skip if both memories have different entity_name values — they're about different entities
+          if (memWords[i].mem.entity_name && memWords[j].mem.entity_name &&
+              memWords[i].mem.entity_name.toLowerCase() !== memWords[j].mem.entity_name.toLowerCase()) continue;
           seen.add(key);
           results.push([memWords[i].mem.id, memWords[j].mem.id]);
         }
@@ -193,6 +196,92 @@ describe("interview contradiction detection", () => {
       makeMemRow({ id: "bbb", content: contentB, domain: "tech", structured_data: "also not json" }),
     ];
     // Malformed JSON → isDocumentIndex returns false → should still flag as normal contradiction
+    const contradictions = findContradictions(mems);
+    expect(contradictions).toHaveLength(1);
+  });
+
+  // --- Entity-name aware contradiction tests ---
+
+  it("should NOT flag two different people at the same company as contradictions", () => {
+    const mems = [
+      makeMemRow({
+        id: "aaa",
+        content: "Evie Grimshaw: Interviewer at Sierra AI, conducts technical interviews",
+        domain: "people",
+        entity_type: "person",
+        entity_name: "Evie Grimshaw",
+      }),
+      makeMemRow({
+        id: "bbb",
+        content: "Greg Snyder: Recruiter at Sierra AI, conducts initial screening interviews",
+        domain: "people",
+        entity_type: "person",
+        entity_name: "Greg Snyder",
+      }),
+    ];
+    const contradictions = findContradictions(mems);
+    expect(contradictions).toHaveLength(0);
+  });
+
+  it("should flag two memories about the same person with conflicting details", () => {
+    const mems = [
+      makeMemRow({
+        id: "aaa",
+        content: "Sarah Chen works as a senior engineer at Anthropic on the safety team",
+        domain: "people",
+        entity_type: "person",
+        entity_name: "Sarah Chen",
+      }),
+      makeMemRow({
+        id: "bbb",
+        content: "Sarah Chen works as a product manager at Anthropic on the growth team",
+        domain: "people",
+        entity_type: "person",
+        entity_name: "Sarah Chen",
+      }),
+    ];
+    const contradictions = findContradictions(mems);
+    expect(contradictions).toHaveLength(1);
+  });
+
+  it("should NOT flag complementary memories about the same entity", () => {
+    const mems = [
+      makeMemRow({
+        id: "aaa",
+        content: "Sierra AI is a startup founded in 2023 focusing on enterprise conversational AI",
+        domain: "companies",
+        entity_type: "organization",
+        entity_name: "Sierra AI",
+      }),
+      makeMemRow({
+        id: "bbb",
+        content: "Sierra AI raised a Series B round led by Sequoia Capital in late 2024",
+        domain: "companies",
+        entity_type: "organization",
+        entity_name: "Sierra AI",
+      }),
+    ];
+    const contradictions = findContradictions(mems);
+    expect(contradictions).toHaveLength(0);
+  });
+
+  it("should still check for contradictions when one memory has no entity_name", () => {
+    const mems = [
+      makeMemRow({
+        id: "aaa",
+        content: "James prefers using TypeScript for backend development projects",
+        domain: "tech",
+        entity_type: "person",
+        entity_name: "James",
+      }),
+      makeMemRow({
+        id: "bbb",
+        content: "Prefers using Python for backend machine learning projects",
+        domain: "tech",
+        entity_type: null,
+        entity_name: null,
+      }),
+    ];
     const contradictions = findContradictions(mems);
     expect(contradictions).toHaveLength(1);
   });

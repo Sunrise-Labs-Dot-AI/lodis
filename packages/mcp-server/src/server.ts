@@ -2521,6 +2521,23 @@ Organize memories by life domain: general, work, health, finance, relationships,
     return [...types];
   }
 
+  interface MemoryDetail {
+    id: string;
+    content: string;
+    detail: string | null;
+    confidence: number;
+    confirmed_count: number;
+    corrected_count: number;
+    domain: string;
+    entity_type: string | null;
+    entity_name: string | null;
+    permanence: string | null;
+    learned_at: string | null;
+    updated_at: string | null;
+    last_used_at: string | null;
+    source_type: string | null;
+  }
+
   interface InterviewItem {
     priority: number;
     section: "critical" | "cleanup" | "gaps";
@@ -2528,6 +2545,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
     issue: string;
     memoryIds: string[];
     action: string;
+    resolution_hint: string | null;
+    options: string[] | null;
+    memory_details: MemoryDetail[] | null;
   }
 
   server.tool(
@@ -2569,11 +2589,11 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       // ========== CLEANUP DETECTION ==========
       if (focus !== "gaps") {
-        type MemRow = { id: string; content: string; detail: string | null; domain: string; confidence: number; entity_type: string | null; entity_name: string | null; learned_at: string | null; confirmed_count: number; used_count: number; permanence: string | null; expires_at: string | null; has_pii_flag: number; structured_data: string | null; confirmed_at: string | null };
+        type MemRow = { id: string; content: string; detail: string | null; domain: string; confidence: number; entity_type: string | null; entity_name: string | null; learned_at: string | null; confirmed_count: number; corrected_count: number; mistake_count: number; used_count: number; permanence: string | null; expires_at: string | null; has_pii_flag: number; structured_data: string | null; confirmed_at: string | null; updated_at: string | null; last_used_at: string | null; source_type: string | null };
 
         // Load memories for JS-side analysis (cap at 500 most recent)
         const allMems = (await client.execute({
-          sql: `SELECT id, content, detail, domain, confidence, entity_type, entity_name, learned_at, confirmed_count, used_count, permanence, expires_at, has_pii_flag, structured_data, confirmed_at FROM memories WHERE ${whereClause} ORDER BY learned_at DESC LIMIT 500`,
+          sql: `SELECT id, content, detail, domain, confidence, entity_type, entity_name, learned_at, confirmed_count, corrected_count, mistake_count, used_count, permanence, expires_at, has_pii_flag, structured_data, confirmed_at, updated_at, last_used_at, source_type FROM memories WHERE ${whereClause} ORDER BY learned_at DESC LIMIT 500`,
           args: filterArgs,
         })).rows as unknown as MemRow[];
 
@@ -2586,10 +2606,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 0,
               section: "critical",
-              question: `This memory may contain sensitive data (${piiTypes.join(", ")}): "${truncate(m.content, 100)}". Should I redact the sensitive parts or remove this memory entirely?`,
+              question: `This memory may contain sensitive data (${piiTypes.join(", ")}). Should I redact the sensitive parts or remove this memory entirely?`,
               issue: "pii",
               memoryIds: [m.id],
               action: "memory_scrub to redact, or memory_remove to delete",
+              resolution_hint: null,
+              options: ["Redact sensitive parts", "Remove entire memory", "It's not actually sensitive — skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2601,10 +2624,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 1,
               section: "critical",
-              question: `This temporary memory has expired: "${truncate(m.content, 100)}". Should I delete it or convert it to a permanent memory?`,
+              question: `This temporary memory has expired. Should I delete it or convert it to a permanent memory?`,
               issue: "expired",
               memoryIds: [m.id],
               action: "memory_remove to delete, or memory_update with permanence: 'active' to keep",
+              resolution_hint: "This memory was meant to be temporary and has passed its expiry. Unless it contains lasting value, removing it is safe.",
+              options: ["Delete it", "Keep as permanent memory", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2633,34 +2659,158 @@ Organize memories by life domain: general, work, health, finance, relationships,
           catch { return false; }
         }
 
+        function toMemoryDetail(m: MemRow): MemoryDetail {
+          return {
+            id: m.id,
+            content: m.content,
+            detail: m.detail,
+            confidence: m.confidence,
+            confirmed_count: m.confirmed_count,
+            corrected_count: m.corrected_count,
+            domain: m.domain,
+            entity_type: m.entity_type,
+            entity_name: m.entity_name,
+            permanence: m.permanence,
+            learned_at: m.learned_at,
+            updated_at: m.updated_at,
+            last_used_at: m.last_used_at,
+            source_type: m.source_type,
+          };
+        }
+
+        function extractClaim(content: string, entityName: string | null): string {
+          let claim = content.toLowerCase();
+          if (entityName) {
+            claim = claim.replace(new RegExp(entityName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "");
+          }
+          claim = claim.replace(/^(i think|i believe|user said|user mentioned|note:|remember:)\s*/i, "");
+          return claim.trim();
+        }
+
+        function hasNegationConflict(claimA: string, claimB: string): boolean {
+          const negationPairs: [RegExp, RegExp][] = [
+            [/\blikes?\b/, /\b(doesn't|does not|hates?|dislikes?)\b/],
+            [/\bprefers?\b/, /\b(avoids?|doesn't prefer|does not prefer)\b/],
+            [/\bis\b/, /\b(isn't|is not|is no longer|was formerly)\b/],
+            [/\buses?\b/, /\b(doesn't use|stopped using|no longer uses)\b/],
+            [/\bworks?\s+(at|for|with)\b/, /\b(left|no longer works|quit|resigned from)\b/],
+            [/\bwants?\b/, /\b(doesn't want|does not want)\b/],
+          ];
+          for (const [pos, neg] of negationPairs) {
+            if ((pos.test(claimA) && neg.test(claimB)) || (pos.test(claimB) && neg.test(claimA))) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        function hasConflictingValues(claimA: string, claimB: string): boolean {
+          // Match proper nouns after key verbs/prepositions, allowing intermediate words
+          // Only proper nouns (capitalized words), not bare numbers — numbers are too ambiguous
+          // (e.g., "founded in 2023" vs "raised in 2024" are different events, not contradictions)
+          const valuePattern = /\b(?:is|at|for|in|on|uses?|prefers?|using|as)\s+(?:\w+\s+)*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/g;
+          const valsA: string[] = [];
+          const valsB: string[] = [];
+          let match;
+          while ((match = valuePattern.exec(claimA)) !== null) valsA.push(match[1].toLowerCase());
+          valuePattern.lastIndex = 0;
+          while ((match = valuePattern.exec(claimB)) !== null) valsB.push(match[1].toLowerCase());
+          if (valsA.length > 0 && valsB.length > 0) {
+            for (const a of valsA) {
+              for (const b of valsB) {
+                if (a !== b && a.length > 2 && b.length > 2) return true;
+              }
+            }
+          }
+          return false;
+        }
+
         const contradictionSeen = new Set<string>();
         for (const [, domainMems] of byDomain) {
           if (domainMems.length < 2) continue;
-          const memWords = domainMems.map(m => ({
+          const memData = domainMems.map(m => ({
             mem: m,
             words: wordSet(m.content + (m.detail ? " " + m.detail : ""), m.entity_name),
+            claim: extractClaim(m.content + (m.detail ? " " + m.detail : ""), m.entity_name),
           }));
-          for (let i = 0; i < memWords.length && items.filter(it => it.issue === "contradiction").length < 5; i++) {
-            for (let j = i + 1; j < memWords.length && items.filter(it => it.issue === "contradiction").length < 5; j++) {
-              const key = [memWords[i].mem.id, memWords[j].mem.id].sort().join("|");
+
+          for (let i = 0; i < memData.length && items.filter(it => it.issue === "contradiction").length < 5; i++) {
+            for (let j = i + 1; j < memData.length && items.filter(it => it.issue === "contradiction").length < 5; j++) {
+              const a = memData[i], b = memData[j];
+              const key = [a.mem.id, b.mem.id].sort().join("|");
               if (contradictionSeen.has(key)) continue;
-              const overlap = wordOverlap(memWords[i].words, memWords[j].words);
-              if (overlap >= 0.45 && overlap < 0.7) {
-                // Skip if both memories were already confirmed (user reviewed them)
-                if (memWords[i].mem.confirmed_at && memWords[j].mem.confirmed_at) continue;
-                // Skip document index entries — catalog entries, not factual claims
-                if (isDocumentIndex(memWords[i].mem) && isDocumentIndex(memWords[j].mem)) continue;
-                // Skip if both memories have different entity_name values — they're about different entities
-                if (memWords[i].mem.entity_name && memWords[j].mem.entity_name &&
-                    memWords[i].mem.entity_name.toLowerCase() !== memWords[j].mem.entity_name.toLowerCase()) continue;
+
+              // Skip conditions
+              if (a.mem.confirmed_at && b.mem.confirmed_at) continue;
+              if (isDocumentIndex(a.mem) && isDocumentIndex(b.mem)) continue;
+              if (a.mem.entity_name && b.mem.entity_name &&
+                  a.mem.entity_name.toLowerCase() !== b.mem.entity_name.toLowerCase()) continue;
+
+              const overlap = wordOverlap(a.words, b.words);
+
+              // Multi-signal conflict scoring
+              let conflictScore = 0;
+              const reasons: string[] = [];
+
+              // Signal 1: Word overlap in the contradiction range
+              if (overlap >= 0.40 && overlap < 0.75) {
+                conflictScore += 0.3;
+              }
+
+              // Signal 2: Same entity_type AND entity_name — higher conflict risk
+              if (a.mem.entity_type && a.mem.entity_type === b.mem.entity_type &&
+                  a.mem.entity_name && b.mem.entity_name &&
+                  a.mem.entity_name.toLowerCase() === b.mem.entity_name.toLowerCase()) {
+                conflictScore += 0.2;
+                reasons.push(`both about ${a.mem.entity_name} (${a.mem.entity_type})`);
+              }
+
+              // Signal 3: Negation language detected
+              if (hasNegationConflict(a.claim, b.claim)) {
+                conflictScore += 0.4;
+                reasons.push("negating language detected");
+              }
+
+              // Signal 4: Conflicting specific values (use original content, not lowercased claims)
+              const aText = a.mem.content + (a.mem.detail ? " " + a.mem.detail : "");
+              const bText = b.mem.content + (b.mem.detail ? " " + b.mem.detail : "");
+              if (hasConflictingValues(aText, bText)) {
+                conflictScore += 0.3;
+                reasons.push("different specific values");
+              }
+
+              // Signal 5: Different entity_types = likely complementary, not conflicting
+              if (a.mem.entity_type && b.mem.entity_type && a.mem.entity_type !== b.mem.entity_type) {
+                conflictScore -= 0.3;
+              }
+
+              // Only flag if conflict score is high enough (requires multiple signals)
+              if (conflictScore >= 0.5) {
                 contradictionSeen.add(key);
+                const reason = reasons.length > 0 ? reasons.join(", ") : "";
+
+                // Build resolution hint from metadata signals
+                let hint: string | null = null;
+                if (a.mem.corrected_count > 0 && b.mem.corrected_count === 0) {
+                  hint = `Memory 1 has been corrected ${a.mem.corrected_count} time(s) — it may be the less reliable one. Consider confirming Memory 2.`;
+                } else if (b.mem.corrected_count > 0 && a.mem.corrected_count === 0) {
+                  hint = `Memory 2 has been corrected ${b.mem.corrected_count} time(s) — it may be the less reliable one. Consider confirming Memory 1.`;
+                } else if (a.mem.updated_at && b.mem.updated_at && a.mem.updated_at > b.mem.updated_at) {
+                  hint = `Memory 1 was updated more recently (${a.mem.updated_at.split("T")[0]}) — it may be more current.`;
+                } else if (b.mem.updated_at && a.mem.updated_at && b.mem.updated_at > a.mem.updated_at) {
+                  hint = `Memory 2 was updated more recently (${b.mem.updated_at.split("T")[0]}) — it may be more current.`;
+                }
+
                 items.push({
                   priority: 2,
                   section: "critical",
-                  question: `I have two memories in "${memWords[i].mem.domain}" that might conflict:\n  1. "${truncate(memWords[i].mem.content, 100)}" (id: ${memWords[i].mem.id})\n  2. "${truncate(memWords[j].mem.content, 100)}" (id: ${memWords[j].mem.id})\nWhich one is correct, or are they both true in different contexts?`,
+                  question: `These memories in "${a.mem.domain}" may conflict${reason ? ` (${reason})` : ""}:\nWhich is correct, or are both true in different contexts?`,
                   issue: "contradiction",
-                  memoryIds: [memWords[i].mem.id, memWords[j].mem.id],
+                  memoryIds: [a.mem.id, b.mem.id],
                   action: "memory_correct the wrong one, or memory_confirm both if no conflict",
+                  resolution_hint: hint,
+                  options: ["Memory 1 is correct — archive Memory 2", "Memory 2 is correct — archive Memory 1", "Both are true in different contexts — confirm both", "Both are wrong — I'll provide the correct info", "Skip"],
+                  memory_details: [toMemoryDetail(a.mem), toMemoryDetail(b.mem)],
                 });
               }
             }
@@ -2676,10 +2826,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 3,
               section: "cleanup",
-              question: `This memory references a time that may have passed: "${truncate(m.content, 100)}" (learned ${m.learned_at.split("T")[0]}). Is this still accurate, or should I update it?`,
+              question: `This memory references a time that may have passed (learned ${m.learned_at.split("T")[0]}). Is this still accurate, or should I update it?`,
               issue: "stale_temporal",
               memoryIds: [m.id],
               action: "memory_update with current info, or memory_remove if obsolete",
+              resolution_hint: `Learned on ${m.learned_at.split("T")[0]} and contains time-relative language. If the time reference has passed, the memory should be updated or removed.`,
+              options: ["Still accurate — confirm", "Update it — I'll provide new info", "Remove it", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2690,10 +2843,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 4,
               section: "cleanup",
-              question: `I'm not very sure about this (${(m.confidence * 100).toFixed(0)}% confidence, never confirmed): "${truncate(m.content, 100)}". Can you confirm this is correct?`,
+              question: `I'm not very sure about this (${(m.confidence * 100).toFixed(0)}% confidence, never confirmed). Can you confirm this is correct?`,
               issue: "low_confidence",
               memoryIds: [m.id],
               action: "memory_confirm if correct, memory_correct if wrong, memory_remove if irrelevant",
+              resolution_hint: m.corrected_count > 0 ? `This memory has been corrected ${m.corrected_count} time(s) — extra scrutiny warranted.` : (m.source_type === "inferred" ? "This was inferred, not directly stated by the user — may need verification." : null),
+              options: ["Correct as-is — confirm", "Wrong — I'll provide the right info", "Remove it", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2704,10 +2860,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
           items.push({
             priority: 5,
             section: "cleanup",
-            question: `This memory doesn't have a type assigned: "${truncate(m.content, 100)}". What kind of thing is this — a person, project, preference, fact, or something else?`,
+            question: `This memory doesn't have a type assigned. What kind of thing is this?`,
             issue: "untyped",
             memoryIds: [m.id],
             action: "memory_classify to list unclassified memories, then memory_update to set entity_type on each",
+            resolution_hint: "Auto-resolve: If the content clearly describes a person, project, preference, etc., classify it without asking the user.",
+            options: [...ALL_ENTITY_TYPES, "Skip"],
+            memory_details: [toMemoryDetail(m)],
           });
         }
 
@@ -2720,10 +2879,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 6,
               section: "cleanup",
-              question: `This memory covers ${Math.max(sentences.length, semicolons.length)} topics: "${truncate(m.content, 100)}". Would you like me to split it into separate memories?`,
+              question: `This memory covers ${Math.max(sentences.length, semicolons.length)} topics. Would you like me to split it into separate memories?`,
               issue: "split",
               memoryIds: [m.id],
               action: "memory_split to break into parts",
+              resolution_hint: "Auto-resolve: If the memory clearly contains multiple independent facts, split it without asking the user.",
+              options: ["Yes, split it", "No, keep as one", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2731,7 +2893,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
         // 8. Stale projects (priority 7)
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
         for (const m of allMems) {
-          if (m.entity_type === "project" && m.permanence !== "archived" && m.permanence !== "canonical" && m.used_count === 0 && m.confirmed_count === 0 && m.learned_at && m.learned_at < ninetyDaysAgo) {
+          const lastActivity = m.last_used_at || m.updated_at || m.learned_at;
+          if (m.entity_type === "project" && m.permanence !== "archived" && m.permanence !== "canonical" && m.used_count === 0 && m.confirmed_count === 0 && lastActivity && lastActivity < ninetyDaysAgo) {
             items.push({
               priority: 7,
               section: "cleanup",
@@ -2739,6 +2902,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
               issue: "stale_project",
               memoryIds: [m.id],
               action: "memory_archive if done, memory_confirm if still active",
+              resolution_hint: m.last_used_at ? `Last used: ${m.last_used_at.split("T")[0]}.` : "Never used or referenced since creation.",
+              options: ["Still active — confirm", "Archive it", "Remove it", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2749,10 +2915,13 @@ Organize memories by life domain: general, work, health, finance, relationships,
             items.push({
               priority: 8,
               section: "cleanup",
-              question: `"${truncate(m.content, 100)}" has been confirmed ${m.confirmed_count} times with ${(m.confidence * 100).toFixed(0)}% confidence. Should I pin this as permanent canonical knowledge?`,
+              question: `This memory has been confirmed ${m.confirmed_count} times with ${(m.confidence * 100).toFixed(0)}% confidence. Should I pin this as permanent canonical knowledge?`,
               issue: "promote",
               memoryIds: [m.id],
               action: "memory_pin to make canonical",
+              resolution_hint: `Auto-resolve: This memory has strong signals (${m.confirmed_count} confirmations, ${(m.confidence * 100).toFixed(0)}% confidence). Pin it automatically unless the content seems questionable.`,
+              options: ["Pin as canonical", "Not yet — keep as is", "Skip"],
+              memory_details: [toMemoryDetail(m)],
             });
           }
         }
@@ -2779,6 +2948,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
                 issue: "empty_type",
                 memoryIds: [],
                 action: `memory_write with entity_type: "${type}"`,
+                resolution_hint: null,
+                options: null,
+                memory_details: null,
               });
             } else if (count <= 2) {
               items.push({
@@ -2788,6 +2960,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
                 issue: "thin_type",
                 memoryIds: [],
                 action: `memory_write with entity_type: "${type}"`,
+                resolution_hint: null,
+                options: null,
+                memory_details: null,
               });
             }
           }
@@ -2807,6 +2982,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
             issue: "shallow_entity",
             memoryIds: [],
             action: `memory_write with entity_name: "${e.entity_name}", entity_type: "${e.entity_type}"`,
+            resolution_hint: null,
+            options: null,
+            memory_details: null,
           });
         }
 
@@ -2825,6 +3003,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
               issue: "missing_crossref",
               memoryIds: [],
               action: `memory_update to add structured_data, or memory_write a new connection`,
+              resolution_hint: null,
+              options: null,
+              memory_details: null,
             });
             continue;
           }
@@ -2838,6 +3019,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
                 issue: "missing_crossref",
                 memoryIds: [],
                 action: `memory_update to add organization and relationship_to_user`,
+                resolution_hint: null,
+                options: null,
+                memory_details: null,
               });
             }
           } catch { /* skip unparseable */ }
@@ -2858,6 +3042,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
               issue: "thin_domain",
               memoryIds: [],
               action: `memory_write with domain: "${d.domain}", or confirm it's complete`,
+              resolution_hint: null,
+              options: null,
+              memory_details: null,
             });
           }
         }
@@ -2937,6 +3124,24 @@ Organize memories by life domain: general, work, health, finance, relationships,
       plan.push("- If the user's answer reveals new information not covered in the plan, write it with `memory_write`.");
       plan.push("- Stop early if the user wants to — this can always be run again later.");
       plan.push("");
+      plan.push("### Auto-resolution (important)");
+      plan.push("");
+      plan.push("Before asking the user any question, review the full content, metadata, and **Resolution Hint** for the memories involved. If you can confidently determine the correct action (confirm both, archive one, classify, split, pin, etc.), **take that action silently** and move on. Only ask the user when the correct resolution is genuinely ambiguous.");
+      plan.push("");
+      plan.push("Examples of auto-resolvable items:");
+      plan.push("- A memory about a person is obviously type `person` → classify it silently");
+      plan.push("- A memory with 5 confirmations and 98% confidence → pin it silently");
+      plan.push("- An expired ephemeral memory with no lasting value → remove it silently");
+      plan.push("- Two memories that cover different aspects of the same topic → confirm both silently");
+      plan.push("");
+      plan.push("At the end of the interview, provide a **summary of all actions taken** — both auto-resolved and user-resolved.");
+      plan.push("");
+      plan.push("### Presenting questions to the user");
+      plan.push("");
+      plan.push("When a question has **Options**, prefer structured question tools if available (e.g., `AskUserQuestion`). Format options as concrete choices. If no structured question tool is available, present options as a numbered list.");
+      plan.push("");
+      plan.push("Always include the memory content and metadata shown below each question so the user has full context to decide.");
+      plan.push("");
       plan.push("### Available tools");
       plan.push("- `memory_confirm` — verify a memory is correct (boosts confidence)");
       plan.push("- `memory_correct` — fix incorrect content");
@@ -2949,6 +3154,53 @@ Organize memories by life domain: general, work, health, finance, relationships,
       plan.push("- `memory_write` — create new memories from user answers");
       plan.push("- `memory_connect` — link related entities");
 
+      // Helper to render a memory detail block in the plan
+      function renderMemoryBlock(detail: MemoryDetail, label: string): string[] {
+        const lines: string[] = [];
+        lines.push(`**${label}** (id: \`${detail.id}\`)`);
+        lines.push(`> ${detail.content}`);
+        if (detail.detail) lines.push(`> *Detail:* ${detail.detail}`);
+        const meta = [
+          `confidence: ${(detail.confidence * 100).toFixed(0)}%`,
+          `confirmed: ${detail.confirmed_count}x`,
+          `corrected: ${detail.corrected_count}x`,
+          `domain: ${detail.domain}`,
+          `type: ${detail.entity_type ?? "unset"}`,
+          `entity: ${detail.entity_name ?? "unset"}`,
+          `permanence: ${detail.permanence ?? "unset"}`,
+          `learned: ${detail.learned_at?.split("T")[0] ?? "unknown"}`,
+          `updated: ${detail.updated_at?.split("T")[0] ?? "never"}`,
+        ].join(" | ");
+        lines.push(`> ${meta}`);
+        return lines;
+      }
+
+      // Helper to render a single interview item
+      function renderItem(item: InterviewItem, qNum: number): string[] {
+        const lines: string[] = [];
+        lines.push(`### Q${qNum}`);
+        lines.push("");
+        lines.push(item.question);
+        lines.push("");
+        if (item.memory_details) {
+          for (let k = 0; k < item.memory_details.length; k++) {
+            const label = item.memory_details.length > 1 ? `Memory ${k + 1}` : "Memory";
+            lines.push(...renderMemoryBlock(item.memory_details[k], label));
+            lines.push("");
+          }
+        }
+        if (item.resolution_hint) {
+          lines.push(`**Resolution Hint:** ${item.resolution_hint}`);
+          lines.push("");
+        }
+        if (item.options) {
+          lines.push(`**Options:** ${item.options.map((o, i) => `${i + 1}. ${o}`).join(" | ")}`);
+          lines.push("");
+        }
+        lines.push(`**Issue:** ${item.issue}${item.memoryIds.length > 0 ? ` | **IDs:** ${item.memoryIds.join(", ")}` : ""} | **Action:** ${item.action}`);
+        return lines;
+      }
+
       let qNum = 0;
 
       if (finalCritical.length > 0) {
@@ -2959,8 +3211,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         for (const item of finalCritical) {
           qNum++;
           plan.push("");
-          plan.push(`### Q${qNum}: ${item.question}`);
-          plan.push(`**Issue:** ${item.issue}${item.memoryIds.length > 0 ? ` | **IDs:** ${item.memoryIds.join(", ")}` : ""} | **Action:** ${item.action}`);
+          plan.push(...renderItem(item, qNum));
         }
       }
 
@@ -2972,8 +3223,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         for (const item of finalCleanup) {
           qNum++;
           plan.push("");
-          plan.push(`### Q${qNum}: ${item.question}`);
-          plan.push(`**Issue:** ${item.issue}${item.memoryIds.length > 0 ? ` | **IDs:** ${item.memoryIds.join(", ")}` : ""} | **Action:** ${item.action}`);
+          plan.push(...renderItem(item, qNum));
         }
       }
 
@@ -2985,8 +3235,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         for (const item of finalGaps) {
           qNum++;
           plan.push("");
-          plan.push(`### Q${qNum}: ${item.question}`);
-          plan.push(`**Gap:** ${item.issue} | **Action:** ${item.action}`);
+          plan.push(...renderItem(item, qNum));
         }
       }
 
@@ -2995,9 +3244,12 @@ Organize memories by life domain: general, work, health, finance, relationships,
       plan.push("");
       plan.push("## Wrap-up");
       plan.push("");
-      plan.push("After completing the questions above, tell the user:");
+      plan.push("After completing all items, provide:");
+      plan.push("1. **Auto-resolved actions summary** — list every action you took silently (with memory IDs), grouped by type (e.g., \"Classified 3 memories\", \"Pinned 2 memories\", \"Confirmed 4 complementary pairs\").");
+      plan.push("2. **User-resolved summary** — list what the user decided.");
+      plan.push("3. **Skipped items** — note anything skipped.");
       plan.push("");
-      plan.push(`"We reviewed ${allQuestions.length} items across your memory. You can see the changes at **localhost:3838** — the dashboard shows your full memory graph, and you can make further edits there anytime. Run \\\`memory_interview\\\` again later for another check-up."`);
+      plan.push(`Then tell the user: "We reviewed ${allQuestions.length} items across your memory. You can see the changes at **localhost:3838** — the dashboard shows your full memory graph, and you can make further edits there anytime. Run \\\`memory_interview\\\` again later for another check-up."`);
 
       // Log the interview event
       try {

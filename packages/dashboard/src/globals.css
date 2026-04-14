@@ -36,9 +36,44 @@
   --color-glow: var(--accent);
 }
 
+@theme {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-text);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+}
+
+code, pre, .font-mono {
+  font-family: var(--font-mono), ui-monospace, "JetBrains Mono", Menlo,
+    Consolas, monospace;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.04),
+      transparent
+    );
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes skeleton-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
 }
 
 .prose-engrams {

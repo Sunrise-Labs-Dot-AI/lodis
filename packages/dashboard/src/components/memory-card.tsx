@@ -21,7 +21,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/confidence-bar";
-import { confirmMemoryAction, deleteMemoryAction, pinMemoryAction, archiveMemoryAction } from "@/lib/actions";
+import {
+  confirmMemoryAction,
+  deleteMemoryAction,
+  pinMemoryAction,
+  archiveMemoryAction,
+} from "@/lib/actions";
 import { formatDate, sourceTypeLabel } from "@/lib/utils";
 import type { MemoryRow } from "@/lib/db";
 
@@ -32,15 +37,17 @@ interface MemoryCardProps {
 export function MemoryCard({ memory: m }: MemoryCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleAction(action: () => Promise<unknown>) {
     setLoading(true);
+    setError(null);
     try {
       await action();
       router.refresh();
     } catch (e) {
-      console.error(e);
+      setError(e instanceof Error ? e.message : "Action failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -51,11 +58,16 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-sm leading-relaxed">{m.content}</p>
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <StatusBadge variant="accent">{m.domain}</StatusBadge>
-            <StatusBadge variant="neutral">
-              {sourceTypeLabel(m.source_type)}
-            </StatusBadge>
+            {m.entity_type && (
+              <StatusBadge variant="neutral" className="max-w-[16rem]">
+                <span className="inline-block truncate align-bottom max-w-full">
+                  {m.entity_type}
+                  {m.entity_name ? `: ${m.entity_name}` : ""}
+                </span>
+              </StatusBadge>
+            )}
             {m.permanence === "canonical" && (
               <StatusBadge variant="accent">
                 <Star size={10} className="mr-0.5 inline fill-current" />
@@ -74,36 +86,40 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
                 Archived
               </StatusBadge>
             )}
-            {m.entity_type && (
-              <StatusBadge variant="neutral">
-                {m.entity_type}{m.entity_name ? `: ${m.entity_name}` : ""}
-              </StatusBadge>
-            )}
             {!!m.has_pii_flag && (
               <StatusBadge variant="warning">
                 <ShieldAlert size={12} className="mr-0.5 inline" />
                 PII
               </StatusBadge>
             )}
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {m.source_agent_name}
-            </span>
-            <span className="text-xs text-[var(--color-text-muted)]">
+            <span className="ml-auto text-xs text-[var(--color-text-muted)] whitespace-nowrap">
               {formatDate(m.learned_at)}
             </span>
           </div>
           <div className="mt-2 max-w-48">
             <ConfidenceBar confidence={m.confidence} />
           </div>
+          {error && (
+            <p
+              role="alert"
+              className="mt-2 text-xs text-[var(--color-danger)]"
+            >
+              {error}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Link
             href={`/memory/${m.id}`}
+            aria-label="Open memory detail"
             className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
           >
             <ExternalLink size={14} />
           </Link>
           <button
+            type="button"
+            aria-label={expanded ? "Collapse memory details" : "Expand memory details"}
+            aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
           >
@@ -114,6 +130,20 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
 
       {expanded && (
         <div className="mt-3 pt-3 border-t border-[var(--color-border-light)]">
+          <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
+            <dt>Source</dt>
+            <dd className="text-[var(--color-text-secondary)]">
+              {sourceTypeLabel(m.source_type)}
+            </dd>
+            {m.source_agent_name && (
+              <>
+                <dt>Agent</dt>
+                <dd className="text-[var(--color-text-secondary)]">
+                  {m.source_agent_name}
+                </dd>
+              </>
+            )}
+          </dl>
           {m.detail && (
             <div className="text-xs text-[var(--color-text-secondary)] mb-3 prose-engrams">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.detail}</ReactMarkdown>
@@ -124,7 +154,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
               Source: {m.source_description}
             </p>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="ghost"
               size="sm"
@@ -135,10 +165,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
               Confirm
             </Button>
             <Link href={`/memory/${m.id}`}>
-              <Button
-                variant="ghost"
-                size="sm"
-              >
+              <Button variant="ghost" size="sm">
                 <Pencil size={14} className="mr-1" />
                 Correct
               </Button>

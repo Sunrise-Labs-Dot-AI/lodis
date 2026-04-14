@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Nav } from "@/components/nav";
 import "@/globals.css";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+});
 
 export const metadata: Metadata = {
   title: "Engrams",
@@ -16,14 +23,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   const content = (
-    <html lang="en" className="dark">
-      <body className="min-h-screen">
+    <html
+      lang="en"
+      className={`dark ${inter.variable} ${jetbrainsMono.variable}`}
+    >
+      <body className="min-h-screen antialiased">
         <a href="#main" className="skip-link">
           Skip to content
         </a>
         <header className="border-b border-[var(--color-border)] bg-[rgba(17,24,39,0.8)] backdrop-blur-xl">
-          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <h1 className="text-lg font-bold text-[var(--color-glow)]">
                 engrams
               </h1>

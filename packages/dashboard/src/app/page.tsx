@@ -6,6 +6,7 @@ import { SearchBar } from "@/components/search-bar";
 import { DomainFilter } from "@/components/domain-filter";
 import { MemoryFilters } from "@/components/memory-filters";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Sparkles, AlertCircle } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -33,23 +34,27 @@ export default async function HomePage({ searchParams }: PageProps) {
   // Empty state: no memories in the entire DB
   if (totalCount === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <div className="w-16 h-16 mb-6 rounded-full bg-[var(--color-accent-soft)] flex items-center justify-center">
-          <Sparkles className="w-8 h-8 text-[var(--color-accent)]" />
-        </div>
-        <h2 className="text-2xl font-semibold mb-2">No memories yet</h2>
-        <p className="text-[var(--color-text-secondary)] max-w-md mb-8">
-          Your memory database is empty. Start a conversation with your AI assistant and say:
-        </p>
-        <Card className="p-4 max-w-lg w-full mb-4">
-          <code className="text-sm text-[var(--color-accent-text)] font-mono">
-            &quot;Help me set up Engrams&quot;
-          </code>
-        </Card>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Your AI will scan your connected tools and ask a few questions to seed your memory.
-        </p>
-      </div>
+      <EmptyState
+        icon={<Sparkles className="w-8 h-8" />}
+        title="No memories yet"
+        description={
+          <>
+            <p className="mb-4">
+              Your memory database is empty. Start a conversation with your AI
+              assistant and say:
+            </p>
+            <Card className="p-4 max-w-lg w-full mb-4 mx-auto">
+              <code className="text-sm text-[var(--color-accent-text)] font-mono">
+                &quot;Help me set up Engrams&quot;
+              </code>
+            </Card>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Your AI will scan your connected tools and ask a few questions to
+              seed your memory.
+            </p>
+          </>
+        }
+      />
     );
   }
 
@@ -79,15 +84,12 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 flex-wrap">
-        <Suspense>
-          <SearchBar />
-        </Suspense>
-        <Suspense>
-          <DomainFilter domains={domains} />
-        </Suspense>
-      </div>
-
+      <Suspense>
+        <SearchBar />
+      </Suspense>
+      <Suspense>
+        <DomainFilter domains={domains} />
+      </Suspense>
       <Suspense>
         <MemoryFilters sourceTypes={sourceTypes} entityTypes={entityTypes} />
       </Suspense>
@@ -108,11 +110,9 @@ export default async function HomePage({ searchParams }: PageProps) {
         </Card>
       )}
 
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-[var(--color-text-muted)]">
-          {memories.length} {memories.length === 1 ? "memory" : "memories"}
-        </p>
-      </div>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        {memories.length} {memories.length === 1 ? "memory" : "memories"}
+      </p>
 
       <MemoryList
         memories={memories}

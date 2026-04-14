@@ -19,7 +19,7 @@ export function SearchBar() {
       } else {
         params.delete("q");
       }
-      router.push(`/?${params.toString()}`);
+      router.replace(`/?${params.toString()}`);
     });
   }
 

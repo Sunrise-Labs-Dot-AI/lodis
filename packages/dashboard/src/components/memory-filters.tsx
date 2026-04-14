@@ -2,8 +2,8 @@
 
 import clsx from "clsx";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
-import { ArrowUpDown, Filter } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 
 interface MemoryFiltersProps {
   sourceTypes: string[];
@@ -11,23 +11,41 @@ interface MemoryFiltersProps {
 }
 
 const SORT_OPTIONS = [
-  { value: "confidence", label: "Confidence" },
+  { value: "confidence", label: "Confidence (highest first)" },
   { value: "recency", label: "Newest" },
   { value: "learned", label: "Oldest" },
-  { value: "used", label: "Most Used" },
+  { value: "used", label: "Most used" },
 ] as const;
 
 const CONFIDENCE_PRESETS = [
   { value: "", label: "Any" },
   { value: "0.8-1", label: "High (80%+)" },
-  { value: "0.5-0.8", label: "Medium (50-80%)" },
+  { value: "0.5-0.8", label: "Medium (50–80%)" },
   { value: "0-0.5", label: "Low (<50%)" },
+] as const;
+
+const PERMANENCE_OPTIONS = [
+  { value: "", label: "All tiers" },
+  { value: "canonical", label: "Canonical" },
+  { value: "active", label: "Active" },
+  { value: "ephemeral", label: "Ephemeral" },
+  { value: "archived", label: "Archived" },
 ] as const;
 
 export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const activeSort = searchParams.get("sort") ?? "confidence";
   const activeSource = searchParams.get("source") ?? "";
@@ -44,6 +62,22 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
     ? `${activeMinConf}-1`
     : "";
 
+  const sortLabel =
+    SORT_OPTIONS.find((o) => o.value === activeSort)?.label ?? "Confidence";
+  const confLabel = CONFIDENCE_PRESETS.find((o) => o.value === activeConfPreset)
+    ?.label;
+
+  const summaryChips: string[] = [];
+  if (activeSort !== "confidence") summaryChips.push(sortLabel);
+  if (confLabel && confLabel !== "Any") summaryChips.push(confLabel);
+  if (activeSource) summaryChips.push(activeSource);
+  if (activeEntity) summaryChips.push(activeEntity);
+  if (activePermanence) summaryChips.push(activePermanence);
+  if (activeUnused) summaryChips.push("Unused");
+  if (activeReview) summaryChips.push("Needs review");
+
+  const hasActiveFilters = summaryChips.length > 0;
+
   function updateParam(key: string, value: string | null) {
     startTransition(() => {
       const params = new URLSearchParams(searchParams.toString());
@@ -52,7 +86,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
       } else {
         params.delete(key);
       }
-      router.push(`/?${params.toString()}`);
+      router.replace(`/?${params.toString()}`);
     });
   }
 
@@ -67,157 +101,232 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
         params.set("minConf", min);
         params.set("maxConf", max);
       }
-      router.push(`/?${params.toString()}`);
+      router.replace(`/?${params.toString()}`);
     });
   }
 
-  function toggleUnused() {
-    updateParam("unused", activeUnused ? null : "1");
+  function clearFilters() {
+    startTransition(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("source");
+      params.delete("entity");
+      params.delete("minConf");
+      params.delete("maxConf");
+      params.delete("permanence");
+      params.delete("unused");
+      params.delete("review");
+      params.delete("sort");
+      router.replace(`/?${params.toString()}`);
+    });
   }
 
-  function toggleReview() {
-    updateParam("review", activeReview ? null : "1");
-  }
+  const selectClass =
+    "w-full px-2.5 py-1.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]";
 
-  const hasActiveFilters = activeSource || activeEntity || activeMinConf || activeUnused || activeReview || activePermanence;
+  const toggleClass = (active: boolean) =>
+    clsx(
+      "px-2.5 py-1 rounded-md transition-colors cursor-pointer text-xs border",
+      active
+        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] border-[var(--color-accent-solid)] font-medium"
+        : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+    );
 
   return (
-    <div className="flex items-center gap-3 flex-wrap text-xs">
-      {/* Sort */}
-      <div className="flex items-center gap-1.5">
-        <ArrowUpDown size={12} className="text-[var(--color-text-muted)]" />
-        {SORT_OPTIONS.map(({ value, label }) => (
-          <button
-            key={value}
-            onClick={() => updateParam("sort", value === "confidence" ? null : value)}
-            className={clsx(
-              "px-2 py-1 rounded-md transition-colors cursor-pointer",
-              activeSort === value
-                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <span className="text-[var(--color-border)]">|</span>
-
-      {/* Confidence presets */}
-      <div className="flex items-center gap-1.5">
-        {CONFIDENCE_PRESETS.map(({ value, label }) => (
-          <button
-            key={value || "any"}
-            onClick={() => setConfidencePreset(value)}
-            className={clsx(
-              "px-2 py-1 rounded-md transition-colors cursor-pointer",
-              activeConfPreset === value
-                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <span className="text-[var(--color-border)]">|</span>
-
-      {/* Source type */}
-      {sourceTypes.length > 1 && (
-        <select
-          value={activeSource}
-          onChange={(e) => updateParam("source", e.target.value || null)}
-          className="px-2 py-1 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
-        >
-          <option value="">All sources</option>
-          {sourceTypes.map((st) => (
-            <option key={st} value={st}>
-              {st}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {/* Entity type */}
-      {entityTypes.length > 0 && (
-        <select
-          value={activeEntity}
-          onChange={(e) => updateParam("entity", e.target.value || null)}
-          className="px-2 py-1 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
-        >
-          <option value="">All types</option>
-          {entityTypes.map((et) => (
-            <option key={et} value={et}>
-              {et}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {/* Permanence */}
-      <select
-        value={activePermanence}
-        onChange={(e) => updateParam("permanence", e.target.value || null)}
-        className="px-2 py-1 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
-      >
-        <option value="">All tiers</option>
-        <option value="canonical">Canonical</option>
-        <option value="active">Active</option>
-        <option value="ephemeral">Ephemeral</option>
-        <option value="archived">Archived</option>
-      </select>
-
-      {/* Unused toggle */}
+    <div className="text-xs">
       <button
-        onClick={toggleUnused}
+        type="button"
+        aria-expanded={open}
+        aria-controls="memory-filters-panel"
+        onClick={() => setOpen((v) => !v)}
         className={clsx(
-          "px-2 py-1 rounded-md transition-colors cursor-pointer",
-          activeUnused
-            ? "bg-[var(--color-warning-bg)] text-[var(--color-warning)] font-medium"
-            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+          "inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer max-w-full",
+          open || hasActiveFilters
+            ? "border-[var(--color-accent-solid)] text-[var(--color-text)]"
+            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
         )}
       >
-        Unused
-      </button>
-
-      {/* Needs review toggle */}
-      <button
-        onClick={toggleReview}
-        className={clsx(
-          "px-2 py-1 rounded-md transition-colors cursor-pointer",
-          activeReview
-            ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+        <SlidersHorizontal size={12} />
+        <span className="font-medium">Filters</span>
+        {hasActiveFilters ? (
+          <span className="flex items-center gap-1 min-w-0 overflow-hidden">
+            <span className="text-[var(--color-text-muted)]">·</span>
+            <span className="truncate text-[var(--color-accent-text)]">
+              {summaryChips.slice(0, 3).join(" · ")}
+              {summaryChips.length > 3 ? ` +${summaryChips.length - 3}` : ""}
+            </span>
+          </span>
+        ) : (
+          <span className="text-[var(--color-text-muted)]">·</span>
         )}
-      >
-        Needs review
+        <ChevronDown
+          size={12}
+          className={clsx(
+            "transition-transform",
+            open && "rotate-180",
+          )}
+        />
       </button>
 
-      {/* Clear filters */}
-      {hasActiveFilters && (
-        <>
-          <span className="text-[var(--color-border)]">|</span>
-          <button
-            onClick={() => {
-              startTransition(() => {
-                const params = new URLSearchParams(searchParams.toString());
-                params.delete("source");
-                params.delete("entity");
-                params.delete("minConf");
-                params.delete("maxConf");
-                params.delete("permanence");
-                params.delete("unused");
-                params.delete("review");
-                router.push(`/?${params.toString()}`);
-              });
-            }}
-            className="px-2 py-1 text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] rounded-md transition-colors cursor-pointer"
-          >
-            Clear filters
-          </button>
-        </>
+      {open && (
+        <div
+          id="memory-filters-panel"
+          className="relative mt-2 p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)]"
+        >
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="absolute top-3 right-3 px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] rounded-md transition-colors cursor-pointer"
+            >
+              Clear filters
+            </button>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Sort */}
+            <div>
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                Sort
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SORT_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      updateParam(
+                        "sort",
+                        value === "confidence" ? null : value,
+                      )
+                    }
+                    className={toggleClass(activeSort === value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Confidence range */}
+            <div>
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                Confidence range
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {CONFIDENCE_PRESETS.map(({ value, label }) => (
+                  <button
+                    key={value || "any"}
+                    type="button"
+                    onClick={() => setConfidencePreset(value)}
+                    className={toggleClass(activeConfPreset === value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Source */}
+            {sourceTypes.length > 1 && (
+              <div>
+                <label
+                  htmlFor="filter-source"
+                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+                >
+                  Source
+                </label>
+                <select
+                  id="filter-source"
+                  value={activeSource}
+                  onChange={(e) => updateParam("source", e.target.value || null)}
+                  className={selectClass}
+                >
+                  <option value="">All sources</option>
+                  {sourceTypes.map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Entity type */}
+            {entityTypes.length > 0 && (
+              <div>
+                <label
+                  htmlFor="filter-entity"
+                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+                >
+                  Entity type
+                </label>
+                <select
+                  id="filter-entity"
+                  value={activeEntity}
+                  onChange={(e) => updateParam("entity", e.target.value || null)}
+                  className={selectClass}
+                >
+                  <option value="">All types</option>
+                  {entityTypes.map((et) => (
+                    <option key={et} value={et}>
+                      {et}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Tier */}
+            <div>
+              <label
+                htmlFor="filter-permanence"
+                className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+              >
+                Tier
+              </label>
+              <select
+                id="filter-permanence"
+                value={activePermanence}
+                onChange={(e) => updateParam("permanence", e.target.value || null)}
+                className={selectClass}
+              >
+                {PERMANENCE_OPTIONS.map(({ value, label }) => (
+                  <option key={value || "any"} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Quick filters */}
+            <div>
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                Quick filters
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => updateParam("unused", activeUnused ? null : "1")}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer",
+                    activeUnused
+                      ? "bg-[var(--color-warning-bg)] text-[var(--color-warning)] border-[var(--color-warning)] font-medium"
+                      : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                  )}
+                >
+                  Unused
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateParam("review", activeReview ? null : "1")}
+                  className={toggleClass(activeReview)}
+                >
+                  Needs review
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,0 +1,18 @@
+/*
+ * Engrams motion preferences.
+ * Blanket opt-out: when user prefers reduced motion, collapse every
+ * animation and transition to near-instant. Simpler than per-animation
+ * @media wrapping and covers all landing orb/thread/reveal/perspective
+ * animations plus any dashboard hover transitions.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

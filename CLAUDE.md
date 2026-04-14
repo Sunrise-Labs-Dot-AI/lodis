@@ -202,7 +202,6 @@ Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mo
 | `/archive` | Archived memories browser with restore actions |
 | `/cleanup` | Health score, dedup, merge, split, contradiction, PII detection + inline actions |
 | `/entities/[name]` | Entity profile page (summary, related memories, connections) |
-| `/graph` | Knowledge graph visualization (D3 force-directed, entity clusters) |
 | `/settings` | DB stats, export, LLM provider config, sync config (Pro) |
 | `/sign-in`, `/sign-up` | Clerk authentication (hosted mode only) |
 | `/api/export` | Memory export API |

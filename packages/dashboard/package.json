@@ -19,10 +19,10 @@
   "dependencies": {
     "@clerk/nextjs": "^7.0.12",
     "@engrams/core": "workspace:*",
+    "@engrams/shared-ui": "workspace:*",
     "engrams": "workspace:*",
     "@libsql/client": "^0.17.2",
     "clsx": "^2.1.0",
-    "d3": "^7.9.0",
     "lucide-react": "^0.511.0",
     "next": "^15.3.1",
     "react": "^19.1.0",
@@ -33,7 +33,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.0",
-    "@types/d3": "^7.4.3",
     "@types/node": "25.5.2",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",

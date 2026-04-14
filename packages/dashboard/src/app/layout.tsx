@@ -18,6 +18,9 @@ export default function RootLayout({
   const content = (
     <html lang="en" className="dark">
       <body className="min-h-screen">
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
         <header className="border-b border-[var(--color-border)] bg-[rgba(17,24,39,0.8)] backdrop-blur-xl">
           <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -28,7 +31,9 @@ export default function RootLayout({
             <Nav />
           </div>
         </header>
-        <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+        <main id="main" className="max-w-5xl mx-auto px-4 py-6">
+          {children}
+        </main>
       </body>
     </html>
   );

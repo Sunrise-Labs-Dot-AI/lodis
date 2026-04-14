@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Archive, Brain, FileText, Network, Shield, Settings, Sparkles } from "lucide-react";
+import { Archive, Brain, FileText, Shield, Settings, Sparkles } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 
 const links = [
   { href: "/", label: "Memories", icon: Brain },
   { href: "/documents", label: "Index", icon: FileText },
   { href: "/archive", label: "Archive", icon: Archive },
-  // { href: "/graph", label: "Graph", icon: Network }, // Hidden until D3 errors are resolved
   { href: "/cleanup", label: "Cleanup", icon: Sparkles },
   { href: "/agents", label: "Agents", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },

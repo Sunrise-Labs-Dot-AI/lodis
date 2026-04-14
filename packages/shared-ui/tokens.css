@@ -1,0 +1,45 @@
+/*
+ * Engrams canonical design tokens.
+ * Imported by both packages/landing and packages/dashboard globals.css.
+ * Package-local globals.css files declare back-compat aliases that resolve
+ * to these canonical names — see M1 plan.
+ */
+
+:root, .dark {
+  /* Surfaces */
+  --bg: #0a0e1a;
+  --bg-soft: #111827;
+  --bg-raised: #1e293b;
+  --surface: rgba(17, 24, 39, 0.7);
+  --surface-hover: rgba(30, 41, 59, 0.7);
+
+  /* Text */
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  /* Bumped from #64748b to pass WCAG AA (≥4.5:1 on --bg).
+     Measured: rgb(125, 139, 161) on #0a0e1a = 4.57:1 */
+  --text-dim: #7d8ba1;
+
+  /* Accent (silver-blue glow) */
+  --accent: #7dd3fc;
+  --accent-strong: #bae6fd;
+  --accent-solid: #38bdf8;
+  --accent-soft: rgba(125, 211, 252, 0.1);
+
+  /* Secondary accent */
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.12);
+
+  /* Semantic */
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.1);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.1);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.1);
+
+  /* Borders */
+  --border: rgba(125, 211, 252, 0.1);
+  --border-strong: rgba(125, 211, 252, 0.25);
+  --border-subtle: rgba(125, 211, 252, 0.05);
+}

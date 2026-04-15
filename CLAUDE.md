@@ -79,6 +79,10 @@ All runtime data lives in `~/.engrams/`:
     └── all-MiniLM-L6-v2/
 ```
 
+### Dashboard deeplinks
+
+MCP tool responses include a `url` field on every memory record so clients (Claude, Cursor, etc.) can link users directly to the dashboard detail page. The base URL is resolved in this order: `ENGRAMS_DASHBOARD_URL` → `NEXT_PUBLIC_APP_URL` → `http://localhost:3838`. Set `ENGRAMS_DASHBOARD_URL` in the MCP server's environment to point deeplinks at a non-default host (e.g. `https://app.getengrams.com` for hosted mode). Entity-shaped responses (`memory_list_entities`, `memory_briefing`) get `/entities/<name>` URLs.
+
 ## Database Schema
 
 Nine tables + two virtual tables:

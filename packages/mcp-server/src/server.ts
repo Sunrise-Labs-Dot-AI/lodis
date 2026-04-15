@@ -58,6 +58,30 @@ function textResult(data: unknown) {
   };
 }
 
+const DASHBOARD_URL =
+  process.env.ENGRAMS_DASHBOARD_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  "http://localhost:3838";
+
+function dashboardBase(): string {
+  return DASHBOARD_URL.replace(/\/$/, "");
+}
+
+function memoryUrl(id: string): string {
+  return `${dashboardBase()}/memory/${id}`;
+}
+
+function entityUrl(name: string): string {
+  return `${dashboardBase()}/entities/${encodeURIComponent(name)}`;
+}
+
+function withUrl<T extends { id?: unknown }>(row: T): T & { url?: string } {
+  if (row && typeof row.id === "string") {
+    return { ...row, url: memoryUrl(row.id) };
+  }
+  return row;
+}
+
 function getUserId(extra: Record<string, unknown>): string | null {
   const authInfo = extra?.authInfo as { extra?: { userId?: string } } | undefined;
   return authInfo?.extra?.userId ?? null;
@@ -654,6 +678,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       const result: Record<string, unknown> = {
         id,
+        url: memoryUrl(id),
         confidence,
         domain: params.domain ?? "general",
         created: true,
@@ -984,9 +1009,11 @@ Organize memories by life domain: general, work, health, finance, relationships,
       return textResult({
         memories: searchResults.map((r) => ({
           ...r.memory,
+          url: memoryUrl(r.memory.id),
           _searchScore: r.score,
           _connected: r.connected.map((c) => ({
             ...c.memory,
+            url: memoryUrl(c.memory.id),
             _relationship: c.relationship,
             _depth: c.depth,
             _similarity: c.similarity,
@@ -1042,6 +1069,24 @@ Organize memories by life domain: general, work, health, finance, relationships,
             args: [generateId(), mem.id, timestamp],
           });
         }
+
+        // Attach deeplink URLs to primary memories, secondary summaries, and references
+        const withUrls = {
+          ...hier,
+          primary: {
+            ...hier.primary,
+            memories: hier.primary.memories.map((m) => ({ ...m, url: memoryUrl(m.id) })),
+          },
+          secondary: {
+            ...hier.secondary,
+            summaries: hier.secondary.summaries.map((s) => ({ ...s, url: memoryUrl(s.id) })),
+          },
+          references: {
+            ...hier.references,
+            items: hier.references.items.map((r) => ({ ...r, url: memoryUrl(r.id) })),
+          },
+        };
+        return textResult(withUrls);
       }
 
       return textResult(result);
@@ -1105,7 +1150,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
       return textResult({
         cached_profile: null,
         entity_name: params.entity_name,
-        memories: result.rows,
+        entity_url: entityUrl(params.entity_name),
+        memories: (result.rows as unknown as { id: string }[]).map((r) => withUrl(r)),
         hint: "No cached profile. Synthesize a summary from these memories and call memory_briefing again with save_summary to cache it.",
       });
     },
@@ -1743,16 +1789,18 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
         return textResult({
           memoryId: params.memoryId,
-          outgoing: filteredOutgoing,
-          incoming: filteredIncoming,
+          url: memoryUrl(params.memoryId),
+          outgoing: filteredOutgoing.map((c) => ({ ...c, targetUrl: memoryUrl(c.targetMemoryId) })),
+          incoming: filteredIncoming.map((c) => ({ ...c, sourceUrl: memoryUrl(c.sourceMemoryId) })),
           totalConnections: filteredOutgoing.length + filteredIncoming.length,
         });
       }
 
       return textResult({
         memoryId: params.memoryId,
-        outgoing,
-        incoming,
+        url: memoryUrl(params.memoryId),
+        outgoing: outgoing.map((c) => ({ ...c, targetUrl: memoryUrl(c.targetMemoryId) })),
+        incoming: incoming.map((c) => ({ ...c, sourceUrl: memoryUrl(c.sourceMemoryId) })),
         totalConnections: outgoing.length + incoming.length,
       });
     },
@@ -1856,7 +1904,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
           })).rows[0] as { total: number };
 
       return textResult({
-        memories: results,
+        memories: (results as unknown as { id: string }[]).map((r) => withUrl(r)),
         count: results.length,
         total: countResult.total,
         offset,
@@ -1968,10 +2016,10 @@ Organize memories by life domain: general, work, health, finance, relationships,
       })).rows as unknown as { entity_type: string; entity_name: string; memory_count: number }[];
 
       // Group by type
-      const grouped: Record<string, { name: string; count: number }[]> = {};
+      const grouped: Record<string, { name: string; count: number; url: string }[]> = {};
       for (const row of rows) {
         if (!grouped[row.entity_type]) grouped[row.entity_type] = [];
-        grouped[row.entity_type].push({ name: row.entity_name, count: row.memory_count });
+        grouped[row.entity_type].push({ name: row.entity_name, count: row.memory_count, url: entityUrl(row.entity_name) });
       }
 
       return textResult({

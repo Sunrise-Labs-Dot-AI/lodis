@@ -40,17 +40,16 @@ export default async function HomePage({ searchParams }: PageProps) {
         description={
           <>
             <p className="mb-4">
-              Your memory database is empty. Start a conversation with your AI
-              assistant and say:
+              Install the Lodis MCP server in your AI client, then ask your
+              assistant to remember something. Memories will appear here as
+              soon as they&rsquo;re written.
             </p>
-            <Card className="p-4 max-w-lg w-full mb-4 mx-auto">
-              <code className="text-sm text-[var(--color-accent-text)] font-mono">
-                &quot;Help me set up Lodis&quot;
-              </code>
-            </Card>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Your AI will scan your connected tools and ask a few questions to
-              seed your memory.
+            <p className="text-xs text-[var(--text-dim)]">
+              Already have memories from another tool? Use{" "}
+              <a href="/settings" className="text-[var(--accent-strong)] hover:underline">
+                Settings &rarr; Import
+              </a>
+              .
             </p>
           </>
         }
@@ -95,22 +94,22 @@ export default async function HomePage({ searchParams }: PageProps) {
       </Suspense>
 
       {unreviewedCount > 0 && params.review !== "1" && (
-        <Card className="p-3 border-[var(--color-accent)] bg-[var(--color-accent-soft)]">
+        <Card className="p-3 border-[var(--accent)] bg-[var(--accent-soft)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-[var(--color-accent)]" />
+              <AlertCircle className="w-4 h-4 text-[var(--accent)]" />
               <span className="text-sm">
                 <strong>{unreviewedCount}</strong> {unreviewedCount === 1 ? "memory needs" : "memories need"} review from onboarding
               </span>
             </div>
-            <a href="/?review=1" className="text-sm text-[var(--color-accent)] hover:underline">
+            <a href="/?review=1" className="text-sm text-[var(--accent)] hover:underline">
               Review now
             </a>
           </div>
         </Card>
       )}
 
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <p className="text-xs text-[var(--text-dim)]">
         {memories.length} {memories.length === 1 ? "memory" : "memories"}
       </p>
 

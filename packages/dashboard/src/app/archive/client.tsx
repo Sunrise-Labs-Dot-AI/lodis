@@ -86,11 +86,11 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Archive size={24} />
             Archive
           </h1>
-          <p className="text-sm mt-1 text-[var(--color-text-secondary)]">
+          <p className="text-sm mt-1 text-[var(--text-muted)]">
             {memories.length} archived {memories.length === 1 ? "memory" : "memories"}
           </p>
         </div>
@@ -117,14 +117,14 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
           <div className="relative">
             <Search
               size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]"
             />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search archive..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)]"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)]"
             />
           </div>
         </form>
@@ -137,8 +137,8 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
               className={clsx(
                 "px-2 py-1 rounded-md transition-colors cursor-pointer",
                 activeSort === value
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] font-medium"
+                  : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
               )}
             >
               {label}
@@ -151,12 +151,12 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
         <Card className="p-8 text-center">
           <Archive
             size={40}
-            className="mx-auto mb-3 text-[var(--color-text-muted)]"
+            className="mx-auto mb-3 text-[var(--text-dim)]"
           />
-          <p className="text-lg font-medium text-[var(--color-text)]">
+          <p className="text-lg font-medium text-[var(--text)]">
             {searchParams.get("q") ? "No matching archived memories" : "Archive is empty"}
           </p>
-          <p className="text-sm mt-1 text-[var(--color-text-muted)]">
+          <p className="text-sm mt-1 text-[var(--text-dim)]">
             {searchParams.get("q")
               ? "Try a different search term."
               : "Archived memories will appear here. Use the Archive button on any memory to move it here."}
@@ -168,7 +168,7 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
           <div className="flex items-center gap-2 mb-3">
             <button
               onClick={selectAll}
-              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] cursor-pointer"
+              className="text-xs text-[var(--text-dim)] hover:text-[var(--text)] cursor-pointer"
             >
               {selected.size === memories.length ? "Deselect all" : "Select all"}
             </button>
@@ -180,7 +180,7 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
                 key={memory.id}
                 className={clsx(
                   "p-4 transition-colors",
-                  selected.has(memory.id) && "ring-1 ring-[var(--color-accent)]",
+                  selected.has(memory.id) && "ring-1 ring-[var(--accent)]",
                 )}
               >
                 <div className="flex items-start gap-3">
@@ -188,17 +188,17 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
                     type="checkbox"
                     checked={selected.has(memory.id)}
                     onChange={() => toggleSelect(memory.id)}
-                    className="mt-1 accent-[var(--color-accent)]"
+                    className="mt-1 accent-[var(--accent)]"
                   />
                   <div className="flex-1 min-w-0">
                     <Link
                       href={`/memory/${memory.id}`}
-                      className="text-sm font-medium text-[var(--color-text)] hover:text-[var(--color-accent-text)] line-clamp-2"
+                      className="text-sm font-medium text-[var(--text)] hover:text-[var(--accent-strong)] line-clamp-2"
                     >
                       {memory.content}
                     </Link>
                     {memory.detail && (
-                      <p className="text-xs text-[var(--color-text-secondary)] mt-1 line-clamp-1">
+                      <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-1">
                         {memory.detail}
                       </p>
                     )}
@@ -207,7 +207,7 @@ export function ArchiveClient({ memories }: { memories: MemoryRow[] }) {
                       {memory.entity_type && (
                         <StatusBadge variant="neutral">{memory.entity_type}</StatusBadge>
                       )}
-                      <span className="text-xs text-[var(--color-text-muted)]">
+                      <span className="text-xs text-[var(--text-dim)]">
                         Archived {memory.archived_at ? formatDate(memory.archived_at) : ""}
                       </span>
                     </div>

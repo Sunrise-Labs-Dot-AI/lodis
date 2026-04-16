@@ -24,9 +24,9 @@ export function formatConfidence(confidence: number): string {
 }
 
 export function confidenceColor(confidence: number): string {
-  if (confidence >= 0.8) return "var(--color-success)";
-  if (confidence >= 0.5) return "var(--color-warning)";
-  return "var(--color-danger)";
+  if (confidence >= 0.8) return "var(--success)";
+  if (confidence >= 0.5) return "var(--warning)";
+  return "var(--danger)";
 }
 
 export function formatBytes(bytes: number): string {

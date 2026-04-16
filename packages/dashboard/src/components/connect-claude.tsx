@@ -18,18 +18,18 @@ export function ConnectClaude({ baseUrl }: { baseUrl: string }) {
   return (
     <Card className="p-4">
       <div className="flex items-center gap-2 mb-1">
-        <Plug size={16} className="text-[var(--color-accent)]" />
+        <Plug size={16} className="text-[var(--accent)]" />
         <h3 className="text-sm font-semibold">Connect to Claude</h3>
       </div>
-      <p className="text-xs text-[var(--color-text-muted)] mb-3">
+      <p className="text-xs text-[var(--text-dim)] mb-3">
         Add Lodis as a remote MCP server in Claude.ai, Claude Desktop, or Claude Code.
       </p>
 
       <div className="space-y-3">
         <div>
-          <label className="text-xs text-[var(--color-text-muted)] block mb-1">MCP Server URL</label>
+          <label className="text-xs text-[var(--text-dim)] block mb-1">MCP Server URL</label>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-[var(--color-bg-secondary)] px-3 py-2 rounded-lg border border-[var(--color-border)] font-mono truncate">
+            <code className="flex-1 text-xs bg-[var(--bg-soft)] px-3 py-2 rounded-lg border border-[var(--border)] font-mono truncate">
               {mcpUrl}
             </code>
             <Button variant="secondary" size="sm" onClick={handleCopy}>
@@ -38,8 +38,8 @@ export function ConnectClaude({ baseUrl }: { baseUrl: string }) {
           </div>
         </div>
 
-        <div className="text-xs text-[var(--color-text-muted)] space-y-2">
-          <p className="font-medium text-[var(--color-text-secondary)]">Setup instructions:</p>
+        <div className="text-xs text-[var(--text-dim)] space-y-2">
+          <p className="font-medium text-[var(--text-muted)]">Setup instructions:</p>
           <ol className="list-decimal list-inside space-y-1">
             <li>
               In <strong>Claude.ai</strong>: Settings → Integrations → Add custom connector → paste the URL above
@@ -49,7 +49,7 @@ export function ConnectClaude({ baseUrl }: { baseUrl: string }) {
             </li>
             <li>
               In <strong>Claude Code</strong>:{" "}
-              <code className="bg-[var(--color-bg-secondary)] px-1 rounded text-[10px]">
+              <code className="bg-[var(--bg-soft)] px-1 rounded text-[10px]">
                 claude mcp add lodis --transport http {mcpUrl}
               </code>
             </li>

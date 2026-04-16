@@ -33,7 +33,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
       <select
         value={agentId}
         onChange={(e) => setAgentId(e.target.value)}
-        className="px-2 py-1.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
+        className="px-2 py-1.5 text-xs bg-[var(--bg-soft)] border border-[var(--border)] rounded-md text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-solid)]"
       >
         <option value="">Select agent</option>
         {agents.map((a) => (
@@ -49,7 +49,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
         onChange={(e) => setDomain(e.target.value)}
         placeholder="Domain (or * for all)"
         list="domain-options"
-        className="px-2 py-1.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)] w-40"
+        className="px-2 py-1.5 text-xs bg-[var(--bg-soft)] border border-[var(--border)] rounded-md text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-solid)] w-40"
       />
       <datalist id="domain-options">
         <option value="*" />
@@ -58,7 +58,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
         ))}
       </datalist>
 
-      <label className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+      <label className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
         <input
           type="checkbox"
           checked={canRead}
@@ -68,7 +68,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
         Read
       </label>
 
-      <label className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+      <label className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
         <input
           type="checkbox"
           checked={canWrite}
@@ -81,7 +81,7 @@ export function AddRuleForm({ agents, domains }: AddRuleFormProps) {
       <button
         type="submit"
         disabled={isPending || !agentId || !domain}
-        className="flex items-center gap-1 px-2 py-1.5 text-xs bg-gradient-to-r from-[rgba(125,211,252,0.15)] to-[rgba(167,139,250,0.15)] border border-[var(--color-border-hover)] text-[var(--color-accent-text)] rounded-md hover:from-[rgba(125,211,252,0.25)] hover:to-[rgba(167,139,250,0.25)] transition-all disabled:opacity-50 cursor-pointer"
+        className="flex items-center gap-1 px-2 py-1.5 text-xs bg-gradient-to-r from-[rgba(125,211,252,0.15)] to-[rgba(167,139,250,0.15)] border border-[var(--border-strong)] text-[var(--accent-strong)] rounded-md hover:from-[rgba(125,211,252,0.25)] hover:to-[rgba(167,139,250,0.25)] transition-all disabled:opacity-50 cursor-pointer"
       >
         <Plus size={12} />
         Add rule

@@ -27,14 +27,14 @@ export function SearchBar() {
     <form onSubmit={handleSubmit} className="relative flex-1 max-w-md">
       <Search
         size={16}
-        className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]"
       />
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search memories..."
-        className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] focus:border-transparent"
+        className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)] focus:border-transparent"
       />
     </form>
   );

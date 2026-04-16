@@ -22,13 +22,13 @@ export function Problem() {
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-16 tracking-tight">
             AI memory today is{" "}
-            <span className="text-amber">broken.</span>
+            <span className="text-[var(--warning)]">broken.</span>
           </h2>
         </Reveal>
 
         {/* Column headers */}
         <div className="hidden md:grid md:grid-cols-2 gap-8 mb-6 px-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber/70">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--warning)]/70">
             Today
           </p>
           <p className="text-xs font-semibold uppercase tracking-widest text-glow/70">
@@ -41,8 +41,8 @@ export function Problem() {
             <Reveal key={i}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
                 {/* Before */}
-                <div className="border-l-2 border-amber/30 pl-5 py-4">
-                  <p className="md:hidden text-xs font-semibold uppercase tracking-widest text-amber/70 mb-2">
+                <div className="border-l-2 border-[var(--warning)]/30 pl-5 py-4">
+                  <p className="md:hidden text-xs font-semibold uppercase tracking-widest text-[var(--warning)]/70 mb-2">
                     Today
                   </p>
                   <p className="text-text-muted leading-relaxed">{row.before}</p>

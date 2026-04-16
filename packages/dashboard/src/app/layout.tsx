@@ -31,10 +31,10 @@ export default function RootLayout({
         <a href="#main" className="skip-link">
           Skip to content
         </a>
-        <header className="border-b border-[var(--color-border)] bg-[rgba(17,24,39,0.8)] backdrop-blur-xl">
+        <header className="border-b border-[var(--border)] bg-[rgba(17,24,39,0.8)] backdrop-blur-xl">
           <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <h1 className="text-lg font-bold text-[var(--color-glow)]">
+              <h1 className="text-lg font-bold text-[var(--accent)]">
                 lodis
               </h1>
             </div>

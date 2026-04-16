@@ -87,7 +87,7 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
   return (
     <>
       {error && (
-        <div className="mb-2 p-2 text-xs text-[var(--color-danger)] bg-[var(--color-danger-bg)] rounded-lg">
+        <div className="mb-2 p-2 text-xs text-[var(--danger)] bg-[var(--danger-bg)] rounded-lg">
           {error}
         </div>
       )}
@@ -182,21 +182,21 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
         title="Correct Memory"
       >
         <div className="space-y-3">
-          <label className="text-xs font-medium text-[var(--color-text-muted)]">Content</label>
+          <label className="text-xs font-medium text-[var(--text-dim)]">Content</label>
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             placeholder="Memory content..."
             rows={2}
-            className="w-full p-3 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+            className="w-full p-3 text-sm bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)] resize-none"
           />
-          <label className="text-xs font-medium text-[var(--color-text-muted)]">Detail (optional)</label>
+          <label className="text-xs font-medium text-[var(--text-dim)]">Detail (optional)</label>
           <textarea
             value={editDetail}
             onChange={(e) => setEditDetail(e.target.value)}
             placeholder="Additional context..."
             rows={2}
-            className="w-full p-3 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+            className="w-full p-3 text-sm bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)] resize-none"
           />
         </div>
         <div className="flex justify-end gap-2 mt-4">
@@ -232,11 +232,11 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
         {!splitParts ? (
           <>
             <div className="space-y-3">
-              <div className="text-sm text-[var(--color-text-secondary)] bg-[var(--color-bg-soft)] rounded-lg p-3 space-y-1">
-                <p className="font-medium text-[var(--color-text)]">{currentContent}</p>
+              <div className="text-sm text-[var(--text-muted)] bg-[var(--bg-soft)] rounded-lg p-3 space-y-1">
+                <p className="font-medium text-[var(--text)]">{currentContent}</p>
                 {currentDetail && <p className="text-xs">{currentDetail}</p>}
               </div>
-              <p className="text-xs text-[var(--color-text-muted)]">
+              <p className="text-xs text-[var(--text-dim)]">
                 Splits the memory by sentences. You can edit each part in the next step.
               </p>
             </div>
@@ -256,23 +256,23 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
           </>
         ) : (
           <>
-            <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            <p className="text-xs text-[var(--text-dim)] mb-3">
               Review and edit the proposed parts. The original memory will be removed.
             </p>
             <div className="space-y-3">
               {splitParts.map((part, i) => (
                 <div
                   key={i}
-                  className="bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg p-3 space-y-2"
+                  className="bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg p-3 space-y-2"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-[var(--color-accent-text)]">
+                    <span className="text-xs font-medium text-[var(--accent-strong)]">
                       Part {i + 1}
                     </span>
                     {splitParts.length > 2 && (
                       <button
                         onClick={() => removePart(i)}
-                        className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                        className="text-xs text-[var(--text-dim)] hover:text-[var(--danger)]"
                       >
                         Remove
                       </button>
@@ -282,14 +282,14 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
                     value={part.content}
                     onChange={(e) => updatePart(i, "content", e.target.value)}
                     rows={Math.max(2, Math.ceil(part.content.length / 50))}
-                    className="w-full p-2 text-sm bg-[var(--color-card)] border border-[var(--color-border)] rounded focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-vertical"
+                    className="w-full p-2 text-sm bg-[var(--surface)] border border-[var(--border)] rounded focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)] resize-vertical"
                     placeholder="Content..."
                   />
                   <textarea
                     value={part.detail ?? ""}
                     onChange={(e) => updatePart(i, "detail", e.target.value)}
                     rows={Math.max(2, Math.ceil((part.detail?.length ?? 0) / 55))}
-                    className="w-full p-2 text-xs bg-[var(--color-card)] border border-[var(--color-border)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)] text-[var(--color-text-secondary)] resize-vertical"
+                    className="w-full p-2 text-xs bg-[var(--surface)] border border-[var(--border)] rounded focus:outline-none focus:ring-1 focus:ring-[var(--accent-solid)] text-[var(--text-muted)] resize-vertical"
                     placeholder="Detail (optional)..."
                   />
                 </div>
@@ -336,7 +336,7 @@ export function MemoryActions({ id, currentContent, currentDetail, permanence }:
         onClose={() => setDeleteModalOpen(false)}
         title="Delete Memory"
       >
-        <p className="text-sm text-[var(--color-text-secondary)]">
+        <p className="text-sm text-[var(--text-muted)]">
           Are you sure you want to delete this memory? This action can be undone
           by an administrator.
         </p>

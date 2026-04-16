@@ -12,7 +12,7 @@ const installConfig = `{
 
 export function Hero() {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-24">
+    <section className="relative min-h-[720px] md:min-h-[780px] flex items-center justify-center overflow-hidden pt-24">
       {/* Floating orbs */}
       <div className="orb orb-1" />
       <div className="orb orb-2" />

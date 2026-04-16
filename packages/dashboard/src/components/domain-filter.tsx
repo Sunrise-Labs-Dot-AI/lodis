@@ -100,8 +100,8 @@ export function DomainFilter({ domains }: DomainFilterProps) {
     clsx(
       "px-2.5 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer whitespace-nowrap",
       active
-        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]"
-        : "bg-[var(--color-bg-soft)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+        ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+        : "bg-[var(--bg-soft)] text-[var(--text-dim)] hover:text-[var(--text)]",
     );
 
   return (
@@ -135,8 +135,8 @@ export function DomainFilter({ domains }: DomainFilterProps) {
             className={clsx(
               "px-2.5 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer inline-flex items-center gap-1",
               overflowOpen
-                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]"
-                : "bg-[var(--color-bg-soft)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+                ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                : "bg-[var(--bg-soft)] text-[var(--text-dim)] hover:text-[var(--text)]",
             )}
           >
             +{overflow.length} more
@@ -147,7 +147,7 @@ export function DomainFilter({ domains }: DomainFilterProps) {
               ref={popoverRef}
               role="dialog"
               aria-label="All domains"
-              className="absolute left-0 top-full mt-2 z-30 w-72 max-w-[calc(100vw-2rem)] p-3 rounded-lg border border-[var(--color-border)] bg-[rgba(10,14,26,0.98)] backdrop-blur-xl shadow-2xl"
+              className="absolute left-0 top-full mt-2 z-30 w-72 max-w-[calc(100vw-2rem)] p-3 rounded-lg border border-[var(--border)] bg-[rgba(10,14,26,0.98)] backdrop-blur-xl shadow-2xl"
             >
               <input
                 ref={searchInputRef}
@@ -162,11 +162,11 @@ export function DomainFilter({ domains }: DomainFilterProps) {
                     triggerRef.current?.focus();
                   }
                 }}
-                className="w-full mb-2 px-2.5 py-1.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]"
+                className="w-full mb-2 px-2.5 py-1.5 text-xs bg-[var(--bg-soft)] border border-[var(--border)] rounded-md text-[var(--text)] placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-solid)]"
               />
               <div className="max-h-60 overflow-y-auto flex flex-col gap-1">
                 {filteredOverflow.length === 0 ? (
-                  <p className="text-xs text-[var(--color-text-muted)] px-2 py-2">
+                  <p className="text-xs text-[var(--text-dim)] px-2 py-2">
                     No domains match.
                   </p>
                 ) : (
@@ -178,8 +178,8 @@ export function DomainFilter({ domains }: DomainFilterProps) {
                       className={clsx(
                         "flex items-center justify-between px-2.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer text-left",
                         activeDomain === domain
-                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]"
-                          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-soft)] hover:text-[var(--color-text)]",
+                          ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                          : "text-[var(--text-muted)] hover:bg-[var(--bg-soft)] hover:text-[var(--text)]",
                       )}
                     >
                       <span className="truncate">{domain}</span>

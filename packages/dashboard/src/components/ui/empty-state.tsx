@@ -24,13 +24,13 @@ export function EmptyState({
       )}
     >
       {icon && (
-        <div className="w-16 h-16 mb-6 rounded-full bg-[var(--color-accent-soft)] flex items-center justify-center text-[var(--color-accent)]">
+        <div className="w-16 h-16 mb-6 rounded-full bg-[var(--accent-soft)] flex items-center justify-center text-[var(--accent)]">
           {icon}
         </div>
       )}
       <h2 className="text-xl font-semibold mb-2">{title}</h2>
       {description && (
-        <div className="text-sm text-[var(--color-text-secondary)] max-w-md mb-6">
+        <div className="text-sm text-[var(--text-muted)] max-w-md mb-6">
           {description}
         </div>
       )}

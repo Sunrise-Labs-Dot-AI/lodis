@@ -99,7 +99,7 @@ export function EditableMetadata({
   }
 
   const inputClass =
-    "px-2 py-0.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-accent-solid)] rounded-full focus:outline-none";
+    "px-2 py-0.5 text-xs bg-[var(--bg-soft)] border border-[var(--accent-solid)] rounded-full focus:outline-none";
   const iconBtnClass = "p-0.5 rounded cursor-pointer";
 
   return (
@@ -121,12 +121,12 @@ export function EditableMetadata({
             className={inputClass}
             style={{ width: `${Math.max(domainValue.length, 4) + 2}ch` }}
           />
-          <button onClick={saveDomain} className={`${iconBtnClass} text-[var(--color-success)]`}>
+          <button onClick={saveDomain} className={`${iconBtnClass} text-[var(--success)]`}>
             <Check size={12} />
           </button>
           <button
             onClick={() => { setDomainValue(domain); setEditingDomain(false); }}
-            className={`${iconBtnClass} text-[var(--color-text-muted)]`}
+            className={`${iconBtnClass} text-[var(--text-dim)]`}
           >
             <X size={12} />
           </button>
@@ -134,7 +134,7 @@ export function EditableMetadata({
       ) : (
         <StatusBadge
           variant="accent"
-          className="cursor-pointer hover:ring-1 hover:ring-[var(--color-accent-solid)] transition-shadow"
+          className="cursor-pointer hover:ring-1 hover:ring-[var(--accent-solid)] transition-shadow"
         >
           <span onClick={() => setEditingDomain(true)}>
             {domain}
@@ -185,7 +185,7 @@ export function EditableMetadata({
       ) : (
         <StatusBadge
           variant="neutral"
-          className="cursor-pointer hover:ring-1 hover:ring-[var(--color-accent-solid)] transition-shadow"
+          className="cursor-pointer hover:ring-1 hover:ring-[var(--accent-solid)] transition-shadow"
         >
           <span onClick={() => setEditingEntityType(true)}>
             {entityType ?? "no type"}
@@ -212,12 +212,12 @@ export function EditableMetadata({
             className={inputClass}
             style={{ width: `${Math.max(entityNameValue.length, 8) + 2}ch` }}
           />
-          <button onClick={saveEntityName} className={`${iconBtnClass} text-[var(--color-success)]`}>
+          <button onClick={saveEntityName} className={`${iconBtnClass} text-[var(--success)]`}>
             <Check size={12} />
           </button>
           <button
             onClick={() => { setEntityNameValue(entityName ?? ""); setEditingEntityName(false); }}
-            className={`${iconBtnClass} text-[var(--color-text-muted)]`}
+            className={`${iconBtnClass} text-[var(--text-dim)]`}
           >
             <X size={12} />
           </button>
@@ -225,7 +225,7 @@ export function EditableMetadata({
       ) : entityName ? (
         <StatusBadge
           variant="neutral"
-          className="cursor-pointer hover:ring-1 hover:ring-[var(--color-accent-solid)] transition-shadow"
+          className="cursor-pointer hover:ring-1 hover:ring-[var(--accent-solid)] transition-shadow"
         >
           <span onClick={() => setEditingEntityName(true)}>
             {entityName}
@@ -234,7 +234,7 @@ export function EditableMetadata({
         </StatusBadge>
       ) : (
         <span
-          className="text-xs text-[var(--color-text-muted)] italic cursor-pointer hover:text-[var(--color-text-secondary)] transition-colors"
+          className="text-xs text-[var(--text-dim)] italic cursor-pointer hover:text-[var(--text-muted)] transition-colors"
           onClick={() => setEditingEntityName(true)}
         >
           + name
@@ -250,11 +250,11 @@ export function EditableMetadata({
       )}
 
       {/* Source info — read-only */}
-      <span className="text-xs text-[var(--color-text-muted)]">
+      <span className="text-xs text-[var(--text-dim)]">
         by {sourceAgentName}
       </span>
       {sourceDescription && (
-        <span className="text-xs text-[var(--color-text-muted)] italic">
+        <span className="text-xs text-[var(--text-dim)] italic">
           — {sourceDescription}
         </span>
       )}

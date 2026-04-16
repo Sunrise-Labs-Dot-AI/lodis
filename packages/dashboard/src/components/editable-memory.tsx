@@ -73,18 +73,18 @@ export function EditableMemory({ id, content, detail }: EditableMemoryProps) {
               if (e.key === "Escape") { setContentValue(content); setEditingContent(false); }
             }}
             rows={2}
-            className="flex-1 p-2 text-base bg-[var(--color-bg-soft)] border border-[var(--color-accent-solid)] rounded-lg focus:outline-none resize-none"
+            className="flex-1 p-2 text-base bg-[var(--bg-soft)] border border-[var(--accent-solid)] rounded-lg focus:outline-none resize-none"
           />
-          <button onClick={saveContent} className="p-1.5 text-[var(--color-success)] hover:bg-[var(--color-success-bg)] rounded cursor-pointer">
+          <button onClick={saveContent} className="p-1.5 text-[var(--success)] hover:bg-[var(--success-bg)] rounded cursor-pointer">
             <Check size={16} />
           </button>
-          <button onClick={() => { setContentValue(content); setEditingContent(false); }} className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-soft)] rounded cursor-pointer">
+          <button onClick={() => { setContentValue(content); setEditingContent(false); }} className="p-1.5 text-[var(--text-dim)] hover:bg-[var(--bg-soft)] rounded cursor-pointer">
             <X size={16} />
           </button>
         </div>
       ) : (
         <p
-          className="text-base leading-relaxed group cursor-pointer hover:bg-[var(--color-bg-soft)] rounded-lg px-2 py-1 -mx-2 -my-1 transition-colors"
+          className="text-base leading-relaxed group cursor-pointer hover:bg-[var(--bg-soft)] rounded-lg px-2 py-1 -mx-2 -my-1 transition-colors"
           onClick={() => setEditingContent(true)}
         >
           {content}
@@ -104,18 +104,18 @@ export function EditableMemory({ id, content, detail }: EditableMemoryProps) {
             }}
             rows={2}
             placeholder="Add detail..."
-            className="flex-1 p-2 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-accent-solid)] rounded-lg focus:outline-none resize-none text-[var(--color-text-secondary)]"
+            className="flex-1 p-2 text-sm bg-[var(--bg-soft)] border border-[var(--accent-solid)] rounded-lg focus:outline-none resize-none text-[var(--text-muted)]"
           />
-          <button onClick={saveDetail} className="p-1.5 text-[var(--color-success)] hover:bg-[var(--color-success-bg)] rounded cursor-pointer">
+          <button onClick={saveDetail} className="p-1.5 text-[var(--success)] hover:bg-[var(--success-bg)] rounded cursor-pointer">
             <Check size={16} />
           </button>
-          <button onClick={() => { setDetailValue(detail ?? ""); setEditingDetail(false); }} className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-soft)] rounded cursor-pointer">
+          <button onClick={() => { setDetailValue(detail ?? ""); setEditingDetail(false); }} className="p-1.5 text-[var(--text-dim)] hover:bg-[var(--bg-soft)] rounded cursor-pointer">
             <X size={16} />
           </button>
         </div>
       ) : (
         <div
-          className="mt-2 text-sm text-[var(--color-text-secondary)] group cursor-pointer hover:bg-[var(--color-bg-soft)] rounded-lg px-2 py-1 -mx-2 -my-1 transition-colors"
+          className="mt-2 text-sm text-[var(--text-muted)] group cursor-pointer hover:bg-[var(--bg-soft)] rounded-lg px-2 py-1 -mx-2 -my-1 transition-colors"
           onClick={() => setEditingDetail(true)}
         >
           {detail ? (
@@ -123,7 +123,7 @@ export function EditableMemory({ id, content, detail }: EditableMemoryProps) {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail}</ReactMarkdown>
             </div>
           ) : (
-            <span className="text-[var(--color-text-muted)] italic">Add detail...</span>
+            <span className="text-[var(--text-dim)] italic">Add detail...</span>
           )}
           <Pencil size={10} className="inline ml-2 opacity-0 group-hover:opacity-50 transition-opacity" />
         </div>

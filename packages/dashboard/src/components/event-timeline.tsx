@@ -18,7 +18,7 @@ const eventVariant: Record<string, "success" | "warning" | "danger" | "neutral" 
 export function EventTimeline({ events }: EventTimelineProps) {
   if (events.length === 0) {
     return (
-      <p className="text-sm text-[var(--color-text-muted)]">No events yet.</p>
+      <p className="text-sm text-[var(--text-dim)]">No events yet.</p>
     );
   }
 
@@ -33,17 +33,17 @@ export function EventTimeline({ events }: EventTimelineProps) {
           </div>
           <div className="flex-1 min-w-0">
             {e.agent_name && (
-              <span className="text-xs text-[var(--color-text-secondary)]">
+              <span className="text-xs text-[var(--text-muted)]">
                 by {e.agent_name}
               </span>
             )}
             {e.new_value && (
-              <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
+              <p className="text-xs text-[var(--text-dim)] mt-0.5 truncate">
                 {e.new_value}
               </p>
             )}
           </div>
-          <span className="text-xs text-[var(--color-text-muted)] shrink-0">
+          <span className="text-xs text-[var(--text-dim)] shrink-0">
             {formatDate(e.timestamp)}
           </span>
         </div>

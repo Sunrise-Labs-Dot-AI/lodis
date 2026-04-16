@@ -10,7 +10,7 @@ import { UserButton } from "@clerk/nextjs";
 
 const links = [
   { href: "/", label: "Memories", icon: Brain },
-  { href: "/documents", label: "Index", icon: FileText },
+  { href: "/documents", label: "Documents", icon: FileText },
   { href: "/archive", label: "Archive", icon: Archive },
   { href: "/cleanup", label: "Cleanup", icon: Sparkles },
   { href: "/agents", label: "Agents", icon: Shield },
@@ -49,7 +49,7 @@ export function Nav() {
   return (
     <div className="flex items-center gap-3">
       {/* Desktop nav */}
-      <nav className="hidden md:flex items-center gap-1 p-1 bg-[var(--color-bg-soft)] rounded-lg">
+      <nav className="hidden md:flex items-center gap-1 p-1 bg-[var(--bg-soft)] rounded-lg">
         {links.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
@@ -57,8 +57,8 @@ export function Nav() {
             className={clsx(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap",
               isActive(href)
-                ? "text-[var(--color-accent-text)] bg-[var(--color-accent-soft)]"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[rgba(125,211,252,0.05)]",
+                ? "text-[var(--accent-strong)] bg-[var(--accent-soft)]"
+                : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[rgba(125,211,252,0.05)]",
             )}
           >
             <Icon size={16} />
@@ -71,7 +71,7 @@ export function Nav() {
       {/* Mobile hamburger */}
       <button
         type="button"
-        className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+        className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md text-[var(--text-dim)] hover:text-[var(--text)] transition-colors"
         aria-expanded={open}
         aria-controls="dashboard-mobile-nav"
         aria-label={open ? "Close menu" : "Open menu"}
@@ -100,7 +100,7 @@ export function Nav() {
         createPortal(
           <div
             id="dashboard-mobile-nav"
-            className="md:hidden fixed left-0 right-0 top-[57px] z-[60] border-b border-[var(--color-border)] bg-[#0a0e1a] shadow-2xl"
+            className="md:hidden fixed left-0 right-0 top-[57px] z-[60] border-b border-[var(--border)] bg-[#0a0e1a] shadow-2xl"
           >
             <nav className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-1">
               {links.map(({ href, label, icon: Icon }) => (
@@ -111,8 +111,8 @@ export function Nav() {
                   className={clsx(
                     "flex items-center gap-2 px-3 py-2.5 rounded-md text-base font-medium transition-colors",
                     isActive(href)
-                      ? "text-[var(--color-accent-text)] bg-[var(--color-accent-soft)]"
-                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                      ? "text-[var(--accent-strong)] bg-[var(--accent-soft)]"
+                      : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
                   )}
                 >
                   <Icon size={18} />

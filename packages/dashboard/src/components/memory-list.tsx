@@ -10,7 +10,7 @@ export function MemoryList({ memories, groupByDomain = true }: MemoryListProps) 
   if (memories.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-[var(--color-text-muted)] text-sm">
+        <p className="text-[var(--text-dim)] text-sm">
           No memories yet. Start chatting with an AI tool that has Lodis
           connected.
         </p>
@@ -39,9 +39,12 @@ export function MemoryList({ memories, groupByDomain = true }: MemoryListProps) 
     <div className="space-y-6">
       {Array.from(grouped.entries()).map(([domain, domainMemories]) => (
         <div key={domain}>
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
+          <h2 className="flex items-baseline gap-2 pb-2 mb-3 border-b border-[var(--border-subtle)] text-sm font-semibold text-[var(--text)] capitalize">
             {domain}
-            <span className="ml-1.5 opacity-60">{domainMemories.length}</span>
+            <span className="text-xs font-normal text-[var(--text-dim)]">
+              &middot; {domainMemories.length}{" "}
+              {domainMemories.length === 1 ? "memory" : "memories"}
+            </span>
           </h2>
           <div className="space-y-2">
             {domainMemories.map((m) => (

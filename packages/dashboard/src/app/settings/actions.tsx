@@ -90,7 +90,7 @@ export function SettingsActions() {
 
       <Card className="p-4">
         <h3 className="text-sm font-semibold mb-3">Export & Import</h3>
-        <p className="text-xs text-[var(--color-text-muted)] mb-3">
+        <p className="text-xs text-[var(--text-dim)] mb-3">
           Export your memories as JSON, or import from another Lodis instance.
         </p>
         <div className="flex gap-2">
@@ -116,17 +116,17 @@ export function SettingsActions() {
           />
         </div>
         {importStatus && (
-          <p className={`text-xs mt-2 ${importStatus.type === "success" ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}>
+          <p className={`text-xs mt-2 ${importStatus.type === "success" ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>
             {importStatus.message}
           </p>
         )}
       </Card>
 
-      <Card className="p-4 border-[var(--color-danger)]">
-        <h3 className="text-sm font-semibold text-[var(--color-danger)] mb-3">
+      <Card className="p-4 border-[var(--danger)]">
+        <h3 className="text-sm font-semibold text-[var(--danger)] mb-3">
           Danger Zone
         </h3>
-        <p className="text-xs text-[var(--color-text-muted)] mb-3">
+        <p className="text-xs text-[var(--text-dim)] mb-3">
           Permanently delete all memories. This cannot be undone.
         </p>
         <Button
@@ -144,7 +144,7 @@ export function SettingsActions() {
         onClose={() => setClearModalOpen(false)}
         title="Clear All Memories"
       >
-        <p className="text-sm text-[var(--color-text-secondary)]">
+        <p className="text-sm text-[var(--text-muted)]">
           This will permanently delete all memories. This action cannot be
           undone. Are you absolutely sure?
         </p>

@@ -41,7 +41,7 @@ export default async function AgentsPage() {
   if (agents.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-[var(--color-text-muted)] text-sm">
+        <p className="text-[var(--text-dim)] text-sm">
           No agents have connected yet. Connect an AI tool with Lodis to see
           agents here.
         </p>
@@ -52,7 +52,7 @@ export default async function AgentsPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Agent Permissions</h1>
-      <p className="text-xs text-[var(--color-text-muted)]">
+      <p className="text-xs text-[var(--text-dim)]">
         Click R/W badges to toggle. Agents without explicit rules have full access.
       </p>
 
@@ -60,14 +60,14 @@ export default async function AgentsPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[var(--color-border)]">
-                <th className="text-left p-3 font-medium text-[var(--color-text-secondary)]">
+              <tr className="border-b border-[var(--border)]">
+                <th className="text-left p-3 font-medium text-[var(--text-muted)]">
                   Agent
                 </th>
                 {allDomains.map((d) => (
                   <th
                     key={d}
-                    className="text-center p-3 font-medium text-[var(--color-text-secondary)]"
+                    className="text-center p-3 font-medium text-[var(--text-muted)]"
                   >
                     {d === "*" ? "All (*)" : d}
                   </th>
@@ -78,12 +78,12 @@ export default async function AgentsPage() {
               {agents.map((agent) => (
                 <tr
                   key={agent.agent_id}
-                  className="border-b border-[var(--color-border-light)]"
+                  className="border-b border-[var(--border-subtle)]"
                 >
                   <td className="p-3">
                     <div>
                       <p className="font-medium">{agent.agent_name}</p>
-                      <p className="text-xs text-[var(--color-text-muted)] font-mono truncate max-w-48">
+                      <p className="text-xs text-[var(--text-dim)] font-mono truncate max-w-48">
                         {agent.agent_id}
                       </p>
                     </div>
@@ -112,7 +112,7 @@ export default async function AgentsPage() {
                             />
                           </div>
                         ) : (
-                          <span className="text-[var(--color-text-muted)]">
+                          <span className="text-[var(--text-dim)]">
                             —
                           </span>
                         )}

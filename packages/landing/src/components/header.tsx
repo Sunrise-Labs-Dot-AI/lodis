@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 
 const navLinks = [
-  { href: "/setup", label: "Setup Guide", external: false },
   { href: "https://github.com/Sunrise-Labs-Dot-AI/lodis", label: "GitHub", external: true },
+  { href: "/setup", label: "Setup Guide", external: false },
   { href: "https://app.lodis.ai/sign-in", label: "Sign In", external: false },
+  { href: "https://app.lodis.ai/sign-up", label: "Sign Up", external: false },
 ];
 
 export function Header() {
@@ -45,12 +46,6 @@ export function Header() {
               {link.label}
             </a>
           ))}
-          <a
-            href="https://app.lodis.ai/sign-up"
-            className="btn-glow text-sm !py-1.5 !px-4"
-          >
-            Sign Up
-          </a>
         </nav>
 
         {/* Mobile hamburger */}
@@ -99,13 +94,6 @@ export function Header() {
                 {link.label}
               </a>
             ))}
-            <a
-              href="https://app.lodis.ai/sign-up"
-              className="btn-glow text-base text-center"
-              onClick={() => setOpen(false)}
-            >
-              Sign Up
-            </a>
           </nav>
         </div>
       )}

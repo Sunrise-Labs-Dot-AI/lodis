@@ -92,7 +92,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
                 PII
               </StatusBadge>
             )}
-            <span className="ml-auto text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+            <span className="ml-auto text-xs text-[var(--text-dim)] whitespace-nowrap">
               {formatDate(m.learned_at)}
             </span>
           </div>
@@ -102,7 +102,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
           {error && (
             <p
               role="alert"
-              className="mt-2 text-xs text-[var(--color-danger)]"
+              className="mt-2 text-xs text-[var(--danger)]"
             >
               {error}
             </p>
@@ -112,7 +112,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
           <Link
             href={`/memory/${m.id}`}
             aria-label="Open memory detail"
-            className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            className="p-1.5 text-[var(--text-dim)] hover:text-[var(--text)] transition-colors"
           >
             <ExternalLink size={14} />
           </Link>
@@ -121,7 +121,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
             aria-label={expanded ? "Collapse memory details" : "Expand memory details"}
             aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
-            className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
+            className="p-1.5 text-[var(--text-dim)] hover:text-[var(--text)] transition-colors cursor-pointer"
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -129,28 +129,28 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
       </div>
 
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-[var(--color-border-light)]">
-          <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
+        <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+          <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs text-[var(--text-dim)]">
             <dt>Source</dt>
-            <dd className="text-[var(--color-text-secondary)]">
+            <dd className="text-[var(--text-muted)]">
               {sourceTypeLabel(m.source_type)}
             </dd>
             {m.source_agent_name && (
               <>
                 <dt>Agent</dt>
-                <dd className="text-[var(--color-text-secondary)]">
+                <dd className="text-[var(--text-muted)]">
                   {m.source_agent_name}
                 </dd>
               </>
             )}
           </dl>
           {m.detail && (
-            <div className="text-xs text-[var(--color-text-secondary)] mb-3 prose-lodis">
+            <div className="text-xs text-[var(--text-muted)] mb-3 prose-lodis">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.detail}</ReactMarkdown>
             </div>
           )}
           {m.source_description && (
-            <p className="text-xs text-[var(--color-text-muted)] mb-3 italic">
+            <p className="text-xs text-[var(--text-dim)] mb-3 italic">
               Source: {m.source_description}
             </p>
           )}
@@ -197,7 +197,7 @@ export function MemoryCard({ memory: m }: MemoryCardProps) {
               size="sm"
               disabled={loading}
               onClick={() => handleAction(() => deleteMemoryAction(m.id))}
-              className="text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)]"
+              className="text-[var(--danger)] hover:bg-[var(--danger-bg)]"
             >
               <Trash2 size={14} className="mr-1" />
               Delete

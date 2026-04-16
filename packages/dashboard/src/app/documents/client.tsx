@@ -77,11 +77,11 @@ export function IndexClient({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <FileText size={24} />
             Document Index
           </h1>
-          <p className="text-sm mt-1 text-[var(--color-text-secondary)]">
+          <p className="text-sm mt-1 text-[var(--text-muted)]">
             {documents.length} indexed {documents.length === 1 ? "document" : "documents"}
             {activeSource && ` from ${SOURCE_LABELS[activeSource] ?? activeSource}`}
           </p>
@@ -94,14 +94,14 @@ export function IndexClient({
           <div className="relative">
             <Search
               size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]"
             />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search indexed documents..."
-              className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-lg placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)]"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--bg-soft)] border border-[var(--border)] rounded-lg placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)]"
             />
           </div>
         </form>
@@ -114,8 +114,8 @@ export function IndexClient({
               className={clsx(
                 "px-2 py-1 rounded-md transition-colors cursor-pointer",
                 activeSort === value
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] font-medium"
+                  : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
               )}
             >
               {label}
@@ -130,8 +130,8 @@ export function IndexClient({
               className={clsx(
                 "px-2 py-1 rounded-md transition-colors cursor-pointer",
                 !activeSource
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] font-medium"
+                  : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
               )}
             >
               All Sources
@@ -143,8 +143,8 @@ export function IndexClient({
                 className={clsx(
                   "px-2 py-1 rounded-md transition-colors cursor-pointer",
                   activeSource === sys
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] font-medium"
-                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] font-medium"
+                    : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
                 )}
               >
                 {SOURCE_LABELS[sys] ?? sys}
@@ -158,12 +158,12 @@ export function IndexClient({
         <Card className="p-8 text-center">
           <FileText
             size={40}
-            className="mx-auto mb-3 text-[var(--color-text-muted)]"
+            className="mx-auto mb-3 text-[var(--text-dim)]"
           />
-          <p className="text-lg font-medium text-[var(--color-text)]">
+          <p className="text-lg font-medium text-[var(--text)]">
             {searchParams.get("q") || activeSource ? "No matching documents" : "No documents indexed yet"}
           </p>
-          <p className="text-sm mt-1 text-[var(--color-text-muted)]">
+          <p className="text-sm mt-1 text-[var(--text-dim)]">
             {searchParams.get("q") || activeSource
               ? "Try a different search or filter."
               : "Ask your AI agent to index documents from Google Drive, Notion, or your filesystem using the memory_index tool."}
@@ -179,14 +179,14 @@ export function IndexClient({
             return (
               <Card key={doc.id} hover className="p-4">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 p-2 rounded-lg bg-[var(--color-bg-soft)]">
-                    <SourceIcon size={18} className="text-[var(--color-accent-text)]" />
+                  <div className="mt-0.5 p-2 rounded-lg bg-[var(--bg-soft)]">
+                    <SourceIcon size={18} className="text-[var(--accent-strong)]" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <Link
                         href={`/memory/${doc.id}`}
-                        className="text-sm font-medium text-[var(--color-text)] hover:text-[var(--color-accent-text)] truncate"
+                        className="text-sm font-medium text-[var(--text)] hover:text-[var(--accent-strong)] truncate"
                       >
                         {doc.entity_name ?? doc.content}
                       </Link>
@@ -195,7 +195,7 @@ export function IndexClient({
                           href={data.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[var(--color-text-muted)] hover:text-[var(--color-accent-text)] flex-shrink-0"
+                          className="text-[var(--text-dim)] hover:text-[var(--accent-strong)] flex-shrink-0"
                         >
                           <ExternalLink size={13} />
                         </a>
@@ -203,7 +203,7 @@ export function IndexClient({
                     </div>
 
                     {/* Summary */}
-                    <p className="text-xs text-[var(--color-text-secondary)] mt-1 line-clamp-2">
+                    <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
                       {doc.content.replace(/^\[Document\]\s*/, "").replace(/^[^—]*—\s*/, "")}
                     </p>
 
@@ -218,12 +218,12 @@ export function IndexClient({
                         <StatusBadge variant="neutral">{data.mime_type}</StatusBadge>
                       )}
                       {data?.file_size != null && (
-                        <span className="text-xs text-[var(--color-text-muted)]">
+                        <span className="text-xs text-[var(--text-dim)]">
                           {formatFileSize(data.file_size)}
                         </span>
                       )}
                       {data?.parent_folder && (
-                        <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                        <span className="text-xs text-[var(--text-dim)] flex items-center gap-1">
                           <FolderOpen size={11} />
                           {data.parent_folder}
                         </span>
@@ -237,7 +237,7 @@ export function IndexClient({
                       {data?.tags?.map((tag) => (
                         <span
                           key={tag}
-                          className="text-xs px-1.5 py-0.5 rounded bg-[var(--color-bg-soft)] text-[var(--color-text-muted)]"
+                          className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-soft)] text-[var(--text-dim)]"
                         >
                           {tag}
                         </span>

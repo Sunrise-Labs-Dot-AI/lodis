@@ -35,7 +35,7 @@ export default async function MemoryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <Link
         href="/"
-        className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition-colors"
       >
         <ArrowLeft size={14} />
         Back to memories
@@ -68,27 +68,27 @@ export default async function MemoryDetailPage({ params }: PageProps) {
           <h3 className="text-sm font-semibold mb-3">Stats</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <span className="text-[var(--color-text-muted)]">Confidence</span>
+              <span className="text-[var(--text-dim)]">Confidence</span>
               <p className="font-medium">{formatConfidence(memory.confidence)}</p>
             </div>
             <div>
-              <span className="text-[var(--color-text-muted)]">Confirmed</span>
+              <span className="text-[var(--text-dim)]">Confirmed</span>
               <p className="font-medium">{memory.confirmed_count}x</p>
             </div>
             <div>
-              <span className="text-[var(--color-text-muted)]">Corrected</span>
+              <span className="text-[var(--text-dim)]">Corrected</span>
               <p className="font-medium">{memory.corrected_count}x</p>
             </div>
             <div>
-              <span className="text-[var(--color-text-muted)]">Mistakes</span>
+              <span className="text-[var(--text-dim)]">Mistakes</span>
               <p className="font-medium">{memory.mistake_count}x</p>
             </div>
             <div>
-              <span className="text-[var(--color-text-muted)]">Used</span>
+              <span className="text-[var(--text-dim)]">Used</span>
               <p className="font-medium">{memory.used_count}x</p>
             </div>
             <div>
-              <span className="text-[var(--color-text-muted)]">Learned</span>
+              <span className="text-[var(--text-dim)]">Learned</span>
               <p className="font-medium">{formatDate(memory.learned_at)}</p>
             </div>
           </div>

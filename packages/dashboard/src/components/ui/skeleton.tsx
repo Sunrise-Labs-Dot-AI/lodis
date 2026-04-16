@@ -22,7 +22,7 @@ export function Skeleton({
     <div
       aria-hidden="true"
       className={clsx(
-        "skeleton bg-[var(--color-bg-soft)] border border-[var(--color-border-light)]",
+        "skeleton bg-[var(--bg-soft)] border border-[var(--border-subtle)]",
         variantClasses[variant],
         className,
       )}
@@ -37,7 +37,7 @@ export function SkeletonMemoryList({ count = 4 }: { count?: number }) {
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="rounded-lg border border-[var(--color-border-light)] bg-[var(--color-card)] p-4"
+          className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-4"
         >
           <Skeleton variant="line" className="h-4 w-3/4 mb-3" />
           <Skeleton variant="line" className="h-3 w-1/2 mb-3" />

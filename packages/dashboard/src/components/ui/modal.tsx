@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, size = "md", children }: ModalProp
       }}
     >
       <div className={clsx(
-        "bg-[var(--color-bg-soft)] backdrop-blur-xl border border-[var(--color-border-hover)] rounded-xl shadow-[0_0_40px_rgba(125,211,252,0.05)] w-full mx-4 p-6 max-h-[85vh] overflow-y-auto",
+        "bg-[var(--bg-soft)] backdrop-blur-xl border border-[var(--border-strong)] rounded-xl shadow-[0_0_40px_rgba(125,211,252,0.05)] w-full mx-4 p-6 max-h-[85vh] overflow-y-auto",
         size === "sm" && "max-w-sm",
         size === "md" && "max-w-md",
         size === "lg" && "max-w-xl",

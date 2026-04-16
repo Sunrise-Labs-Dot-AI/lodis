@@ -31,23 +31,23 @@ export default async function SettingsPage() {
         <h3 className="text-sm font-semibold mb-3">Database</h3>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-muted)]">
+            <span className="text-[var(--text-dim)]">
               {isHosted ? "Database" : "File path"}
             </span>
             <span className="font-mono text-xs">{dbPath}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-muted)]">Size</span>
+            <span className="text-[var(--text-dim)]">Size</span>
             <span>{isHosted ? "—" : formatBytes(stats.dbSizeBytes)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-muted)]">
+            <span className="text-[var(--text-dim)]">
               Total memories
             </span>
             <span>{stats.totalMemories}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--color-text-muted)]">Domains</span>
+            <span className="text-[var(--text-dim)]">Domains</span>
             <span>{stats.totalDomains}</span>
           </div>
         </div>

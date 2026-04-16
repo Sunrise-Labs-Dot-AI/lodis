@@ -58,19 +58,19 @@ export default async function EntityProfilePage({ params }: PageProps) {
       <div className="flex items-center gap-3">
         <Link
           href="/"
-          className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-[var(--color-accent)]/10">
-            <Icon className="w-6 h-6 text-[var(--color-accent)]" />
+          <div className="p-2 rounded-lg bg-[var(--accent)]/10">
+            <Icon className="w-6 h-6 text-[var(--accent)]" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--color-text-primary)]">
+            <h1 className="text-2xl font-semibold text-[var(--text)]">
               {entityName}
             </h1>
-            <p className="text-sm text-[var(--color-text-secondary)] capitalize">
+            <p className="text-sm text-[var(--text-muted)] capitalize">
               {entityType} &middot; {memories.length} {memories.length === 1 ? "memory" : "memories"}
             </p>
           </div>
@@ -82,13 +82,13 @@ export default async function EntityProfilePage({ params }: PageProps) {
         <Card className="p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+              <h2 className="text-sm font-medium text-[var(--text-muted)] mb-2">
                 Profile Summary
               </h2>
-              <p className="text-[var(--color-text-primary)] leading-relaxed">
+              <p className="text-[var(--text)] leading-relaxed">
                 {profile.summary}
               </p>
-              <p className="text-xs text-[var(--color-text-tertiary)] mt-3">
+              <p className="text-xs text-[var(--text-dim)] mt-3">
                 Generated {formatDate(profile.generated_at)} &middot; Based on {JSON.parse(profile.memory_ids).length} memories &middot; ~{profile.token_count} tokens
               </p>
             </div>
@@ -96,8 +96,8 @@ export default async function EntityProfilePage({ params }: PageProps) {
         </Card>
       ) : (
         <Card className="p-6">
-          <p className="text-[var(--color-text-secondary)] text-sm">
-            No entity profile generated yet. Use the <code className="text-xs bg-[var(--color-surface-secondary)] px-1 py-0.5 rounded">memory_briefing</code> MCP tool to generate one.
+          <p className="text-[var(--text-muted)] text-sm">
+            No entity profile generated yet. Use the <code className="text-xs bg-[var(--bg-soft)] px-1 py-0.5 rounded">memory_briefing</code> MCP tool to generate one.
           </p>
         </Card>
       )}
@@ -119,28 +119,28 @@ export default async function EntityProfilePage({ params }: PageProps) {
             : null;
           return (
             <Card className="p-6">
-              <h2 className="text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+              <h2 className="text-sm font-medium text-[var(--text-muted)] mb-3">
                 Document Source
               </h2>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
-                  <span className="text-[var(--color-text-tertiary)]">Source</span>
-                  <p className="text-[var(--color-text-primary)] capitalize">{sd.source_system?.replace(/_/g, " ") ?? "Unknown"}</p>
+                  <span className="text-[var(--text-dim)]">Source</span>
+                  <p className="text-[var(--text)] capitalize">{sd.source_system?.replace(/_/g, " ") ?? "Unknown"}</p>
                 </div>
                 <div>
-                  <span className="text-[var(--color-text-tertiary)]">Location</span>
-                  <p className="text-[var(--color-text-primary)] truncate">{sd.location}</p>
+                  <span className="text-[var(--text-dim)]">Location</span>
+                  <p className="text-[var(--text)] truncate">{sd.location}</p>
                 </div>
                 {sd.mime_type && (
                   <div>
-                    <span className="text-[var(--color-text-tertiary)]">Type</span>
-                    <p className="text-[var(--color-text-primary)]">{sd.mime_type}</p>
+                    <span className="text-[var(--text-dim)]">Type</span>
+                    <p className="text-[var(--text)]">{sd.mime_type}</p>
                   </div>
                 )}
                 {sd.file_size != null && (
                   <div>
-                    <span className="text-[var(--color-text-tertiary)]">Size</span>
-                    <p className="text-[var(--color-text-primary)]">
+                    <span className="text-[var(--text-dim)]">Size</span>
+                    <p className="text-[var(--text)]">
                       {sd.file_size < 1024 * 1024
                         ? `${(sd.file_size / 1024).toFixed(1)} KB`
                         : `${(sd.file_size / (1024 * 1024)).toFixed(1)} MB`}
@@ -149,15 +149,15 @@ export default async function EntityProfilePage({ params }: PageProps) {
                 )}
                 {sd.parent_folder && (
                   <div>
-                    <span className="text-[var(--color-text-tertiary)] flex items-center gap-1"><FolderOpen size={12} /> Folder</span>
-                    <p className="text-[var(--color-text-primary)]">{sd.parent_folder}</p>
+                    <span className="text-[var(--text-dim)] flex items-center gap-1"><FolderOpen size={12} /> Folder</span>
+                    <p className="text-[var(--text)]">{sd.parent_folder}</p>
                   </div>
                 )}
                 {sd.last_indexed_at && (
                   <div>
-                    <span className="text-[var(--color-text-tertiary)] flex items-center gap-1"><Clock size={12} /> Last Indexed</span>
+                    <span className="text-[var(--text-dim)] flex items-center gap-1"><Clock size={12} /> Last Indexed</span>
                     <div className="flex items-center gap-2">
-                      <p className="text-[var(--color-text-primary)]">{formatDate(sd.last_indexed_at)}</p>
+                      <p className="text-[var(--text)]">{formatDate(sd.last_indexed_at)}</p>
                       {staleness && <StatusBadge variant={staleness.variant}>{staleness.label}</StatusBadge>}
                     </div>
                   </div>
@@ -168,7 +168,7 @@ export default async function EntityProfilePage({ params }: PageProps) {
                   href={sd.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-3 text-sm text-[var(--color-accent-text)] hover:underline"
+                  className="inline-flex items-center gap-1.5 mt-3 text-sm text-[var(--accent-strong)] hover:underline"
                 >
                   <ExternalLink size={13} />
                   Open in source
@@ -182,7 +182,7 @@ export default async function EntityProfilePage({ params }: PageProps) {
       {/* Connected Entities */}
       {connections.length > 0 && (
         <Card className="p-6">
-          <h2 className="text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+          <h2 className="text-sm font-medium text-[var(--text-muted)] mb-3">
             Connected Entities
           </h2>
           <div className="flex flex-wrap gap-2">
@@ -192,11 +192,11 @@ export default async function EntityProfilePage({ params }: PageProps) {
                 <Link
                   key={`${conn.name}-${conn.relationship}`}
                   href={`/entities/${encodeURIComponent(conn.name)}`}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-surface-secondary)] hover:bg-[var(--color-surface-tertiary)] transition-colors text-sm"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-soft)] hover:bg-[var(--surface-hover)] transition-colors text-sm"
                 >
-                  <ConnIcon className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
-                  <span className="text-[var(--color-text-primary)]">{conn.name}</span>
-                  <span className="text-xs text-[var(--color-text-tertiary)]">{conn.relationship}</span>
+                  <ConnIcon className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span className="text-[var(--text)]">{conn.name}</span>
+                  <span className="text-xs text-[var(--text-dim)]">{conn.relationship}</span>
                 </Link>
               );
             })}
@@ -224,15 +224,15 @@ export default async function EntityProfilePage({ params }: PageProps) {
 function MemorySection({ title, memories }: { title: string; memories: Array<{ id: string; content: string; confidence: number; learned_at: string | null; permanence: string | null; domain: string }> }) {
   return (
     <div>
-      <h2 className="text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+      <h2 className="text-sm font-medium text-[var(--text-muted)] mb-3">
         {title} ({memories.length})
       </h2>
       <div className="space-y-2">
         {memories.map((mem) => (
           <Link key={mem.id} href={`/memory/${mem.id}`}>
-            <Card className="p-4 hover:border-[var(--color-accent)]/30 transition-colors cursor-pointer">
+            <Card className="p-4 hover:border-[var(--accent)]/30 transition-colors cursor-pointer">
               <div className="flex items-start justify-between gap-4">
-                <p className="text-sm text-[var(--color-text-primary)] flex-1">
+                <p className="text-sm text-[var(--text)] flex-1">
                   {mem.content}
                 </p>
                 <div className="flex items-center gap-2 shrink-0">
@@ -241,7 +241,7 @@ function MemorySection({ title, memories }: { title: string; memories: Array<{ i
                 </div>
               </div>
               {mem.learned_at && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                <p className="text-xs text-[var(--text-dim)] mt-1">
                   {formatDate(mem.learned_at)}
                 </p>
               )}

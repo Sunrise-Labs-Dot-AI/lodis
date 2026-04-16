@@ -69,10 +69,10 @@ const TYPE_BADGE_VARIANT: Record<
 // --- Health Score ---
 
 function healthColor(score: number): string {
-  if (score >= 80) return "var(--color-success)";
-  if (score >= 60) return "var(--color-accent)";
-  if (score >= 40) return "var(--color-warning)";
-  return "var(--color-danger)";
+  if (score >= 80) return "var(--success)";
+  if (score >= 60) return "var(--accent)";
+  if (score >= 40) return "var(--warning)";
+  return "var(--danger)";
 }
 
 function healthLabel(score: number): string {
@@ -100,7 +100,7 @@ function HealthFactorRow({
           <span
             className="text-xs font-medium"
             style={{
-              color: factor.score < 80 ? color : "var(--color-text-secondary)",
+              color: factor.score < 80 ? color : "var(--text-muted)",
             }}
           >
             {factor.name}
@@ -109,21 +109,21 @@ function HealthFactorRow({
             <span
               className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
               style={{
-                background: "var(--color-danger-bg)",
-                color: "var(--color-danger)",
+                background: "var(--danger-bg)",
+                color: "var(--danger)",
               }}
             >
               {factor.score === 0 ? "Critical" : "Low"}
             </span>
           )}
         </div>
-        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+        <span className="text-xs" style={{ color: "var(--text-dim)" }}>
           {factor.detail}
         </span>
       </div>
       <div
         className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden`}
-        style={{ background: "var(--color-bg-soft)" }}
+        style={{ background: "var(--bg-soft)" }}
       >
         <div
           className="h-full rounded-full transition-all duration-500"
@@ -162,7 +162,7 @@ function HealthScoreCard({ health }: { health: HealthScore }) {
           </span>
           <span
             className="text-xs mt-0.5"
-            style={{ color: "var(--color-text-muted)" }}
+            style={{ color: "var(--text-dim)" }}
           >
             {health.totalMemories} memories
           </span>
@@ -173,7 +173,7 @@ function HealthScoreCard({ health }: { health: HealthScore }) {
             <div className="mb-3">
               <h3
                 className="text-xs font-medium mb-2"
-                style={{ color: "var(--color-text-muted)" }}
+                style={{ color: "var(--text-dim)" }}
               >
                 Needs attention
               </h3>
@@ -190,7 +190,7 @@ function HealthScoreCard({ health }: { health: HealthScore }) {
               {problemFactors.length > 0 && (
                 <h3
                   className="text-xs font-medium mb-2 mt-3"
-                  style={{ color: "var(--color-text-muted)" }}
+                  style={{ color: "var(--text-dim)" }}
                 >
                   Looking good
                 </h3>
@@ -210,14 +210,14 @@ function HealthScoreCard({ health }: { health: HealthScore }) {
         <div
           className="mt-4 pt-4 flex items-start gap-2 text-xs"
           style={{
-            borderTop: "1px solid var(--color-border)",
-            color: "var(--color-text-muted)",
+            borderTop: "1px solid var(--border)",
+            color: "var(--text-dim)",
           }}
         >
           <Zap
             size={14}
             className="flex-shrink-0 mt-0.5"
-            style={{ color: "var(--color-accent)" }}
+            style={{ color: "var(--accent)" }}
           />
           <span>{health.autoHandled.description}</span>
         </div>
@@ -245,21 +245,21 @@ function MemoryMiniCard({
       className="text-sm px-3 py-2.5 rounded border"
       style={{
         background: highlight
-          ? "var(--color-success-bg)"
-          : "var(--color-bg-soft)",
+          ? "var(--success-bg)"
+          : "var(--bg-soft)",
         borderColor: highlight
-          ? "var(--color-success)"
-          : "var(--color-border)",
+          ? "var(--success)"
+          : "var(--border)",
       }}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="line-clamp-2" style={{ color: "var(--color-text)" }}>
+        <span className="line-clamp-2" style={{ color: "var(--text)" }}>
           {memory.content}
         </span>
         <Link
           href={`/memory/${memory.id}`}
           className="flex-shrink-0 mt-0.5 hover:opacity-80"
-          style={{ color: "var(--color-text-muted)" }}
+          style={{ color: "var(--text-dim)" }}
         >
           <ExternalLink size={12} />
         </Link>
@@ -269,8 +269,8 @@ function MemoryMiniCard({
           <span
             className="text-[10px] font-medium px-1.5 py-0.5 rounded"
             style={{
-              background: "var(--color-success-bg)",
-              color: "var(--color-success)",
+              background: "var(--success-bg)",
+              color: "var(--success)",
             }}
           >
             {label}
@@ -288,7 +288,7 @@ function MemoryMiniCard({
         </span>
         <span
           className="text-[10px] font-mono"
-          style={{ color: "var(--color-text-muted)" }}
+          style={{ color: "var(--text-dim)" }}
         >
           {memory.id.slice(0, 8)}
         </span>
@@ -315,8 +315,8 @@ function InlineCorrection({
     <div
       className="mt-2 p-3 rounded border"
       style={{
-        background: "var(--color-bg-soft)",
-        borderColor: "var(--color-border)",
+        background: "var(--bg-soft)",
+        borderColor: "var(--border)",
       }}
     >
       <textarea
@@ -324,7 +324,7 @@ function InlineCorrection({
         onChange={(e) => setText(e.target.value)}
         placeholder="Describe what's wrong or what should change..."
         rows={2}
-        className="w-full p-2 text-sm bg-[var(--color-card)] border border-[var(--color-border)] rounded placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-solid)] resize-none"
+        className="w-full p-2 text-sm bg-[var(--surface)] border border-[var(--border)] rounded placeholder:text-[var(--text-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-solid)] resize-none"
       />
       <div className="flex justify-end gap-2 mt-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={loading}>
@@ -428,7 +428,7 @@ function MemoryActionBar({
           size="sm"
           disabled={loading}
           onClick={() => onDelete(memoryId)}
-          className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+          className="text-[var(--danger)] hover:text-[var(--danger)]"
         >
           <Trash2 size={13} className="mr-1" />
           Delete
@@ -460,12 +460,12 @@ function ResolvedCard({
         <CheckCircle
           size={18}
           className="flex-shrink-0 mt-0.5"
-          style={{ color: "var(--color-success)" }}
+          style={{ color: "var(--success)" }}
         />
         <div className="flex-1 min-w-0">
           <p
             className="text-sm font-medium"
-            style={{ color: "var(--color-success)" }}
+            style={{ color: "var(--success)" }}
           >
             {action}
           </p>
@@ -473,15 +473,15 @@ function ResolvedCard({
             <div
               className="mt-2 text-sm p-2.5 rounded"
               style={{
-                background: "var(--color-bg-soft)",
-                color: "var(--color-text)",
+                background: "var(--bg-soft)",
+                color: "var(--text)",
               }}
             >
               <p className="line-clamp-3">{memory.content}</p>
               {memory.detail && (
                 <p
                   className="text-xs mt-1"
-                  style={{ color: "var(--color-text-muted)" }}
+                  style={{ color: "var(--text-dim)" }}
                 >
                   {memory.detail}
                 </p>
@@ -728,13 +728,13 @@ export function CleanupClient() {
         <div>
           <h1
             className="text-2xl font-bold"
-            style={{ color: "var(--color-text)" }}
+            style={{ color: "var(--text)" }}
           >
             Memory Health
           </h1>
           <p
             className="text-sm mt-1"
-            style={{ color: "var(--color-text-secondary)" }}
+            style={{ color: "var(--text-muted)" }}
           >
             Monitor quality and resolve issues that need your input
           </p>
@@ -755,8 +755,8 @@ export function CleanupClient() {
       </div>
 
       {error && (
-        <Card className="p-4 mb-4 border-[var(--color-danger)]">
-          <p style={{ color: "var(--color-danger)" }}>{error}</p>
+        <Card className="p-4 mb-4 border-[var(--danger)]">
+          <p style={{ color: "var(--danger)" }}>{error}</p>
         </Card>
       )}
 
@@ -787,17 +787,17 @@ export function CleanupClient() {
             <Shield
               size={40}
               className="mx-auto mb-3"
-              style={{ color: "var(--color-success)" }}
+              style={{ color: "var(--success)" }}
             />
             <p
               className="text-lg font-medium"
-              style={{ color: "var(--color-text)" }}
+              style={{ color: "var(--text)" }}
             >
               Nothing needs your attention
             </p>
             <p
               className="text-sm mt-1"
-              style={{ color: "var(--color-text-muted)" }}
+              style={{ color: "var(--text-dim)" }}
             >
               The system is handling routine maintenance automatically.
             </p>
@@ -809,7 +809,7 @@ export function CleanupClient() {
         <div className="mb-4">
           <h2
             className="text-sm font-medium mb-3"
-            style={{ color: "var(--color-text-secondary)" }}
+            style={{ color: "var(--text-muted)" }}
           >
             Needs your input ({visibleActionable.length})
           </h2>
@@ -900,7 +900,7 @@ function SuggestionCard({
           </StatusBadge>
           <span
             className="text-sm"
-            style={{ color: "var(--color-text-secondary)" }}
+            style={{ color: "var(--text-muted)" }}
           >
             {suggestion.description}
           </span>
@@ -1102,7 +1102,7 @@ function SplitDetail({
       )}
       <p
         className="text-xs font-medium mb-2"
-        style={{ color: "var(--color-text-muted)" }}
+        style={{ color: "var(--text-dim)" }}
       >
         Proposed split:
       </p>
@@ -1112,16 +1112,16 @@ function SplitDetail({
             key={i}
             className="text-sm p-2 rounded border"
             style={{
-              background: "var(--color-bg-soft)",
-              borderColor: "var(--color-border)",
-              color: "var(--color-text)",
+              background: "var(--bg-soft)",
+              borderColor: "var(--border)",
+              color: "var(--text)",
             }}
           >
             <span className="font-medium">Part {i + 1}:</span> {part.content}
             {part.detail && (
               <p
                 className="text-xs mt-0.5"
-                style={{ color: "var(--color-text-muted)" }}
+                style={{ color: "var(--text-dim)" }}
               >
                 {part.detail}
               </p>
@@ -1170,13 +1170,13 @@ function ContradictionDetail({
               <div
                 className="p-3 rounded border"
                 style={{
-                  background: "var(--color-bg-soft)",
-                  borderColor: "var(--color-border)",
+                  background: "var(--bg-soft)",
+                  borderColor: "var(--border)",
                 }}
               >
                 <p
                   className="text-sm mb-2"
-                  style={{ color: "var(--color-text)" }}
+                  style={{ color: "var(--text)" }}
                 >
                   {conflict.statement}
                 </p>
@@ -1197,7 +1197,7 @@ function ContradictionDetail({
                     <Link
                       href={`/memory/${conflict.id}`}
                       className="hover:opacity-80"
-                      style={{ color: "var(--color-text-muted)" }}
+                      style={{ color: "var(--text-dim)" }}
                     >
                       <ExternalLink size={11} />
                     </Link>
@@ -1292,8 +1292,8 @@ function PiiDetail({
               key={type}
               className="text-xs px-2 py-0.5 rounded"
               style={{
-                background: "var(--color-danger-bg)",
-                color: "var(--color-danger)",
+                background: "var(--danger-bg)",
+                color: "var(--danger)",
               }}
             >
               {type.replace(/_/g, " ")}
@@ -1304,7 +1304,7 @@ function PiiDetail({
 
       <p
         className="text-xs mb-3"
-        style={{ color: "var(--color-text-muted)" }}
+        style={{ color: "var(--text-dim)" }}
       >
         Redacting also scrubs sensitive data from event history.
       </p>
@@ -1435,7 +1435,7 @@ function PromoteDetail({
           variant="ghost"
           onClick={() => onDelete(memoryId)}
           disabled={applying}
-          className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+          className="text-[var(--danger)] hover:text-[var(--danger)]"
         >
           <Trash2 size={13} className="mr-1" />
           Delete
@@ -1462,7 +1462,7 @@ function ExpiredDetail({
   return (
     <div className="mt-2">
       {memory && <MemoryMiniCard memory={memory} />}
-      <p className="text-xs mt-2 mb-2 text-[var(--color-text-muted)]">
+      <p className="text-xs mt-2 mb-2 text-[var(--text-dim)]">
         This ephemeral memory has passed its expiration time.
       </p>
       <div className="flex items-center gap-2">
@@ -1508,7 +1508,7 @@ function StaleProjectDetail({
   return (
     <div className="mt-2">
       {memory && <MemoryMiniCard memory={memory} />}
-      <p className="text-xs mt-2 mb-2 text-[var(--color-text-muted)]">
+      <p className="text-xs mt-2 mb-2 text-[var(--text-dim)]">
         This project context has been idle for over 90 days with no usage or confirmation.
       </p>
       <div className="flex items-center gap-2">
@@ -1534,7 +1534,7 @@ function StaleProjectDetail({
           variant="ghost"
           onClick={() => onDelete(memoryId)}
           disabled={applying}
-          className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+          className="text-[var(--danger)] hover:text-[var(--danger)]"
         >
           <Trash2 size={13} className="mr-1" />
           Delete

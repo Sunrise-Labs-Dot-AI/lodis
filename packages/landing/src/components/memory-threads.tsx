@@ -1,12 +1,12 @@
 export function MemoryThreads() {
   const nodes = [
-    { cx: 120, cy: 80, r: 4, color: "var(--color-glow)", delay: 0 },
-    { cx: 280, cy: 140, r: 5, color: "var(--color-violet)", delay: 0.5 },
-    { cx: 200, cy: 260, r: 3.5, color: "var(--color-glow)", delay: 1 },
-    { cx: 380, cy: 60, r: 4, color: "var(--color-emerald)", delay: 1.5 },
-    { cx: 440, cy: 220, r: 3, color: "var(--color-violet)", delay: 2 },
-    { cx: 60, cy: 200, r: 3.5, color: "var(--color-glow)", delay: 0.8 },
-    { cx: 340, cy: 300, r: 4, color: "var(--color-emerald)", delay: 1.2 },
+    { cx: 120, cy: 80, r: 4, color: "var(--accent)", delay: 0 },
+    { cx: 280, cy: 140, r: 5, color: "var(--violet)", delay: 0.5 },
+    { cx: 200, cy: 260, r: 3.5, color: "var(--accent)", delay: 1 },
+    { cx: 380, cy: 60, r: 4, color: "var(--success)", delay: 1.5 },
+    { cx: 440, cy: 220, r: 3, color: "var(--violet)", delay: 2 },
+    { cx: 60, cy: 200, r: 3.5, color: "var(--accent)", delay: 0.8 },
+    { cx: 340, cy: 300, r: 4, color: "var(--success)", delay: 1.2 },
   ];
 
   const edges = [
@@ -37,7 +37,7 @@ export function MemoryThreads() {
           <path
             key={i}
             d={`M ${from.cx} ${from.cy} Q ${mx} ${my} ${to.cx} ${to.cy}`}
-            stroke="var(--color-glow)"
+            stroke="var(--accent)"
             strokeWidth="1"
             strokeOpacity="0.3"
             className="thread-path"

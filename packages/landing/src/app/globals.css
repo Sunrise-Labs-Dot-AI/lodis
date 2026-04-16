@@ -4,34 +4,33 @@
 @import "@lodis/shared-ui/focus.css";
 
 /*
- * Back-compat shim: existing Tailwind utilities (text-glow, bg-void,
- * text-text-muted, etc.) resolve through canonical tokens in shared-ui.
- * Rename cleanup is deferred to M3 polish.
+ * Landing Tailwind utility registry.
+ * Utility names (text-glow, bg-void, text-violet, etc.) are preserved as the
+ * stable public API of the landing package; values resolve through the
+ * canonical tokens in @lodis/shared-ui/tokens.css.
  */
 @theme {
-  --color-void: #0a0e1a;
-  --color-surface: #111827;
-  --color-surface-raised: #1e293b;
-  --color-glow: #7dd3fc;
-  --color-glow-soft: #bae6fd;
-  --color-violet: #a78bfa;
-  --color-violet-soft: #c4b5fd;
-  --color-emerald: #34d399;
-  --color-amber: #fbbf24;
-  --color-text: #e2e8f0;
-  --color-text-muted: #94a3b8;
-  /* Bumped via shared-ui/tokens.css --text-dim (WCAG AA fix) */
-  --color-text-dim: #7d8ba1;
-  --color-border: rgba(125, 211, 252, 0.1);
-  --color-border-hover: rgba(125, 211, 252, 0.25);
+  --color-void: var(--bg);
+  --color-surface: var(--bg-soft);
+  --color-surface-raised: var(--bg-raised);
+  --color-glow: var(--accent);
+  --color-glow-soft: var(--accent-strong);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-emerald: var(--success);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-dim: var(--text-dim);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-strong);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
 }
 
 body {
-  background-color: var(--color-void);
-  color: var(--color-text);
+  background-color: var(--bg);
+  color: var(--text);
   font-family: var(--font-sans);
 }
 
@@ -97,21 +96,21 @@ body {
 .glass {
   background: rgba(17, 24, 39, 0.7);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border);
   border-radius: 12px;
   transition: border-color 300ms, box-shadow 300ms;
 }
 
 .glass:hover {
-  border-color: var(--color-border-hover);
+  border-color: var(--border-strong);
   box-shadow: 0 0 20px rgba(125, 211, 252, 0.08);
 }
 
 /* Code block styling */
 .code-block {
   background: rgba(10, 14, 26, 0.9);
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-glow);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
   border-radius: 8px;
   font-family: var(--font-mono);
   font-size: 0.875rem;
@@ -130,7 +129,7 @@ body {
   );
   background-size: 200% 100%;
   animation: shimmer 3s ease-in-out infinite;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 
@@ -151,8 +150,8 @@ body {
   display: inline-block;
   white-space: nowrap;
   background: linear-gradient(135deg, rgba(125, 211, 252, 0.15), rgba(167, 139, 250, 0.15));
-  border: 1px solid var(--color-border-hover);
-  color: var(--color-glow-soft);
+  border: 1px solid var(--border-strong);
+  color: var(--accent-strong);
   padding: 0.75rem 2rem;
   border-radius: 8px;
   font-weight: 500;
@@ -163,15 +162,15 @@ body {
 .btn-glow:hover {
   background: linear-gradient(135deg, rgba(125, 211, 252, 0.25), rgba(167, 139, 250, 0.25));
   box-shadow: 0 0 30px rgba(125, 211, 252, 0.15);
-  border-color: var(--color-glow);
+  border-color: var(--accent);
 }
 
 .btn-ghost {
   display: inline-block;
   white-space: nowrap;
   background: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   padding: 0.75rem 2rem;
   border-radius: 8px;
   font-weight: 500;
@@ -180,8 +179,8 @@ body {
 }
 
 .btn-ghost:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /*
@@ -217,7 +216,7 @@ body {
 
 .screenshot-frame {
   transform: rotateX(4deg) rotateY(-2deg);
-  border: 1px solid var(--color-border-hover);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   overflow: hidden;
   box-shadow:

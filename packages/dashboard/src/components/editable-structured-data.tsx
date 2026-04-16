@@ -172,13 +172,13 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
     if (isEditing && field?.type === "select") {
       return (
         <div key={key} className={isExtra ? "col-span-2 sm:col-span-1" : ""}>
-          <span className="text-[var(--color-text-muted)]">{label}</span>
+          <span className="text-[var(--text-dim)]">{label}</span>
           <select
             autoFocus
             value={String(val ?? "")}
             onChange={(e) => saveField(key, e.target.value, field)}
             onBlur={() => setEditingKey(null)}
-            className="block w-full mt-0.5 px-1.5 py-0.5 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-accent-solid)] rounded focus:outline-none cursor-pointer"
+            className="block w-full mt-0.5 px-1.5 py-0.5 text-sm bg-[var(--bg-soft)] border border-[var(--accent-solid)] rounded focus:outline-none cursor-pointer"
           >
             <option value="">-</option>
             {field.options?.map((o) => (
@@ -192,7 +192,7 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
     if (isEditing) {
       return (
         <div key={key} className={complex ? "col-span-2" : isExtra ? "col-span-2 sm:col-span-1" : ""}>
-          <span className="text-[var(--color-text-muted)]">{label}</span>
+          <span className="text-[var(--text-dim)]">{label}</span>
           <div className="flex items-center gap-1 mt-0.5">
             <input
               ref={inputRef}
@@ -203,17 +203,17 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
                 if (e.key === "Escape") setEditingKey(null);
               }}
               placeholder={field?.type === "text-array" ? "comma-separated..." : ""}
-              className="flex-1 px-1.5 py-0.5 text-sm bg-[var(--color-bg-soft)] border border-[var(--color-accent-solid)] rounded focus:outline-none min-w-0"
+              className="flex-1 px-1.5 py-0.5 text-sm bg-[var(--bg-soft)] border border-[var(--accent-solid)] rounded focus:outline-none min-w-0"
             />
             <button
               onClick={() => saveField(key, editValue, field)}
-              className="p-0.5 text-[var(--color-success)] rounded cursor-pointer shrink-0"
+              className="p-0.5 text-[var(--success)] rounded cursor-pointer shrink-0"
             >
               <Check size={12} />
             </button>
             <button
               onClick={() => setEditingKey(null)}
-              className="p-0.5 text-[var(--color-text-muted)] rounded cursor-pointer shrink-0"
+              className="p-0.5 text-[var(--text-dim)] rounded cursor-pointer shrink-0"
             >
               <X size={12} />
             </button>
@@ -227,15 +227,15 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
       return (
         <div
           key={key}
-          className="col-span-2 group cursor-pointer hover:bg-[var(--color-bg-soft)] rounded px-1 -mx-1 transition-colors"
+          className="col-span-2 group cursor-pointer hover:bg-[var(--bg-soft)] rounded px-1 -mx-1 transition-colors"
           onClick={() => startEditing(key)}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[var(--color-text-muted)]">{label}</span>
+            <span className="text-[var(--text-dim)]">{label}</span>
             {displayValue.length > 80 && (
               <button
                 onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}
-                className="text-xs text-[var(--color-accent-text)] hover:underline cursor-pointer"
+                className="text-xs text-[var(--accent-strong)] hover:underline cursor-pointer"
               >
                 {expanded ? "collapse" : "expand"}
               </button>
@@ -252,12 +252,12 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
     return (
       <div
         key={key}
-        className={`group cursor-pointer hover:bg-[var(--color-bg-soft)] rounded px-1 -mx-1 transition-colors overflow-hidden ${isExtra ? "col-span-2 sm:col-span-1" : ""}`}
+        className={`group cursor-pointer hover:bg-[var(--bg-soft)] rounded px-1 -mx-1 transition-colors overflow-hidden ${isExtra ? "col-span-2 sm:col-span-1" : ""}`}
         onClick={() => startEditing(key)}
       >
-        <span className="text-[var(--color-text-muted)]">{label}</span>
+        <span className="text-[var(--text-dim)]">{label}</span>
         <p className="font-medium truncate">
-          {displayValue || <span className="text-[var(--color-text-muted)] italic font-normal">-</span>}
+          {displayValue || <span className="text-[var(--text-dim)] italic font-normal">-</span>}
           <Pencil size={8} className="inline ml-1 opacity-0 group-hover:opacity-50 transition-opacity" />
         </p>
       </div>
@@ -277,7 +277,7 @@ export function EditableStructuredData({ id, entityType, structuredData }: Edita
         {/* Extra keys not in schema */}
         {extraKeys.length > 0 && schema && (
           <div className="col-span-2 border-t border-[rgba(148,163,184,0.1)] mt-1 pt-2">
-            <span className="text-xs text-[var(--color-text-muted)]">Additional fields</span>
+            <span className="text-xs text-[var(--text-dim)]">Additional fields</span>
           </div>
         )}
         {extraKeys.map((key) => renderField(key, humanizeKey(key), undefined, true))}

@@ -23,7 +23,7 @@ export function CodeBlock({ children, className }: { children: string; className
         style={{
           background: copied ? "rgba(52, 211, 153, 0.15)" : "rgba(17, 24, 39, 0.8)",
           borderColor: copied ? "rgba(52, 211, 153, 0.3)" : "rgba(125, 211, 252, 0.15)",
-          color: copied ? "var(--color-emerald)" : "var(--color-text-muted)",
+          color: copied ? "var(--success)" : "var(--text-muted)",
         }}
         aria-label="Copy to clipboard"
       >

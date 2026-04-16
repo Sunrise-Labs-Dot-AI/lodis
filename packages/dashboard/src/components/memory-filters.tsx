@@ -121,14 +121,14 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
   }
 
   const selectClass =
-    "w-full px-2.5 py-1.5 text-xs bg-[var(--color-bg-soft)] border border-[var(--color-border)] rounded-md text-[var(--color-text-secondary)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-solid)]";
+    "w-full px-2.5 py-1.5 text-xs bg-[var(--bg-soft)] border border-[var(--border)] rounded-md text-[var(--text-muted)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-solid)]";
 
   const toggleClass = (active: boolean) =>
     clsx(
       "px-2.5 py-1 rounded-md transition-colors cursor-pointer text-xs border",
       active
-        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)] border-[var(--color-accent-solid)] font-medium"
-        : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+        ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] border-[var(--accent-solid)] font-medium"
+        : "text-[var(--text-dim)] border-[var(--border)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
     );
 
   return (
@@ -141,22 +141,22 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
         className={clsx(
           "inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-colors cursor-pointer max-w-full",
           open || hasActiveFilters
-            ? "border-[var(--color-accent-solid)] text-[var(--color-text)]"
-            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+            ? "border-[var(--accent-solid)] text-[var(--text)]"
+            : "border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text)]",
         )}
       >
         <SlidersHorizontal size={12} />
         <span className="font-medium">Filters</span>
         {hasActiveFilters ? (
           <span className="flex items-center gap-1 min-w-0 overflow-hidden">
-            <span className="text-[var(--color-text-muted)]">·</span>
-            <span className="truncate text-[var(--color-accent-text)]">
+            <span className="text-[var(--text-dim)]">·</span>
+            <span className="truncate text-[var(--accent-strong)]">
               {summaryChips.slice(0, 3).join(" · ")}
               {summaryChips.length > 3 ? ` +${summaryChips.length - 3}` : ""}
             </span>
           </span>
         ) : (
-          <span className="text-[var(--color-text-muted)]">·</span>
+          <span className="text-[var(--text-dim)]">·</span>
         )}
         <ChevronDown
           size={12}
@@ -170,13 +170,13 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
       {open && (
         <div
           id="memory-filters-panel"
-          className="relative mt-2 p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)]"
+          className="relative mt-2 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface)]"
         >
           {hasActiveFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="absolute top-3 right-3 px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] rounded-md transition-colors cursor-pointer"
+              className="absolute top-3 right-3 px-2 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-bg)] rounded-md transition-colors cursor-pointer"
             >
               Clear filters
             </button>
@@ -185,7 +185,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
           <div className="grid gap-4 sm:grid-cols-2">
             {/* Sort */}
             <div>
-              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--text-dim)]">
                 Sort
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -209,7 +209,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
 
             {/* Confidence range */}
             <div>
-              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--text-dim)]">
                 Confidence range
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -231,7 +231,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
               <div>
                 <label
                   htmlFor="filter-source"
-                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--text-dim)]"
                 >
                   Source
                 </label>
@@ -256,7 +256,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
               <div>
                 <label
                   htmlFor="filter-entity"
-                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+                  className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--text-dim)]"
                 >
                   Entity type
                 </label>
@@ -280,7 +280,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
             <div>
               <label
                 htmlFor="filter-permanence"
-                className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]"
+                className="mb-1.5 block text-[11px] uppercase tracking-wide text-[var(--text-dim)]"
               >
                 Tier
               </label>
@@ -300,7 +300,7 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
 
             {/* Quick filters */}
             <div>
-              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--text-dim)]">
                 Quick filters
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -310,8 +310,8 @@ export function MemoryFilters({ sourceTypes, entityTypes }: MemoryFiltersProps) 
                   className={clsx(
                     "px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer",
                     activeUnused
-                      ? "bg-[var(--color-warning-bg)] text-[var(--color-warning)] border-[var(--color-warning)] font-medium"
-                      : "text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-soft)]",
+                      ? "bg-[var(--warning-bg)] text-[var(--warning)] border-[var(--warning)] font-medium"
+                      : "text-[var(--text-dim)] border-[var(--border)] hover:text-[var(--text)] hover:bg-[var(--bg-soft)]",
                   )}
                 >
                   Unused

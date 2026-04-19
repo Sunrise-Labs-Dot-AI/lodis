@@ -109,7 +109,7 @@ Memories are classified into 13 entity types: `person`, `organization`, `place`,
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about, informed_by, uses).
 
-## MCP Tools (27)
+## MCP Tools (28)
 
 | Tool | Description |
 |------|-------------|
@@ -117,6 +117,7 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 | `memory_context` | Token-budget-aware context search (hierarchical or narrative output) |
 | `memory_briefing` | Pre-computed entity profile summaries with 24h cache |
 | `memory_write` | Create memory with dedup detection, permanence tier, and optional TTL |
+| `memory_bulk_upload` | Batch-insert up to 5,000 memories with dedup bypassed by default, chunked transactions, and per-entry results (for imports from canonical external sources) |
 | `memory_update` | Modify content, detail, or metadata |
 | `memory_confirm` | Mark verified (confidence → 0.99) |
 | `memory_correct` | LLM-powered semantic diff correction |

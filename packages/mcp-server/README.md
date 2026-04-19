@@ -40,7 +40,7 @@ The assistant will scan your connected tools (calendar, email, GitHub), ask a fe
 
 ## What You Get
 
-Lodis provides 27 MCP tools:
+Lodis provides 28 MCP tools:
 
 | Tool | Description |
 |------|-------------|
@@ -48,6 +48,7 @@ Lodis provides 27 MCP tools:
 | `memory_context` | Token-budget-aware context retrieval |
 | `memory_briefing` | LLM-generated entity profile summaries |
 | `memory_write` | Create a new memory with dedup detection and permanence tiers |
+| `memory_bulk_upload` | Upload many memories at once (bypasses dedup) for imports from canonical external sources |
 | `memory_update` | Modify a memory's content, detail, or metadata |
 | `memory_remove` | Soft-delete a memory |
 | `memory_confirm` | Confirm a memory is correct (boosts confidence to 0.99) |

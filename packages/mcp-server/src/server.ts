@@ -41,8 +41,9 @@ import {
   saveProfile,
   listProfiles,
   isProfileStale,
+  bulkInsertMemories,
 } from "@lodis/core";
-import type { SourceType, Relationship, EntityType, Permanence, Client } from "@lodis/core";
+import type { SourceType, Relationship, EntityType, Permanence, Client, BulkEntry } from "@lodis/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -695,6 +696,90 @@ Organize memories by life domain: general, work, health, finance, relationships,
         result._pii_detected = [...new Set(piiMatches.map((m) => m.type))];
       }
       return textResult(result);
+    },
+  );
+
+  server.tool(
+    "memory_bulk_upload",
+    "Upload many memories at once, bypassing dedup by default. Designed for imports from canonical external sources (Google Contacts, ChatGPT export, a contacts CSV) where the caller has already deduped against its own source. Each entry's result is returned individually so failed or skipped indices can be retried. Lodis does NOT protect against double-imports when skipDedup is true — idempotency is the caller's responsibility. For conversational writes where dedup and confidence tuning matter, use memory_write instead.",
+    {
+      entries: z.array(z.object({
+        content: z.string().describe("The memory content"),
+        detail: z.string().optional().describe("Extended context"),
+        domain: z.string().optional().describe("Life domain (default: general)"),
+        sourceType: z.enum(["stated", "inferred", "observed", "cross-agent"]).optional().describe("How this memory was acquired (default: observed)"),
+        sourceDescription: z.string().optional().describe("Description of source"),
+        entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional(),
+        entityName: z.string().optional().describe("Canonical entity name"),
+        structuredData: z.record(z.unknown()).optional().describe("Type-specific structured fields"),
+        permanence: z.enum(["canonical", "active", "ephemeral"]).optional(),
+        ttl: z.string().optional().describe("Time-to-live for ephemeral memories (e.g. '24h', '7d')"),
+      })).min(1).max(5000).describe("Memories to insert (1-5000 per call)"),
+      sourceAgentId: z.string().describe("Your agent ID (applied to all entries)"),
+      sourceAgentName: z.string().describe("Your agent name (applied to all entries)"),
+      skipDedup: z.boolean().optional().describe("Skip per-entry similarity check (default true — the whole point of bulk)"),
+      batchSize: z.number().int().min(1).max(500).optional().describe("Entries per DB transaction chunk (default 100)"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+
+      // Permission pre-flight: check each unique domain once.
+      const uniqueDomains = new Set<string>();
+      for (const e of params.entries) uniqueDomains.add(e.domain ?? "general");
+      const domainAllowed = new Map<string, boolean>();
+      for (const d of uniqueDomains) {
+        domainAllowed.set(d, await checkPermission(params.sourceAgentId, d, "write", userId));
+      }
+
+      const permFailures: Array<{ index: number; status: "failed"; error: string }> = [];
+      const allowedEntries: BulkEntry[] = [];
+      const allowedIndices: number[] = [];
+      for (let i = 0; i < params.entries.length; i++) {
+        const e = params.entries[i];
+        const d = e.domain ?? "general";
+        if (!domainAllowed.get(d)) {
+          permFailures.push({
+            index: i,
+            status: "failed",
+            error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${d}"`,
+          });
+          continue;
+        }
+        allowedEntries.push(e as BulkEntry);
+        allowedIndices.push(i);
+      }
+
+      const coreResult = await bulkInsertMemories(client, allowedEntries, {
+        sourceAgentId: params.sourceAgentId,
+        sourceAgentName: params.sourceAgentName,
+        userId,
+        skipDedup: params.skipDedup ?? true,
+        batchSize: params.batchSize,
+        vecAvailable,
+        onProgress: (d, t) => {
+          process.stderr.write(`[lodis] bulk_upload: ${d}/${t}\n`);
+        },
+      });
+
+      // Re-map core indices (0..allowedEntries.length) back to caller indices.
+      const remapped = coreResult.results.map((r) => ({
+        ...r,
+        index: allowedIndices[r.index],
+        ...(r.id ? { url: memoryUrl(r.id) } : {}),
+      }));
+
+      const merged = [...permFailures, ...remapped].sort((a, b) => a.index - b.index);
+      const written = merged.filter((r) => r.status === "written").length;
+      const failed = merged.filter((r) => r.status === "failed").length;
+      const skipped = merged.filter((r) => r.status === "skipped").length;
+
+      return textResult({
+        written,
+        failed,
+        skipped,
+        results: merged,
+        durationMs: coreResult.durationMs,
+      });
     },
   );
 

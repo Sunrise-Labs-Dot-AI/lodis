@@ -18,6 +18,8 @@ export { loadCredentials, saveCredentials, initCredentials, loadConfig, saveConf
 export type { Credentials, LodisConfig } from "./credentials.js";
 export { migrateToCloud, migrateToLocal, exportMemories, importFromExport } from "./migrate.js";
 export type { LodisExportData } from "./migrate.js";
+export { bulkInsertMemories } from "./bulk.js";
+export type { BulkEntry, BulkInsertOptions, BulkInsertResult, BulkResultEntry, BulkStatus } from "./bulk.js";
 export { getOrGenerateProfile, saveProfile, getProfile, isProfileStale, listProfiles } from "./entity-profiles.js";
 export type { EntityProfile } from "./entity-profiles.js";
 export { generateToken, hashToken } from "./tokens.js";

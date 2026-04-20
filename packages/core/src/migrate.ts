@@ -298,6 +298,12 @@ export async function importFromExport(
  * Encrypts content, detail, and structured_data fields.
  * Embeddings are copied as-is (not sensitive).
  * Idempotent via INSERT OR REPLACE.
+ *
+ * NOTE: `context_retrievals` is intentionally NOT copied here. The per-memory
+ * ranking signal (`referenced_count` / `noise_count` / `last_referenced_at`)
+ * survives because it lives on the `memories` rows themselves. The per-call
+ * audit trail is considered ephemeral. Closing this gap is tracked in
+ * https://github.com/Sunrise-Labs-Dot-AI/lodis/issues/69.
  */
 export async function migrateToCloud(
   localClient: Client,

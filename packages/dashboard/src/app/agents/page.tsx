@@ -1,141 +1,83 @@
-import { getAgentPermissions, getAgents, getDomains } from "@/lib/db";
+import {
+  getAgentActivity,
+  getAgentPermissions,
+  getSensitiveDomains,
+  getDomains,
+  type PermissionRow,
+} from "@/lib/db";
 import { getUserId } from "@/lib/auth";
-import { Card } from "@/components/ui/card";
-import { PermissionToggle } from "@/components/permission-toggle";
-import { AddRuleForm } from "@/components/add-rule-form";
-import { RemoveRuleButton } from "@/components/remove-rule-button";
+import { AgentCard } from "@/components/agent-card";
+import { SensitiveDomainsPanel } from "@/components/sensitive-domains-panel";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Shield } from "lucide-react";
+import { deriveAgentMode } from "@/lib/agent-mode";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
   const userId = await getUserId();
-  const agents = await getAgents(userId);
-  const permissions = await getAgentPermissions(userId);
-  const domains = await getDomains(userId);
+  const [activity, permissions, sensitiveDomains, allDomains] = await Promise.all([
+    getAgentActivity(userId),
+    getAgentPermissions(userId),
+    getSensitiveDomains(userId),
+    getDomains(userId),
+  ]);
 
-  // Build permission map: agentId -> domain -> { canRead, canWrite }
-  const permMap = new Map<string, Map<string, { canRead: boolean; canWrite: boolean }>>();
+  const rulesByAgent = new Map<string, PermissionRow[]>();
   for (const p of permissions) {
-    if (!permMap.has(p.agent_id)) permMap.set(p.agent_id, new Map());
-    permMap.get(p.agent_id)!.set(p.domain, {
-      canRead: !!p.can_read,
-      canWrite: !!p.can_write,
-    });
+    if (!rulesByAgent.has(p.agent_id)) rulesByAgent.set(p.agent_id, []);
+    rulesByAgent.get(p.agent_id)!.push(p);
   }
 
-  // Collect all domains that have explicit rules (including * wildcard)
-  const ruleDomains = new Set<string>();
-  for (const p of permissions) {
-    ruleDomains.add(p.domain);
-  }
-  // Also include memory domains
-  for (const d of domains) {
-    ruleDomains.add(d.domain);
-  }
-  const allDomains = Array.from(ruleDomains).sort((a, b) => {
-    if (a === "*") return -1;
-    if (b === "*") return 1;
-    return a.localeCompare(b);
-  });
-
-  if (agents.length === 0) {
+  if (activity.length === 0) {
     return (
-      <div className="text-center py-16">
-        <p className="text-[var(--text-dim)] text-sm">
-          No agents have connected yet. Connect an AI tool with Lodis to see
-          agents here.
-        </p>
-      </div>
+      <EmptyState
+        icon={<Shield size={28} aria-hidden="true" />}
+        title="No agents yet"
+        description="Connect an AI tool to Lodis and its agent will appear here. Each agent's memory access can be isolated, blocked, or left open."
+      />
     );
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold">Agent Permissions</h1>
-      <p className="text-xs text-[var(--text-dim)]">
-        Click R/W badges to toggle. Agents without explicit rules have full access.
-      </p>
-
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border)]">
-                <th className="text-left p-3 font-medium text-[var(--text-muted)]">
-                  Agent
-                </th>
-                {allDomains.map((d) => (
-                  <th
-                    key={d}
-                    className="text-center p-3 font-medium text-[var(--text-muted)]"
-                  >
-                    {d === "*" ? "All (*)" : d}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((agent) => (
-                <tr
-                  key={agent.agent_id}
-                  className="border-b border-[var(--border-subtle)]"
-                >
-                  <td className="p-3">
-                    <div>
-                      <p className="font-medium">{agent.agent_name}</p>
-                      <p className="text-xs text-[var(--text-dim)] font-mono truncate max-w-48">
-                        {agent.agent_id}
-                      </p>
-                    </div>
-                  </td>
-                  {allDomains.map((d) => {
-                    const perm = permMap.get(agent.agent_id)?.get(d);
-                    return (
-                      <td key={d} className="text-center p-3">
-                        {perm ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <PermissionToggle
-                              agentId={agent.agent_id}
-                              domain={d}
-                              field="read"
-                              enabled={perm.canRead}
-                            />
-                            <PermissionToggle
-                              agentId={agent.agent_id}
-                              domain={d}
-                              field="write"
-                              enabled={perm.canWrite}
-                            />
-                            <RemoveRuleButton
-                              agentId={agent.agent_id}
-                              domain={d}
-                            />
-                          </div>
-                        ) : (
-                          <span className="text-[var(--text-dim)]">
-                            —
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="space-y-6">
+      <header className="flex items-baseline justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold">Agents</h1>
+          <p className="text-xs text-[var(--text-dim)] mt-1">
+            {activity.length} connected · click an agent to review what it can see and write.
+          </p>
         </div>
-      </Card>
+      </header>
 
-      <Card className="p-4">
-        <h2 className="text-sm font-medium mb-3">Add Permission Rule</h2>
-        <AddRuleForm
-          agents={agents.map((a) => ({
-            agent_id: a.agent_id,
-            agent_name: a.agent_name,
-          }))}
-          domains={domains.map((d) => d.domain)}
-        />
-      </Card>
+      <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
+        <ul
+          role="list"
+          className="grid gap-3 grid-cols-1 sm:grid-cols-2"
+        >
+          {activity.map(a => {
+            const rules = rulesByAgent.get(a.agentId) ?? [];
+            const mode = deriveAgentMode(rules);
+            return (
+              <li key={`${a.agentId}|${a.agentName}`}>
+                <AgentCard
+                  agentId={a.agentId}
+                  agentName={a.agentName}
+                  memoryCount={a.count}
+                  lastSeen={a.lastSeen}
+                  mode={mode}
+                />
+              </li>
+            );
+          })}
+        </ul>
+        <aside aria-label="Sensitive domains" className="lg:sticky lg:top-4 lg:self-start">
+          <SensitiveDomainsPanel
+            sensitiveDomains={sensitiveDomains}
+            allDomains={allDomains}
+          />
+        </aside>
+      </div>
     </div>
   );
 }

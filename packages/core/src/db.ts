@@ -71,6 +71,10 @@ const CREATE_TABLES_SQL = `
     can_read INTEGER NOT NULL DEFAULT 1,
     can_write INTEGER NOT NULL DEFAULT 1
   );
+  -- The (agent_id, domain, IFNULL(user_id, '')) unique index is added
+  -- by the agent_permissions_unique_index migration below — it cannot
+  -- live in this initial CREATE TABLE because user_id is itself added
+  -- by the add_user_id_columns migration which runs after this block.
 
   CREATE TABLE IF NOT EXISTS user_settings (
     user_id TEXT PRIMARY KEY,
@@ -97,6 +101,14 @@ const CREATE_TABLES_SQL = `
     revoked_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS sensitive_domains (
+    user_id TEXT,
+    domain TEXT NOT NULL,
+    marked_at TEXT
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_sensitive_domains_user_domain
+    ON sensitive_domains(IFNULL(user_id, ''), domain);
 
   CREATE TABLE IF NOT EXISTS lodis_meta (
     key TEXT PRIMARY KEY,
@@ -279,6 +291,23 @@ async function runMigrations(client: Client): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_context_retrievals_user ON context_retrievals(user_id);
       CREATE INDEX IF NOT EXISTS idx_context_retrievals_created ON context_retrievals(created_at);
       CREATE INDEX IF NOT EXISTS idx_context_retrievals_rated ON context_retrievals(rated_at) WHERE rated_at IS NULL;
+    `);
+  });
+
+  await runMigration(client, "agent_permissions_unique_index", async () => {
+    // Dedupe any existing duplicate (agent_id, domain, user_id) rows so the
+    // unique index can be created. Keeps the most permissive copy per group
+    // (max can_read, max can_write) — safer than picking arbitrarily, since
+    // a zero-permission row that shadows a real grant would be worse than
+    // the reverse. IFNULL(user_id, '') matches the index expression below.
+    await client.executeMultiple(`
+      DELETE FROM agent_permissions
+      WHERE rowid NOT IN (
+        SELECT MIN(rowid) FROM agent_permissions
+        GROUP BY agent_id, domain, IFNULL(user_id, '')
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_permissions_unique
+        ON agent_permissions(agent_id, domain, IFNULL(user_id, ''));
     `);
   });
 

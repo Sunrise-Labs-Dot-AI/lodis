@@ -690,6 +690,81 @@ Organize memories by life domain: general, work, health, finance, relationships,
         })
         .run();
 
+      // --- Sensitive-domain default-deny for new agents ---
+      // If the user has marked this domain sensitive AND the writing agent
+      // has no existing rule for this exact domain, auto-insert a block
+      // row so the agent can't later read/write this domain without the
+      // user explicitly granting access. This is the one enforcement
+      // path the sensitive-domains feature adds (see Agent Permissions
+      // redesign plan §Sensitive domain markers — semantics 3).
+      //
+      // First-write semantics (documented):
+      //   The memory this call is creating persists even on the agent's
+      //   first sensitive-domain write — only the NEXT read or write
+      //   from the same agent to the same domain will hit the block.
+      //   The first write is observed, not denied; subsequent access is
+      //   denied until the user explicitly allows the domain.
+      //
+      // Atomicity: the SELECT-and-INSERT happen as a single SQL
+      // statement (`INSERT ... SELECT ... WHERE EXISTS`) so a
+      // concurrent `markDomainSensitive(..., false)` between a check
+      // and an insert cannot produce a phantom auto-block row for a
+      // domain that was unmarked mid-call.
+      if (params.sourceAgentId) {
+        // Lowercase to match the dashboard's `validateDomain`
+        // normalization (actions.ts). Without this, an agent writing
+        // to `"Healthcare"` would not match a `sensitive_domains` row
+        // that the dashboard stored as `"healthcare"`, so the
+        // auto-block would silently fail to fire for any domain the
+        // user marked sensitive via the UI using a casing variant.
+        const domainForWrite = (params.domain ?? "general").toLowerCase();
+        try {
+          // One atomic statement. (a) `WHERE EXISTS (...)` enforces
+          // the "domain is currently sensitive for this user" check
+          // in the same statement as the insert, so a concurrent
+          // `markDomainSensitive(..., false)` cannot produce a
+          // phantom auto-block. (b) `ON CONFLICT DO NOTHING` against
+          // `idx_agent_permissions_unique` preserves any pre-existing
+          // allow rule for this agent+domain — the audit event below
+          // only fires when a new row actually lands (see
+          // `insertRes.rowsAffected > 0`).
+          const insertRes = await client.execute({
+            sql: `INSERT INTO agent_permissions (agent_id, domain, can_read, can_write, user_id)
+                  SELECT ?, ?, 0, 0, ?
+                  WHERE EXISTS (
+                    SELECT 1 FROM sensitive_domains
+                    WHERE domain = ?${userId ? " AND user_id = ?" : ""}
+                  )
+                  ON CONFLICT DO NOTHING`,
+            args: userId
+              ? [params.sourceAgentId, domainForWrite, userId, domainForWrite, userId]
+              : [params.sourceAgentId, domainForWrite, null, domainForWrite],
+          });
+          if (insertRes.rowsAffected > 0) {
+            await db.insert(memoryEvents)
+              .values({
+                id: generateId(),
+                memoryId: id,
+                eventType: "sensitive_auto_block",
+                agentId: params.sourceAgentId,
+                agentName: params.sourceAgentName,
+                newValue: JSON.stringify({ domain: domainForWrite, reason: "first write to sensitive domain" }),
+                timestamp,
+              })
+              .run();
+          }
+        } catch (err) {
+          // Narrowed: only sensitive_domains table-missing on a very
+          // old DB is tolerated. Any other error is logged so the
+          // silent-no-op regression mode can't hide.
+          const message = err instanceof Error ? err.message : String(err);
+          const isTableMissing = /no such table:?\s*sensitive_domains/i.test(message);
+          if (!isTableMissing) {
+            process.stderr.write(`[lodis] sensitive-domain auto-block failed: ${message}\n`);
+          }
+        }
+      }
+
       await bumpLastModified(client);
 
       // Check if onboarding hint should be added for near-empty databases

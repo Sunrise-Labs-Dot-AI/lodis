@@ -116,7 +116,18 @@ async function getClient(): Promise<Client> {
   return _client;
 }
 
-async function ensureSchema(client: Client): Promise<void> {
+/**
+ * Idempotent — safe to await from any code path. Used by `getClient`
+ * here on every dashboard read; also exported so server actions
+ * (`@/app/agents/actions.ts`) that take a separate libsql connection
+ * can guarantee migrations have run before any ON CONFLICT statement
+ * that depends on the unique indexes created here. Without this guard,
+ * an action invoked before any dashboard page render hits a brand-new
+ * sqlite handle with no `idx_agent_permissions_unique` index, and
+ * bare `ON CONFLICT DO UPDATE` errors with "ON CONFLICT clause does
+ * not match any PRIMARY KEY or UNIQUE constraint".
+ */
+export async function ensureSchema(client: Client): Promise<void> {
   try {
     // Ensure core tables exist
     await client.executeMultiple(`
@@ -156,6 +167,11 @@ async function ensureSchema(client: Client): Promise<void> {
         expires_at TEXT, last_used_at TEXT, last_ip TEXT, revoked_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+      CREATE TABLE IF NOT EXISTS sensitive_domains (
+        user_id TEXT, domain TEXT NOT NULL, marked_at TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sensitive_domains_user_domain
+        ON sensitive_domains(IFNULL(user_id, ''), domain);
       CREATE TABLE IF NOT EXISTS lodis_meta (
         key TEXT PRIMARY KEY, value TEXT NOT NULL
       );
@@ -168,6 +184,13 @@ async function ensureSchema(client: Client): Promise<void> {
       ["add_entity_columns", "ALTER TABLE memories ADD COLUMN entity_type TEXT; ALTER TABLE memories ADD COLUMN entity_name TEXT; ALTER TABLE memories ADD COLUMN structured_data TEXT"],
       ["add_updated_at", "ALTER TABLE memories ADD COLUMN updated_at TEXT; ALTER TABLE memory_connections ADD COLUMN updated_at TEXT"],
       ["add_user_id_columns", "ALTER TABLE memories ADD COLUMN user_id TEXT; ALTER TABLE memory_connections ADD COLUMN user_id TEXT; ALTER TABLE memory_events ADD COLUMN user_id TEXT; ALTER TABLE agent_permissions ADD COLUMN user_id TEXT"],
+      // Deduplicate before adding unique index, then add it. IFNULL(user_id, '')
+      // collapses NULL tenancy so the unique key works in local mode too.
+      // The MIN(rowid) keeps one row per group arbitrarily — acceptable
+      // because prior races only produced exact duplicates.
+      ["agent_permissions_unique_index",
+        "DELETE FROM agent_permissions WHERE rowid NOT IN (SELECT MIN(rowid) FROM agent_permissions GROUP BY agent_id, domain, IFNULL(user_id, ''));"
+        + " CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_permissions_unique ON agent_permissions(agent_id, domain, IFNULL(user_id, ''))"],
     ];
 
     for (const [name, sql] of migrations) {
@@ -443,6 +466,179 @@ export async function getAgents(userId?: string | null): Promise<{ agent_id: str
     args: [...uf.args],
   });
   return result.rows.map(r => plainObj<{ agent_id: string; agent_name: string }>(r));
+}
+
+export async function getSensitiveDomains(userId?: string | null): Promise<string[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  try {
+    const result = await client.execute({
+      sql: `SELECT domain FROM sensitive_domains WHERE 1=1${uf.clause} ORDER BY domain`,
+      args: [...uf.args],
+    });
+    return result.rows.map(r => r.domain as string);
+  } catch {
+    // Table may not exist yet on a dashboard that has never hit ensureSchema.
+    return [];
+  }
+}
+
+export async function isDomainSensitive(
+  userId: string | null | undefined,
+  domain: string,
+): Promise<boolean> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  try {
+    const result = await client.execute({
+      sql: `SELECT 1 FROM sensitive_domains WHERE domain = ?${uf.clause} LIMIT 1`,
+      args: [domain, ...uf.args],
+    });
+    return result.rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function getAgentsWithDomainRule(
+  userId: string | null | undefined,
+  domain: string,
+): Promise<{ agentId: string; agentName: string; canRead: number; canWrite: number; isWildcard: boolean }[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  const nameSub = `COALESCE((SELECT source_agent_name FROM memories
+                             WHERE source_agent_id = p.agent_id${uf.clause ? " AND user_id = ?" : ""}
+                             ORDER BY COALESCE(confirmed_at, learned_at) DESC LIMIT 1), p.agent_id)`;
+  const direct = await client.execute({
+    sql: `SELECT p.agent_id as agent_id, p.can_read, p.can_write,
+                 ${nameSub} as agent_name
+          FROM agent_permissions p
+          WHERE p.domain = ?${uf.clause ? " AND p.user_id = ?" : ""}`,
+    args: [...uf.args, domain, ...uf.args],
+  });
+  const wildcard = await client.execute({
+    sql: `SELECT p.agent_id as agent_id, p.can_read, p.can_write,
+                 ${nameSub} as agent_name
+          FROM agent_permissions p
+          WHERE p.domain = '*'${uf.clause ? " AND p.user_id = ?" : ""}`,
+    args: [...uf.args, ...uf.args],
+  });
+
+  const directAgents = new Set(direct.rows.map(r => r.agent_id as string));
+  const rows: { agentId: string; agentName: string; canRead: number; canWrite: number; isWildcard: boolean }[] = [];
+  for (const r of direct.rows) {
+    rows.push({
+      agentId: r.agent_id as string,
+      agentName: r.agent_name as string,
+      canRead: r.can_read as number,
+      canWrite: r.can_write as number,
+      isWildcard: false,
+    });
+  }
+  for (const r of wildcard.rows) {
+    const aid = r.agent_id as string;
+    if (!directAgents.has(aid)) {
+      rows.push({
+        agentId: aid,
+        agentName: r.agent_name as string,
+        canRead: r.can_read as number,
+        canWrite: r.can_write as number,
+        isWildcard: true,
+      });
+    }
+  }
+  return rows;
+}
+
+export async function getAgentActivity(
+  userId?: string | null,
+): Promise<{ agentId: string; agentName: string; count: number; lastSeen: string | null }[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  const fromMemories = await client.execute({
+    sql: `SELECT source_agent_id as agent_id, source_agent_name as agent_name,
+                 COUNT(*) as count,
+                 MAX(COALESCE(last_used_at, confirmed_at, learned_at)) as last_seen
+          FROM memories
+          WHERE deleted_at IS NULL${uf.clause}
+          GROUP BY source_agent_id, source_agent_name
+          ORDER BY count DESC`,
+    args: [...uf.args],
+  });
+  const rows: { agentId: string; agentName: string; count: number; lastSeen: string | null }[] =
+    fromMemories.rows.map(r => ({
+      agentId: r.agent_id as string,
+      agentName: r.agent_name as string,
+      count: r.count as number,
+      lastSeen: (r.last_seen as string | null) ?? null,
+    }));
+
+  // Union with agents that have permission rules but no memories yet
+  // (e.g. user applied a preset before any write). Without this, the
+  // /agents grid hides rule-only agents and the only way to find them
+  // is via direct URL or the per-domain page.
+  const fromPerms = await client.execute({
+    sql: `SELECT DISTINCT agent_id FROM agent_permissions WHERE 1=1${uf.clause}`,
+    args: [...uf.args],
+  });
+  const seen = new Set(rows.map(r => r.agentId));
+  for (const r of fromPerms.rows) {
+    const aid = r.agent_id as string;
+    if (!seen.has(aid)) {
+      rows.push({ agentId: aid, agentName: aid, count: 0, lastSeen: null });
+    }
+  }
+  return rows;
+}
+
+export async function getAgentDomainDistribution(
+  userId: string | null | undefined,
+  agentId: string,
+  limit = 100,
+): Promise<{ domain: string; count: number }[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  const result = await client.execute({
+    sql: `SELECT domain, COUNT(*) as count
+          FROM memories
+          WHERE deleted_at IS NULL AND source_agent_id = ?${uf.clause}
+          GROUP BY domain
+          ORDER BY count DESC
+          LIMIT ?`,
+    args: [agentId, ...uf.args, limit],
+  });
+  return result.rows.map(r => ({ domain: r.domain as string, count: r.count as number }));
+}
+
+export async function getAgentRecentMemories(
+  userId: string | null | undefined,
+  agentId: string,
+  limit = 10,
+): Promise<{ id: string; title: string; domain: string; timestamp: string | null; hasPii: boolean }[]> {
+  const client = await getClient();
+  const uf = userFilter(userId);
+  // Deliberately omit content/detail per plan security invariant #5.
+  // Title is derived from content's first line via SUBSTR so we can surface
+  // *something* recognizable without leaking the full body into the list view.
+  const result = await client.execute({
+    sql: `SELECT id,
+                 SUBSTR(content, 1, 80) as title,
+                 domain,
+                 COALESCE(last_used_at, confirmed_at, learned_at) as ts,
+                 has_pii_flag as pii
+          FROM memories
+          WHERE deleted_at IS NULL AND source_agent_id = ?${uf.clause}
+          ORDER BY ts DESC
+          LIMIT ?`,
+    args: [agentId, ...uf.args, limit],
+  });
+  return result.rows.map(r => ({
+    id: r.id as string,
+    title: (r.title as string) ?? "",
+    domain: r.domain as string,
+    timestamp: (r.ts as string | null) ?? null,
+    hasPii: ((r.pii as number | null) ?? 0) > 0,
+  }));
 }
 
 export async function getDbStats(userId?: string | null): Promise<{

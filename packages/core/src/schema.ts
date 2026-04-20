@@ -1,4 +1,4 @@
-import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 export const memories = sqliteTable("memories", {
   id: text("id").primaryKey(),
@@ -108,6 +108,30 @@ export const apiTokens = sqliteTable("api_tokens", {
   revokedAt: text("revoked_at"),                      // soft revoke
   createdAt: text("created_at").notNull(),
 });
+
+// Note: the operational uniqueness on (user_id, domain) is enforced
+// by a raw SQL `CREATE UNIQUE INDEX ... ON sensitive_domains(IFNULL(user_id, ''), domain)`
+// in `packages/core/src/db.ts` and `packages/dashboard/src/lib/db.ts`.
+// The Drizzle `primaryKey` declaration here is for type-introspection
+// only — SQLite's default unique semantics treat each NULL `user_id`
+// as distinct, so a plain `(user_id, domain)` PK would NOT dedupe
+// local-mode rows where `user_id IS NULL`. The IFNULL trick collapses
+// NULL tenancy into a sentinel string so upserts (`ON CONFLICT DO ...`)
+// in actions.ts:markDomainSensitive remain idempotent. If this schema
+// is ever migrated via `drizzle-kit push`, the resulting CREATE TABLE
+// will lack the IFNULL trick — re-add the raw index in a follow-up
+// migration.
+export const sensitiveDomains = sqliteTable(
+  "sensitive_domains",
+  {
+    userId: text("user_id"),
+    domain: text("domain").notNull(),
+    markedAt: text("marked_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.domain] }),
+  }),
+);
 
 export const cleanupDismissals = sqliteTable("cleanup_dismissals", {
   id: text("id").primaryKey(),

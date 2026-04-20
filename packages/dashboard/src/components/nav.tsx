@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { Archive, Brain, FileText, Shield, Settings, Sparkles } from "lucide-react";
+import { Archive, BookOpen, Brain, FileText, Shield, Settings, Sparkles } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 
 const links = [
@@ -15,6 +15,7 @@ const links = [
   { href: "/cleanup", label: "Cleanup", icon: Sparkles },
   { href: "/agents", label: "Agents", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/how-it-works", label: "How", icon: BookOpen },
 ];
 
 const isHosted = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;

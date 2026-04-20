@@ -25,3 +25,5 @@ export type { EntityProfile } from "./entity-profiles.js";
 export { generateToken, hashToken } from "./tokens.js";
 export { userSettings, apiTokens } from "./schema.js";
 export type { Client } from "@libsql/client";
+export { CHAPTERS, listChapters, getChapter, isKnownChapterId, chapterToMarkdown, tocToMarkdown } from "./tutorial/index.js";
+export type { Chapter, ChapterId, Section, ToolReference, TryItNext, ChapterFormat } from "./tutorial/index.js";

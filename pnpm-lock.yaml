@@ -107,6 +107,9 @@ importers:
 
   packages/landing:
     dependencies:
+      '@lodis/core':
+        specifier: workspace:*
+        version: link:../core
       '@lodis/shared-ui':
         specifier: workspace:*
         version: link:../shared-ui

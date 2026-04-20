@@ -42,8 +42,13 @@ import {
   listProfiles,
   isProfileStale,
   bulkInsertMemories,
+  listChapters,
+  getChapter,
+  isKnownChapterId,
+  chapterToMarkdown,
+  tocToMarkdown,
 } from "@lodis/core";
-import type { SourceType, Relationship, EntityType, Permanence, Client, BulkEntry } from "@lodis/core";
+import type { SourceType, Relationship, EntityType, Permanence, Client, BulkEntry, ChapterFormat } from "@lodis/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -56,6 +61,12 @@ function now(): string {
 function textResult(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+  };
+}
+
+function markdownResult(text: string) {
+  return {
+    content: [{ type: "text" as const, text }],
   };
 }
 
@@ -3899,6 +3910,45 @@ Organize memories by life domain: general, work, health, finance, relationships,
         return textResult({
           error: `Migration failed: ${err instanceof Error ? err.message : "Unknown error"}`,
         });
+      }
+    },
+  );
+
+  // memory_tutorial — static bundled content, ACL-check exempt.
+  // Retains getUserId(extra) as pattern preservation so a future tool that
+  // does touch user data doesn't silently drop user isolation on copy-paste.
+  server.tool(
+    "memory_tutorial",
+    "Interactive tutorial for learning how Lodis works. Call with no args for a table of contents, or with a chapter id (e.g. 'overview', 'write', 'search', 'trust', 'permissions') to get that chapter's content. The 'Examples' entries are ILLUSTRATIVE — narrate them to the user and offer to run them, do NOT auto-execute.",
+    {
+      chapter: z.string().optional().describe("Chapter id (e.g. 'overview', 'search'). Omit for table of contents."),
+      format: z.enum(["narrative", "reference"]).optional().describe("Output style; defaults to narrative."),
+    },
+    async (params, extra) => {
+      // Pattern preservation — discarded for static content but kept so copy-paste
+      // of this handler doesn't drop user isolation in a tool that does read user data.
+      const _userId = getUserId(extra);
+      void _userId;
+      try {
+        if (!params.chapter) {
+          return markdownResult(tocToMarkdown(listChapters()));
+        }
+        if (!isKnownChapterId(params.chapter)) {
+          // Never echo the raw input — prevents reflected prompt injection.
+          return markdownResult(
+            "Unknown chapter. Call memory_tutorial with no arguments for the table of contents.",
+          );
+        }
+        const chapter = getChapter(params.chapter);
+        const format: ChapterFormat = params.format ?? "narrative";
+        return markdownResult(chapterToMarkdown(chapter, format));
+      } catch (err) {
+        // Rollback: fall back to TOC + apology rather than throwing live mid-demo.
+        console.error("[memory_tutorial] chapter render failed:", err);
+        return markdownResult(
+          "The tutorial hit a snag rendering that chapter. Here's the table of contents instead:\n\n" +
+            tocToMarkdown(listChapters()),
+        );
       }
     },
   );

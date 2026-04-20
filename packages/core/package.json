@@ -32,6 +32,10 @@
     "./types": {
       "import": "./dist/types.js",
       "types": "./dist/types.d.ts"
+    },
+    "./tutorial": {
+      "import": "./dist/tutorial/index.js",
+      "types": "./dist/tutorial/index.d.ts"
     }
   },
   "scripts": {

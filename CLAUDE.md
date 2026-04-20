@@ -109,7 +109,7 @@ Memories are classified into 13 entity types: `person`, `organization`, `place`,
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about, informed_by, uses).
 
-## MCP Tools (28)
+## MCP Tools (29)
 
 | Tool | Description |
 |------|-------------|
@@ -141,6 +141,7 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 | `memory_index` | Index external documents (Drive, Notion, filesystem) for unified search |
 | `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works (no-ACL, static — bundled content, skips `checkPermission` but retains `getUserId` for pattern preservation) |
 
 ## Memory Permanence
 

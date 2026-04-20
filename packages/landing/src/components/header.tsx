@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 const navLinks = [
+  { href: "/how-it-works", label: "How it works", external: false },
   { href: "https://github.com/Sunrise-Labs-Dot-AI/lodis", label: "GitHub", external: true },
   { href: "/setup", label: "Setup Guide", external: false },
   { href: "https://app.lodis.ai/sign-in", label: "Sign In", external: false },

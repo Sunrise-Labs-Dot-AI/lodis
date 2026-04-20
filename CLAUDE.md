@@ -15,7 +15,7 @@ An open-source MCP server + localhost web dashboard that gives AI agents persist
 
 ## Current State (April 2026)
 
-V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid search, 13 entity types, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
+V1–V3 feature complete. 29 MCP tools, 141+ tests (128 core + 13 server), hybrid search, 13 entity types, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search with closed-loop feedback (`memory_rate_context`), entity profiles, and a full Next.js dashboard.
 
 **Shipped:**
 - Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
@@ -45,7 +45,7 @@ V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid 
 | LLM | Abstracted `LLMProvider` interface — Anthropic (lazy import), OpenAI, Ollama (raw fetch). Per-task model routing: extraction (cheap) vs analysis (capable) |
 | Dashboard | Next.js 15 (App Router), React 19, Tailwind v4, custom UI components |
 | Landing | Next.js 15, Tailwind v4, Pensieve design system |
-| Testing | Vitest (105 tests across 10 files) |
+| Testing | Vitest (128 core + 13 server tests) |
 | Build | pnpm workspaces + Turborepo |
 | Distribution | npm (`lodis` package), npx one-liner install |
 
@@ -85,15 +85,18 @@ MCP tool responses include a `url` field on every memory record so clients (Clau
 
 ## Database Schema
 
-Nine tables + two virtual tables:
+Eleven tables + two virtual tables:
 
-- **memories** — core storage (id, content, detail, summary, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at, permanence, expires_at, archived_at, user_id)
+- **memories** — core storage (id, content, detail, summary, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, referenced_count, noise_count, learned_at, confirmed_at, last_used_at, last_referenced_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at, permanence, expires_at, archived_at, user_id)
 - **memory_connections** — relationship graph (source_memory_id, target_memory_id, relationship, updated_at, user_id)
 - **memory_events** — audit trail (id, memory_id, event_type, agent_id, agent_name, old_value, new_value, timestamp, user_id)
 - **agent_permissions** — per-agent read/write by domain (agent_id, domain, can_read, can_write, user_id)
+- **sensitive_domains** — user-flagged domains that auto-block new agent access (user_id, domain, marked_at)
+- **context_retrievals** — `memory_context` telemetry (id, user_id, agent_id/name, query, query_hash, query_redacted, token_budget, format, filters_json, tokens_used, returned_memory_ids_json, saturation_json, score_distribution_json, created_at, rated_at, referenced_memory_ids_json, noise_memory_ids_json, notes). Intentionally excluded from `memory_migrate` — see issue #69.
 - **memory_summaries** — cached entity profiles (id, entity_name, entity_type, summary, memory_ids, token_count, generated_at, user_id)
 - **user_settings** — BYOK provider config, tier, encrypted API keys (user_id, tier, byok_provider, byok_api_key_enc, byok_base_url, byok_extraction_model, byok_analysis_model, created_at, updated_at)
 - **api_tokens** — API token management (id, user_id, name, token_hash, scopes, expires_at, revoked_at, created_at)
+- **cleanup_dismissals** — legacy table, unreferenced as of April 2026 (PR #72 retired `/cleanup`). Left in place to avoid a hosted-Turso migration. Do not add new writers.
 - **lodis_meta** — key-value metadata (key, value) — tracks last_modified for cache invalidation
 - **memory_fts** — FTS5 virtual table over content, detail, entity_name, source_agent_name
 - **memory_embeddings** — sqlite-vec virtual table (float[384])
@@ -109,12 +112,13 @@ Memories are classified into 13 entity types: `person`, `organization`, `place`,
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about, informed_by, uses).
 
-## MCP Tools (29)
+## MCP Tools (30)
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with domain/confidence/entity filters |
-| `memory_context` | Token-budget-aware context search (hierarchical or narrative output) |
+| `memory_context` | Token-budget-aware context search with enriched meta (`saturation`, `scoreDistribution`, `coverage`, `suggestedFollowUps`, `rate_with_this_id`) |
+| `memory_rate_context` | Report `referenced` (cited) vs `noise` (filtered) IDs back from a prior `memory_context` call. Idempotent. Bumps `referenced_count`/`noise_count` and applies the +0.02 confidence nudge to cited memories. |
 | `memory_briefing` | Pre-computed entity profile summaries with 24h cache |
 | `memory_write` | Create memory with dedup detection, permanence tier, and optional TTL |
 | `memory_bulk_upload` | Batch-insert up to 5,000 memories with dedup bypassed by default, chunked transactions, and per-entry results (for imports from canonical external sources) |
@@ -204,13 +208,15 @@ Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mo
 |-------|---------|
 | `/` | Memory browser (search, filter by domain/entity/confidence, inline edit) |
 | `/memory/[id]` | Detail view (provenance, connections, events, edit) |
-| `/agents` | Agent permission management |
+| `/agents` | Agent permission management (agent-centric UI with Open/Isolated modes + presets) |
 | `/archive` | Archived memories browser with restore actions |
-| `/cleanup` | Health score, dedup, merge, split, contradiction, PII detection + inline actions |
+| `/retrievals` | `memory_context` telemetry: stats, budget histogram, recent retrievals with ref/noise chips |
+| `/how-it-works` | Interactive tutorial chapters (shared with landing page) |
 | `/entities/[name]` | Entity profile page (summary, related memories, connections) |
 | `/settings` | DB stats, export, LLM provider config, sync config (Pro) |
 | `/sign-in`, `/sign-up` | Clerk authentication (hosted mode only) |
 | `/api/export` | Memory export API |
+| `/api/mcp` | Serverless MCP endpoint (hosted mode) |
 
 ## Design System (Pensieve)
 

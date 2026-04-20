@@ -5,14 +5,14 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { Archive, BookOpen, Brain, FileText, Shield, Settings, Sparkles } from "lucide-react";
+import { Activity, Archive, BookOpen, Brain, FileText, Shield, Settings } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 
 const links = [
   { href: "/", label: "Memories", icon: Brain },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/archive", label: "Archive", icon: Archive },
-  { href: "/cleanup", label: "Cleanup", icon: Sparkles },
+  { href: "/retrievals", label: "Retrievals", icon: Activity },
   { href: "/agents", label: "Agents", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/how-it-works", label: "How", icon: BookOpen },

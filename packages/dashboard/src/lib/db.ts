@@ -1273,28 +1273,6 @@ export async function getIndexSourceSystems(userId?: string | null): Promise<str
   return [...systems].sort();
 }
 
-// --- Cleanup persistence ---
-
-let cleanupTableReady = false;
-
-async function ensureCleanupTable(client: Client): Promise<void> {
-  if (cleanupTableReady) return;
-  await client.execute({
-    sql: `CREATE TABLE IF NOT EXISTS cleanup_dismissals (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      suggestion_key TEXT NOT NULL,
-      suggestion_type TEXT NOT NULL,
-      action TEXT NOT NULL,
-      resolution_note TEXT,
-      created_at TEXT NOT NULL,
-      UNIQUE(user_id, suggestion_key)
-    )`,
-    args: [],
-  });
-  cleanupTableReady = true;
-}
-
 export async function getLastModified(userId?: string | null): Promise<string | null> {
   const client = await getClient();
   const key = userId ? `last_modified:${userId}` : "last_modified";
@@ -1309,72 +1287,6 @@ export async function getLastModified(userId?: string | null): Promise<string | 
     args: [],
   });
   return fallback.rows.length > 0 ? (fallback.rows[0].value as string) : null;
-}
-
-export async function getCachedScanResult(userId?: string | null): Promise<{
-  scannedAt: string;
-  lastModifiedAt: string;
-  result: import("./cleanup").ScanResult;
-} | null> {
-  const client = await getClient();
-  const key = userId ? `cleanup_cache:${userId}` : "cleanup_cache:_default";
-  const row = await client.execute({
-    sql: `SELECT value FROM lodis_meta WHERE key = ?`,
-    args: [key],
-  });
-  if (row.rows.length === 0) return null;
-  try {
-    return JSON.parse(row.rows[0].value as string);
-  } catch {
-    return null;
-  }
-}
-
-export async function setCachedScanResult(
-  result: import("./cleanup").ScanResult,
-  lastModifiedAt: string,
-  userId?: string | null,
-): Promise<void> {
-  const client = await getClient();
-  const key = userId ? `cleanup_cache:${userId}` : "cleanup_cache:_default";
-  const value = JSON.stringify({
-    scannedAt: new Date().toISOString(),
-    lastModifiedAt,
-    result,
-  });
-  await client.execute({
-    sql: `INSERT OR REPLACE INTO lodis_meta (key, value) VALUES (?, ?)`,
-    args: [key, value],
-  });
-}
-
-export async function dismissSuggestion(
-  suggestionKey: string,
-  suggestionType: string,
-  action: "dismissed" | "resolved",
-  resolutionNote?: string,
-  userId?: string | null,
-): Promise<void> {
-  const client = await getClient();
-  await ensureCleanupTable(client);
-  const id = generateId();
-  const userVal = userId ?? "_default";
-  await client.execute({
-    sql: `INSERT OR REPLACE INTO cleanup_dismissals (id, user_id, suggestion_key, suggestion_type, action, resolution_note, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    args: [id, userVal, suggestionKey, suggestionType, action, resolutionNote ?? null, new Date().toISOString()],
-  });
-}
-
-export async function getDismissedKeys(userId?: string | null): Promise<Set<string>> {
-  const client = await getClient();
-  await ensureCleanupTable(client);
-  const userVal = userId ?? "_default";
-  const result = await client.execute({
-    sql: `SELECT suggestion_key FROM cleanup_dismissals WHERE user_id = ?`,
-    args: [userVal],
-  });
-  return new Set(result.rows.map(r => r.suggestion_key as string));
 }
 
 // --- Retrievals (memory_context telemetry) ---
@@ -1446,78 +1358,4 @@ export async function getRetrievalBudgetHistogram(
     out.push({ bucket: label, count: row.total ?? 0, boundCount: row.bound ?? 0 });
   }
   return out;
-}
-
-export interface UtilityCleanupCandidate {
-  id: string;
-  content: string;
-  used_count: number;
-  referenced_count: number;
-  noise_count: number;
-  confidence: number;
-  permanence: string | null;
-  learned_at: string | null;
-}
-
-/**
- * Memories that keep getting retrieved but never cited.
- * used_count >= 5 AND referenced_count == 0 AND noise_count >= 2.
- */
-export async function getRetrievedButNeverUseful(
-  userId?: string | null,
-): Promise<UtilityCleanupCandidate[]> {
-  const client = await getClient();
-  const uf = userFilter(userId);
-  const r = await client.execute({
-    sql: `SELECT id, content, used_count, referenced_count, noise_count, confidence, permanence, learned_at
-          FROM memories
-          WHERE deleted_at IS NULL
-            AND used_count >= 5 AND referenced_count = 0 AND noise_count >= 2${uf.clause}
-          ORDER BY noise_count DESC, used_count DESC
-          LIMIT 50`,
-    args: uf.args,
-  });
-  return r.rows as unknown as UtilityCleanupCandidate[];
-}
-
-/**
- * Frequently cited memories that aren't pinned — candidates for canonicalizing.
- * referenced_count >= 3 AND permanence != 'canonical'.
- */
-export async function getProvenUsefulUnpinned(
-  userId?: string | null,
-): Promise<UtilityCleanupCandidate[]> {
-  const client = await getClient();
-  const uf = userFilter(userId);
-  const r = await client.execute({
-    sql: `SELECT id, content, used_count, referenced_count, noise_count, confidence, permanence, learned_at
-          FROM memories
-          WHERE deleted_at IS NULL
-            AND referenced_count >= 3
-            AND (permanence IS NULL OR permanence != 'canonical')${uf.clause}
-          ORDER BY referenced_count DESC
-          LIMIT 50`,
-    args: uf.args,
-  });
-  return r.rows as unknown as UtilityCleanupCandidate[];
-}
-
-/**
- * Inconsistent signal — cited at least once, flagged as noise at least once.
- */
-export async function getInconsistentSignal(
-  userId?: string | null,
-): Promise<UtilityCleanupCandidate[]> {
-  const client = await getClient();
-  const uf = userFilter(userId);
-  const r = await client.execute({
-    sql: `SELECT id, content, used_count, referenced_count, noise_count, confidence, permanence, learned_at
-          FROM memories
-          WHERE deleted_at IS NULL
-            AND referenced_count >= 1 AND noise_count >= 1${uf.clause}
-          ORDER BY (referenced_count + noise_count) DESC
-          LIMIT 50`,
-    args: uf.args,
-  });
-  return r.rows as unknown as UtilityCleanupCandidate[];
 }

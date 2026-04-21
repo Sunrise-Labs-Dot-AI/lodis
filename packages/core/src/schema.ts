@@ -163,4 +163,9 @@ export const contextRetrievals = sqliteTable("context_retrievals", {
   referencedMemoryIdsJson: text("referenced_memory_ids_json"),
   noiseMemoryIdsJson: text("noise_memory_ids_json"),
   notes: text("notes"),
+  // 1 when cross-encoder reranker produced the ordering, 0 when disabled /
+  // no candidates / threw. NULL on rows from before the reranker-diagnostic
+  // migration. Used by /retrievals dashboard to surface silent-fallback rates.
+  rerankerEngaged: integer("reranker_engaged"),
+  rerankerError: text("reranker_error"),
 });

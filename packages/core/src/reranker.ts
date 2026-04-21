@@ -75,14 +75,26 @@ export async function rerank(
     const chunk = candidates.slice(i, i + batchSize);
     const queries = new Array(chunk.length).fill(query);
     const docs = chunk.map((c) => c.text);
+    // Transformers.js v3 tokenizer accepts text_pair for sequence-classification
+    // cross-encoder input. Note: `return_tensors: "pt"` is PyTorch-only — some
+    // v3 builds reject unknown keys, so we omit it. The tokenizer returns
+    // Tensor-wrapped outputs (input_ids / attention_mask) by default.
     const inputs = tokenizer(queries, {
       text_pair: docs,
       padding: true,
       truncation: true,
-      return_tensors: "pt",
     });
     const outputs = await model(inputs);
     // BGE-reranker-base has num_labels=1. logits shape: [batch_size, 1].
+    // Defensive guard: if the model's output object doesn't contain `logits`
+    // (some HF-hub mirror models name it differently, and Transformers.js
+    // occasionally renames across versions), surface the actual keys so the
+    // diagnostic path in contextSearch can report them instead of throwing
+    // a generic "Cannot read property 'data' of undefined".
+    if (!outputs || !outputs.logits || !outputs.logits.data) {
+      const keys = outputs ? Object.keys(outputs).join(",") : "<null>";
+      throw new Error(`reranker model output missing .logits.data (got keys: ${keys})`);
+    }
     const logits = outputs.logits.data as Float32Array;
     for (let j = 0; j < chunk.length; j++) {
       rawScores[i + j] = logits[j];

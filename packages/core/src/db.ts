@@ -332,6 +332,18 @@ async function runMigrations(client: Client): Promise<void> {
     `);
     // setupFTS() will recreate with tokenize='porter unicode61'
   });
+
+  await runMigration(client, "add_reranker_diagnostic_columns", async () => {
+    // Telemetry for the cross-encoder reranker (Stage 2 of memory_context).
+    // `reranker_engaged`: 1 = reranker produced final ordering, 0 = disabled
+    // / no candidates / silent-fallback after throw, NULL = pre-migration row.
+    // `reranker_error`: captured message when Stage 2 threw and fell back to
+    // RRF ordering. Surfaces silent-fallback rates on /retrievals dashboard.
+    await client.executeMultiple(`
+      ALTER TABLE context_retrievals ADD COLUMN reranker_engaged INTEGER;
+      ALTER TABLE context_retrievals ADD COLUMN reranker_error TEXT;
+    `);
+  });
 }
 
 export async function createDatabase(config?: {

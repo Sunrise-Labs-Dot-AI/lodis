@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { computeScoreDistribution, sanitizeFollowUpTarget } from "../context-packing.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync, unlinkSync } from "fs";
+import { resolve } from "path";
+import { tmpdir } from "os";
+import { randomBytes } from "crypto";
+import type { Client } from "@libsql/client";
+import { computeScoreDistribution, sanitizeFollowUpTarget, contextSearch } from "../context-packing.js";
+import { createDatabase } from "../db.js";
 
 describe("computeScoreDistribution", () => {
   it("returns empty for no scores", () => {
@@ -74,5 +80,51 @@ describe("sanitizeFollowUpTarget", () => {
 
   it("collapses whitespace", () => {
     expect(sanitizeFollowUpTarget("foo   bar\t\tbaz")).toBe("foo bar baz");
+  });
+});
+
+describe("contextSearch reranker diagnostics", () => {
+  let dbPath: string;
+  let client: Client;
+  let originalDisabled: string | undefined;
+
+  beforeEach(async () => {
+    dbPath = resolve(tmpdir(), `lodis-ctx-${randomBytes(8).toString("hex")}.db`);
+    const result = await createDatabase({ url: "file:" + dbPath });
+    client = result.client;
+    originalDisabled = process.env.LODIS_RERANKER_DISABLED;
+  });
+
+  afterEach(() => {
+    if (originalDisabled === undefined) delete process.env.LODIS_RERANKER_DISABLED;
+    else process.env.LODIS_RERANKER_DISABLED = originalDisabled;
+    try {
+      client.close();
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+      if (existsSync(dbPath + "-wal")) unlinkSync(dbPath + "-wal");
+      if (existsSync(dbPath + "-shm")) unlinkSync(dbPath + "-shm");
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  it("sets rerankerEngaged=false when LODIS_RERANKER_DISABLED=1", async () => {
+    process.env.LODIS_RERANKER_DISABLED = "1";
+    // No memories in the DB — contextSearch returns an empty result set, but
+    // the disabled flag is evaluated regardless. This keeps the test fast
+    // (no model load, no embedding).
+    const res = await contextSearch(client, "anything");
+    expect(res.meta.rerankerEngaged).toBe(false);
+    expect(res.meta.rerankerError).toBeUndefined();
+  });
+
+  it("sets rerankerEngaged=false on empty candidate set even when enabled", async () => {
+    delete process.env.LODIS_RERANKER_DISABLED;
+    const res = await contextSearch(client, "anything");
+    // results.length === 0 short-circuits before rerank() is called, and we
+    // still report the flag so dashboards don't see `undefined` for empty
+    // queries.
+    expect(res.meta.rerankerEngaged).toBe(false);
+    expect(res.meta.rerankerError).toBeUndefined();
   });
 });

@@ -1275,8 +1275,9 @@ Organize memories by life domain: general, work, health, finance, relationships,
           sql: `INSERT INTO context_retrievals (
             id, user_id, agent_id, agent_name, query, query_hash, query_redacted,
             token_budget, format, filters_json, tokens_used,
-            returned_memory_ids_json, saturation_json, score_distribution_json, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            returned_memory_ids_json, saturation_json, score_distribution_json, created_at,
+            reranker_engaged, reranker_error
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             retrievalId,
             userId ?? null,
@@ -1293,6 +1294,10 @@ Organize memories by life domain: general, work, health, finance, relationships,
             JSON.stringify(result.meta.saturation),
             JSON.stringify(result.meta.scoreDistribution),
             timestamp,
+            // Reranker telemetry — lets /retrievals dashboard surface silent-
+            // fallback rates. Boolean → 0/1 for SQLite; NULL when undefined.
+            result.meta.rerankerEngaged === undefined ? null : (result.meta.rerankerEngaged ? 1 : 0),
+            result.meta.rerankerError ?? null,
           ],
         },
       ];

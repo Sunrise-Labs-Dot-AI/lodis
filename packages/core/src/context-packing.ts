@@ -88,6 +88,13 @@ export interface ContextMeta {
   scoreDistribution: ScoreDistribution;
   coverage: Coverage;
   suggestedFollowUps: SuggestedFollowUp[];
+  /** True when the cross-encoder reranker produced the final ordering;
+   *  false when it was disabled, had no candidates, or threw.
+   *  Undefined when the reranker path was not evaluated. */
+  rerankerEngaged?: boolean;
+  /** Error message if the reranker threw (truncated). Callers/dashboards can
+   *  use this to detect silent fallback to RRF ordering. */
+  rerankerError?: string;
 }
 
 export interface HierarchicalResult {
@@ -601,9 +608,20 @@ export async function contextSearch(
   // reranker logit so downstream score-weighted steps use the cross-encoder
   // signal. Failures here (model unavailable, etc.) fall back to the RRF
   // ordering — retrieval must not break if reranker infrastructure is absent.
+  // We track `rerankerEngaged` and `rerankerError` in ContextMeta so callers
+  // / dashboards can detect silent fallback — the bare catch in the v0 of
+  // this code made Stage-2 regressions undetectable from the response.
   const rerankTopK = 40;
   let reranked: ExpandedResult[];
-  if (rerankerEnabled && results.length > 0) {
+  let rerankerEngaged: boolean | undefined;
+  let rerankerError: string | undefined;
+  if (!rerankerEnabled) {
+    rerankerEngaged = false;
+    reranked = results;
+  } else if (results.length === 0) {
+    rerankerEngaged = false;
+    reranked = results;
+  } else {
     try {
       const candidates = results.map((r) => ({
         id: r.memory.id as string,
@@ -616,11 +634,16 @@ export async function contextSearch(
         if (!orig) return [];
         return [{ ...orig, score: rr.score }];
       });
-    } catch {
+      rerankerEngaged = true;
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      rerankerError = msg.length > 200 ? msg.slice(0, 200) : msg;
+      rerankerEngaged = false;
+      // Stderr so the failure surfaces in MCP launch logs — matches the
+      // pattern embeddings.ts / vec.ts use for graceful-degradation notes.
+      process.stderr.write(`[lodis] reranker threw, falling back to RRF ordering: ${rerankerError}\n`);
       reranked = results;
     }
-  } else {
-    reranked = results;
   }
 
   // Apply permanence-aware scoring
@@ -662,6 +685,8 @@ export async function contextSearch(
         scoreDistribution,
         coverage,
         suggestedFollowUps,
+        rerankerEngaged,
+        ...(rerankerError ? { rerankerError } : {}),
       },
     };
   }
@@ -711,6 +736,8 @@ export async function contextSearch(
       scoreDistribution,
       coverage,
       suggestedFollowUps,
+      rerankerEngaged,
+      ...(rerankerError ? { rerankerError } : {}),
     },
   };
 }

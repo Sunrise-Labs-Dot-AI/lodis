@@ -2,12 +2,21 @@ import type { Client } from "@libsql/client";
 import { hybridSearch, type ExpandedResult } from "./search.js";
 import { effectivePermanence } from "./confidence.js";
 import { getProfile } from "./entity-profiles.js";
+import { rerank } from "./reranker.js";
 
 // --- Token estimation ---
 
 /** Conservative estimate: ~4 chars per token for English text */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+// --- Reranker input text (mirrors the embeddings.ts concat convention) ---
+
+function memoryRerankText(r: ExpandedResult): string {
+  const content = (r.memory.content as string | null) ?? "";
+  const detail = r.memory.detail as string | null;
+  return detail ? `${content} ${detail}` : content;
 }
 
 // --- Types ---
@@ -566,22 +575,56 @@ export async function contextSearch(
 ): Promise<ContextPackedResult> {
   const tokenBudget = options.tokenBudget ?? 6000;
   const format = options.format ?? "hierarchical";
+  const rerankerEnabled = process.env.LODIS_RERANKER_DISABLED !== "1";
 
-  // Search with generous limit — we'll pack to budget
+  // Stage 1: hybrid retrieval.
+  // When reranker is enabled, fetch a wider candidate set (limit=200) and skip
+  // graph expansion — the reranker orders relevance so we don't need the RRF
+  // scores to guide expansion. When disabled, fall back to the legacy single-
+  // stage path (limit=50 + expand). LODIS_RERANKER_DISABLED=1 opts out.
+  const stage1Limit = rerankerEnabled ? 200 : 50;
   const { results } = await hybridSearch(client, query, {
     userId: options.userId,
     domain: options.domain,
     entityType: options.entityType,
     entityName: options.entityName,
     minConfidence: options.minConfidence,
-    limit: 50,
-    expand: true,
+    limit: stage1Limit,
+    expand: !rerankerEnabled,
     maxDepth: 2,
     similarityThreshold: 0.4,
   });
 
+  // Stage 2: cross-encoder rerank (optional).
+  // BGE-reranker scores each (query, memory) pair directly; we re-order the
+  // candidate set and keep the top rerankTopK. Replaces r.score with the
+  // reranker logit so downstream score-weighted steps use the cross-encoder
+  // signal. Failures here (model unavailable, etc.) fall back to the RRF
+  // ordering — retrieval must not break if reranker infrastructure is absent.
+  const rerankTopK = 40;
+  let reranked: ExpandedResult[];
+  if (rerankerEnabled && results.length > 0) {
+    try {
+      const candidates = results.map((r) => ({
+        id: r.memory.id as string,
+        text: memoryRerankText(r),
+      }));
+      const rerankResults = await rerank(query, candidates, { topK: rerankTopK });
+      const byId = new Map(results.map((r) => [r.memory.id as string, r]));
+      reranked = rerankResults.flatMap((rr) => {
+        const orig = byId.get(rr.id);
+        if (!orig) return [];
+        return [{ ...orig, score: rr.score }];
+      });
+    } catch {
+      reranked = results;
+    }
+  } else {
+    reranked = results;
+  }
+
   // Apply permanence-aware scoring
-  const scored = results.map((r) => ({
+  const scored = reranked.map((r) => ({
     ...r,
     score: r.score * permanenceMultiplier(r.memory),
   }));

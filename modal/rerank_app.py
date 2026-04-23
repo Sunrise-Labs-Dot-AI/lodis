@@ -69,7 +69,17 @@ import os
 import modal
 from fastapi import Header, HTTPException
 
-RERANK_MODEL_ID = "BAAI/bge-reranker-base"
+# Switched from BAAI/bge-reranker-base to cross-encoder/ms-marco-MiniLM-L-6-v2
+# on 2026-04-23 after live measurement showed BGE took 60s for 200 realistic-
+# length candidates (~500-1500 chars each) — exceeding both the HttpReranker
+# 30s client timeout AND Vercel Lambda's 60s maxDuration. MiniLM-L-6-v2 is
+# ~5× faster (80MB vs 278MB, 6 layers vs 12, smaller hidden dim) at a small
+# quality cost. Should process 200 realistic candidates in ~12-15s.
+#
+# If quality drops below acceptable, revisit: (a) GPU-accelerate BGE on T4
+# (<500ms for 200), or (b) pre-truncate to top-60 on Lodis side before
+# calling here.
+RERANK_MODEL_ID = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Input-size caps — guards against DoS + cost amplification. These apply
 # even to authenticated callers; a compromised Lodis instance sending a

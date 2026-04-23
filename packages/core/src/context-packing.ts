@@ -586,17 +586,20 @@ export async function contextSearch(
   // Reranker enablement — environment-aware default with explicit overrides:
   //   • LODIS_RERANKER_DISABLED=1 → always off  (evaluated first — safer)
   //   • LODIS_RERANKER_ENABLED=1  → always on
+  //   • LODIS_RERANKER_URL set    → on (implies HTTP provider — no cold-start)
   //   • otherwise: ON for long-lived Node (default), OFF on Vercel
   //
   // Rationale: the in-process BGE-reranker incurs ~13-15s cold-start per
   // Lambda invocation. That's unacceptable UX on a serverless function.
   // Local-first users (`npx lodis`, long-lived Node) keep the reranker on
-  // by default. Hosted/Vercel gets a clean "Stage 2 disabled" state until
-  // Phase 2 (HTTP-backed RerankerProvider → warm service) lands. DISABLED
-  // wins over ENABLED to avoid silent override of a stale kill-switch.
+  // by default. Hosted/Vercel users point LODIS_RERANKER_URL at a warm
+  // service (see HttpReranker + modal/rerank_app.py) and auto-enable.
+  // DISABLED wins over ENABLED to avoid silent override of a stale
+  // kill-switch — always the safest interpretation of conflicting env.
   const rerankerEnabled = (() => {
     if (process.env.LODIS_RERANKER_DISABLED === "1") return false;
     if (process.env.LODIS_RERANKER_ENABLED === "1") return true;
+    if (process.env.LODIS_RERANKER_URL) return true; // HTTP provider implies enabled
     return process.env.VERCEL !== "1"; // default off on Vercel, on elsewhere
   })();
 

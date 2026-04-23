@@ -7,8 +7,8 @@ export { generateEmbedding, generateEmbeddings, getEmbedder, backfillEmbeddings,
 export { setupVec, insertEmbedding, deleteEmbedding, searchVec } from "./vec.js";
 export { hybridSearch } from "./search.js";
 export type { SearchResult, ExpandedResult } from "./search.js";
-export { rerank, getReranker, DEFAULT_RERANKER_MODEL } from "./reranker.js";
-export type { RerankCandidate, RerankResult } from "./reranker.js";
+export { rerank, getReranker, DEFAULT_RERANKER_MODEL, LocalReranker, HttpReranker, selectRerankerProvider } from "./reranker.js";
+export type { RerankCandidate, RerankResult, RerankOptions, RerankerProvider } from "./reranker.js";
 export { contextSearch, computeScoreDistribution, sanitizeFollowUpTarget } from "./context-packing.js";
 export type { ContextPackedResult, HierarchicalResult, NarrativeResult, ContextMemory, ContextSummary, ContextReference, EntityProfileSummary, Saturation, ScoreDistribution, Coverage, SuggestedFollowUp, ContextMeta } from "./context-packing.js";
 export { rateContext } from "./feedback.js";

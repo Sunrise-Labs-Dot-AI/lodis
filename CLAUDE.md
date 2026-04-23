@@ -31,6 +31,9 @@ V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid 
 - Entity profiles (`memory_briefing`) — LLM-generated summaries with 24h cache
 - Archive page + entity profile pages in dashboard
 - 13 entity types (expanded from 8)
+- Two-stage retrieval in `memory_context` — hybrid candidate set → cross-encoder rerank. `RerankerProvider` interface in `packages/core/src/reranker.ts` with two implementations: `LocalReranker` (in-process BGE-reranker-base via Transformers.js, for long-lived Node / CLI) and `HttpReranker` (POSTs to a configurable endpoint, for serverless hosts). `selectRerankerProvider()` picks based on `LODIS_RERANKER_URL`. Env vars: `LODIS_RERANKER_DISABLED=1` forces off (wins over enabled), `LODIS_RERANKER_ENABLED=1` forces on, `LODIS_RERANKER_URL` implies HTTP provider. Default on for long-lived Node, off on Vercel. Diagnostic fields on response `meta`: `rerankerEngaged` (bool) and `rerankerError` (string, on catch). Also logged to `context_retrievals` telemetry rows.
+- Modal reference rerank service at `modal/rerank_app.py` + `modal/README.md`. FastAPI endpoint with fail-closed bearer-token auth, `hmac.compare_digest`, input-size caps (200 candidates / 4000-char query / 8000-char text), no request-body logging. Production default model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (~5× faster than BGE on CPU for realistic-length 200-candidate payloads). Deploy via `modal deploy modal/rerank_app.py`; wire via `LODIS_RERANKER_URL` + `LODIS_RERANKER_API_KEY` on the dashboard host.
+- Hosted MCP deployed at `https://app.getengrams.com/api/mcp` (also aliased `app.lodis.ai`). Auth via Clerk. Production env vars: `LODIS_RERANKER_URL`, `LODIS_RERANKER_API_KEY`, `LODIS_RERANKER_TIMEOUT_MS` (set to 30000; the code default is 20000 but 200-candidate CPU rerank can push that with MiniLM's ~10s + cold-start overhead).
 
 **Deferred (handoffs written, not dispatched):**
 - Pro tier remaining: cloud sync (Turso), hosted dashboard Vercel deployment (`handoff-pro-tier.md`)
@@ -54,11 +57,13 @@ V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid 
 ```
 lodis/
 ├── packages/
-│   ├── core/             # @lodis/core — schema, types, confidence engine, LLM abstraction, crypto, context-packing, entity profiles
+│   ├── core/             # @lodis/core — schema, types, confidence engine, LLM abstraction, crypto, context-packing, entity profiles, reranker
 │   ├── mcp-server/       # lodis (npm) — MCP server + CLI entry point
-│   ├── dashboard/        # @lodis/dashboard — Next.js localhost app (port 3838)
+│   ├── dashboard/        # @lodis/dashboard — Next.js dashboard + hosted MCP route (/api/mcp)
 │   └── landing/          # @lodis/landing — lodis.ai landing page
-├── handoff-*.md          # Build handoff documents
+├── modal/                # Modal reference rerank service (rerank_app.py + README.md)
+├── scripts/              # Benchmark + diagnostic scripts (stage-a-diagnostic.mjs, stage-b-rerank-benchmark.mjs)
+├── handoff-*.md          # Build handoff documents (gitignored)
 ├── LICENSE               # MIT
 ├── package.json          # pnpm workspace root
 ├── pnpm-workspace.yaml

@@ -67,6 +67,7 @@ import hmac
 import os
 
 import modal
+from fastapi import Header, HTTPException
 
 RERANK_MODEL_ID = "BAAI/bge-reranker-base"
 
@@ -113,11 +114,17 @@ api_key_secret = modal.Secret.from_name("rerank-api-key", required_keys=["RERANK
 @app.cls(
     cpu=2.0,
     memory=1024,
-    keep_warm=1,
-    container_idle_timeout=300,
-    allow_concurrent_inputs=10,
+    # Modal 1.x renames:
+    #   keep_warm=1          → min_containers=1      (warm floor)
+    #   container_idle_timeout=300 → scaledown_window=300 (idle → stop delay)
+    #   allow_concurrent_inputs=10 → @modal.concurrent(max_inputs=10) decorator
+    # Holds one warm container so the first request each deploy-cycle skips
+    # the ~3-5s model-load cold start.
+    min_containers=1,
+    scaledown_window=300,
     secrets=[api_key_secret],
 )
+@modal.concurrent(max_inputs=10)
 class Reranker:
     """Loads BGE-reranker-base once per container; reuses for all requests."""
 
@@ -166,9 +173,16 @@ class Reranker:
 
 @app.function(secrets=[api_key_secret])
 @modal.fastapi_endpoint(method="POST")
-async def rerank(req: dict, authorization: str | None = None):
+async def rerank(
+    req: dict,
+    # FastAPI's default inference treats a plain `str | None = None` as a
+    # QUERY param, not a header. `Header(default=None)` is required for
+    # FastAPI to read the actual HTTP `Authorization` header. Without this
+    # the gate always sees None and returns 401 for every authenticated
+    # request — caught by smoke-test 4a.
+    authorization: str | None = Header(default=None),
+):
     """HTTP entry point matching HttpReranker's wire contract."""
-    from fastapi import HTTPException
 
     # Auth — fail-closed. If RERANK_API_KEY is missing from the env (e.g.
     # the Modal secret was deleted, or deployed to a workspace where Step 2

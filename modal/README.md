@@ -70,10 +70,10 @@ Score magnitudes vary per model — BGE-reranker-base typically separates a clea
 |---|---|
 | Cold-start (first request to new container) | ~3–5 s (ONNX init + first forward pass) |
 | Warm-start (subsequent requests) | 50–200 ms p50 for a query + 40 candidates |
-| Warm idle cost (`keep_warm=1`, cpu=2, mem=1GB) | ~$0.10/day |
+| Warm idle cost (`min_containers=1`, cpu=2, mem=1GB) | ~$0.10/day |
 | Per-request cost at modest traffic | <$0.001/query on CPU |
 
-If traffic is sparse enough that warm-idle cost dominates, remove `keep_warm=1` from the decorator in `rerank_app.py` — cold-start comes back but Modal scales to $0.
+If traffic is sparse enough that warm-idle cost dominates, remove `min_containers=1` from the decorator in `rerank_app.py` — cold-start comes back but Modal scales to $0.
 
 ## Troubleshooting
 

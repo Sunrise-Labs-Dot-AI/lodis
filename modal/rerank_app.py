@@ -6,12 +6,12 @@ Wire contract (matches HttpReranker in packages/core/src/reranker.ts):
   POST /rerank
   Headers:
     content-type: application/json
-    [authorization: Bearer <RERANK_API_KEY>]           (optional)
+    authorization: Bearer <RERANK_API_KEY>              (REQUIRED — fail-closed)
   Body:
     {
-      "query": "string",
-      "candidates": [{"id": "string", "text": "string"}, ...],
-      "topK": 40                                        (optional)
+      "query": "string",                                 (≤ 4000 chars)
+      "candidates": [{"id": "string", "text": "string"}], (≤ 200 items; text ≤ 8000)
+      "topK": 40                                         (optional)
     }
 
   200 OK:
@@ -20,19 +20,39 @@ Wire contract (matches HttpReranker in packages/core/src/reranker.ts):
     }
     (results are sorted by descending score; rank is 1-indexed)
 
+  400 — malformed body (missing/wrong-type fields)
+  401 — missing/invalid bearer token
+  413 — too many candidates OR candidate text too long
+  500 — server misconfigured (RERANK_API_KEY secret missing) OR internal error
+        (exception messages are NOT propagated — they may contain query/PII)
+
+Security posture:
+  - Fail-closed auth: if the RERANK_API_KEY env var is unset inside the
+    container, every request returns 500. `required_keys=["RERANK_API_KEY"]`
+    on the Modal secret makes Modal itself refuse to boot the container
+    without the key.
+  - Bearer comparison uses `hmac.compare_digest` (constant-time) to avoid
+    the timing side-channel that `!=` on strings allows.
+  - Input-size caps protect against DoS and cost amplification — a caller
+    with a valid key cannot OOM the container or drive compute bills by
+    sending 100k candidates of 10kB each.
+  - No request-body logging. The `score.remote` call is wrapped in a
+    generic try/except that returns 500 with a stable message; exception
+    text (which may contain the query) is swallowed.
+
 Deployment:
 
   pip install modal
-  modal setup                         # one-time auth
+  modal setup                         # one-time auth (or: modal token set)
   modal deploy modal/rerank_app.py    # from the repo root
 
   # Then set these in Vercel env vars for the dashboard:
   LODIS_RERANKER_URL=https://<workspace>--lodis-reranker-rerank.modal.run
-  LODIS_RERANKER_API_KEY=<if you set RERANK_API_KEY as a Modal secret>
+  LODIS_RERANKER_API_KEY=<same hex value you stored in the Modal secret>
 
 Keep-warm:
   keep_warm=1 holds one container ready so the first request does not pay the
-  ~5s model-load cost. Modal charges for warm idle time — ~$0.10/day on CPU,
+  ~3-5s model-load cost. Modal charges for warm idle time — ~$0.10/day on CPU,
   cheap insurance vs. cold-start UX regressions. Scale to 0 by removing
   keep_warm if traffic is sparse and latency sensitivity is low.
 
@@ -43,11 +63,22 @@ Scaling:
   requests onto one container when possible.
 """
 
+import hmac
 import os
 
 import modal
 
 RERANK_MODEL_ID = "BAAI/bge-reranker-base"
+
+# Input-size caps — guards against DoS + cost amplification. These apply
+# even to authenticated callers; a compromised Lodis instance sending a
+# runaway payload cannot blow memory on the 1GB container or drive Modal
+# bills by reranking 100k pairs per request. Adjust only if Lodis's typical
+# pre-rerank candidate pool grows past 200 (currently capped at limit=200
+# in context-packing.ts).
+MAX_CANDIDATES = 200
+MAX_QUERY_CHARS = 4000
+MAX_CANDIDATE_TEXT_CHARS = 8000
 
 # --- Image ---
 # Lean CPU image: PyTorch CPU wheels + Transformers + FastAPI for the web
@@ -72,10 +103,11 @@ image = (
 
 app = modal.App("lodis-reranker", image=image)
 
-# Optional bearer-token auth. If RERANK_API_KEY Modal secret is set, the
-# endpoint will require `authorization: Bearer <key>` on every request.
-# Otherwise the endpoint is open (fine for dev / localhost forwarding).
-api_key_secret = modal.Secret.from_name("rerank-api-key", required_keys=[])
+# Bearer-token auth is MANDATORY and fail-closed. `required_keys=[...]`
+# tells Modal to refuse to boot the container if the secret is missing —
+# catches "deployed to a workspace that never ran `modal secret create`"
+# at startup rather than as a 500 on every request.
+api_key_secret = modal.Secret.from_name("rerank-api-key", required_keys=["RERANK_API_KEY"])
 
 
 @app.cls(
@@ -98,7 +130,6 @@ class Reranker:
         self.model = AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL_ID)
         self.model.eval()
         self.torch = torch
-        self.expected_api_key = os.environ.get("RERANK_API_KEY")
 
     @modal.method()
     def score(
@@ -139,39 +170,86 @@ async def rerank(req: dict, authorization: str | None = None):
     """HTTP entry point matching HttpReranker's wire contract."""
     from fastapi import HTTPException
 
-    # Auth (optional). If RERANK_API_KEY is set, require Bearer token.
+    # Auth — fail-closed. If RERANK_API_KEY is missing from the env (e.g.
+    # the Modal secret was deleted, or deployed to a workspace where Step 2
+    # of the deploy plan was skipped), every request 500s. No anonymous
+    # path. `required_keys=[...]` on the secret makes this nearly
+    # impossible at the platform level; the in-handler check is defense in
+    # depth for the "secret exists but env var name drifted" edge case.
     expected = os.environ.get("RERANK_API_KEY")
-    if expected:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="missing bearer token")
-        if authorization.removeprefix("Bearer ").strip() != expected:
-            raise HTTPException(status_code=401, detail="invalid bearer token")
+    if not expected:
+        raise HTTPException(status_code=500, detail="server misconfigured: RERANK_API_KEY missing")
 
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+
+    # Constant-time comparison — `!=` on strings short-circuits on first
+    # mismatched byte, leaking the key one byte at a time via latency.
+    provided = authorization.removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="invalid bearer token")
+
+    # --- Validate + enforce input-size caps ---
     query = req.get("query")
     candidates = req.get("candidates")
     top_k = req.get("topK")
-    if not isinstance(query, str) or not isinstance(candidates, list):
-        raise HTTPException(status_code=400, detail="invalid request body")
 
-    results = Reranker().score.remote(query, candidates, top_k)
+    if not isinstance(query, str):
+        raise HTTPException(status_code=400, detail="invalid request body: query must be a string")
+    if len(query) > MAX_QUERY_CHARS:
+        raise HTTPException(
+            status_code=413, detail=f"query too long (max {MAX_QUERY_CHARS} chars)"
+        )
+    if not isinstance(candidates, list):
+        raise HTTPException(status_code=400, detail="invalid request body: candidates must be a list")
+    if len(candidates) > MAX_CANDIDATES:
+        raise HTTPException(
+            status_code=413, detail=f"too many candidates (max {MAX_CANDIDATES})"
+        )
+    for i, c in enumerate(candidates):
+        if not (
+            isinstance(c, dict)
+            and isinstance(c.get("id"), str)
+            and isinstance(c.get("text"), str)
+        ):
+            # Deliberately generic — do NOT echo the malformed value,
+            # which could be attacker-controlled and end up in logs.
+            raise HTTPException(status_code=400, detail=f"invalid candidate shape at index {i}")
+        if len(c["text"]) > MAX_CANDIDATE_TEXT_CHARS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"candidate text too long (max {MAX_CANDIDATE_TEXT_CHARS} chars)",
+            )
+    if top_k is not None and (not isinstance(top_k, int) or top_k < 1):
+        raise HTTPException(status_code=400, detail="invalid topK: must be a positive integer")
+
+    # Wrap the remote call in a blanket except that does NOT propagate the
+    # exception message. Tracebacks from BGE / tokenizer / Modal infra may
+    # contain the query or candidate text; we keep those out of the response
+    # body and rely on `modal app logs` for debugging (and even those should
+    # be spot-checked post-deploy — see modal/README.md).
+    try:
+        results = Reranker().score.remote(query, candidates, top_k)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="internal error")
     return {"results": results}
 
 
 # Local smoke test — `modal run modal/rerank_app.py` to exercise the class
 # without deploying. Useful for iterating on model-loading / scoring before
-# standing up the endpoint.
+# standing up the endpoint. Uses synthetic data so neither the local shell
+# history nor Modal's log capture user content.
 @app.local_entrypoint()
 def main():
     r = Reranker()
     out = r.score.remote(
-        "Who is the recruiter at Anthropic for the PM Consumer role?",
+        "What is the capital of France?",
         [
-            {
-                "id": "relevant",
-                "text": "Laura Small: Recruiter at Anthropic for the PM Consumer role. First screen on 3/14.",
-            },
-            {"id": "irrelevant1", "text": "James has five siblings, including twin brother Alex."},
-            {"id": "irrelevant2", "text": "Karen and John Stine married on 9/24/1977 in Boulder."},
+            {"id": "relevant", "text": "Paris is the capital and largest city of France."},
+            {"id": "irrelevant1", "text": "Dogs are mammals that typically live 10-13 years."},
+            {"id": "irrelevant2", "text": "The Eiffel Tower is 330 meters tall."},
         ],
     )
     print(out)

@@ -1474,6 +1474,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
       entityName: z.string().optional().describe("Canonical entity name"),
       agentId: z.string().optional().describe("Your agent ID"),
       agentName: z.string().optional().describe("Your agent name"),
+      eventType: z.enum(["confidence_changed", "content_migration"]).optional().describe("Audit event type to emit (default 'confidence_changed'). Set to 'content_migration' for backfill/bulk content reshape operations so the event log can distinguish them from user edits."),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
@@ -1521,7 +1522,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         .values({
           id: generateId(),
           memoryId: params.id,
-          eventType: "confidence_changed",
+          eventType: params.eventType ?? "confidence_changed",
           agentId: params.agentId ?? null,
           agentName: params.agentName ?? null,
           oldValue: JSON.stringify({

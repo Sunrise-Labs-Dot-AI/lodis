@@ -47,8 +47,14 @@ import {
   isKnownChapterId,
   chapterToMarkdown,
   tocToMarkdown,
+  validateDomainName,
+  registerDomain,
+  archiveDomain,
+  getDomain,
+  listDomains,
+  evaluateAutoPin,
 } from "@lodis/core";
-import type { SourceType, Relationship, EntityType, Permanence, Client, BulkEntry, ChapterFormat } from "@lodis/core";
+import type { SourceType, Relationship, EntityType, Permanence, Client, BulkEntry, ChapterFormat, PinAction } from "@lodis/core";
 
 function generateId(): string {
   return randomBytes(16).toString("hex");
@@ -316,7 +322,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
       sourceAgentName: z.string().describe("Your agent name"),
       sourceType: z.enum(["stated", "inferred", "observed", "cross-agent"]).describe("How this memory was acquired"),
       sourceDescription: z.string().optional().describe("Description of source"),
-      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Entity classification. If omitted, auto-classification runs in background."),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Entity classification. If omitted, auto-classification runs in background."),
       entityName: z.string().optional().describe("Canonical entity name (e.g. 'Sarah Chen', not 'my manager Sarah'). Helps with dedup."),
       structuredData: z.record(z.unknown()).optional().describe("Type-specific structured fields (schema depends on entityType)"),
       permanence: z.enum(["canonical", "active", "ephemeral"]).optional().describe("Memory permanence tier. canonical = permanent/decay-immune. ephemeral = auto-expires. active = default."),
@@ -621,7 +627,10 @@ Organize memories by life domain: general, work, health, finance, relationships,
       }
 
       // --- Insert new memory ---
-      const VALID_ENTITY_TYPES = ["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"];
+      const VALID_ENTITY_TYPES = ["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"];
+      if (params.entityType === "snippet") {
+        return textResult({ error: "entityType 'snippet' must be written via memory_write_snippet (validated path). Use memory_write_snippet instead." });
+      }
       if (params.entityType && !VALID_ENTITY_TYPES.includes(params.entityType)) {
         return textResult({ error: `Invalid entity_type: "${params.entityType}". Must be one of: ${VALID_ENTITY_TYPES.join(", ")}` });
       }
@@ -805,7 +814,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         domain: z.string().optional().describe("Life domain (default: general)"),
         sourceType: z.enum(["stated", "inferred", "observed", "cross-agent"]).optional().describe("How this memory was acquired (default: observed)"),
         sourceDescription: z.string().optional().describe("Description of source"),
-        entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional(),
+        entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional(),
         entityName: z.string().optional().describe("Canonical entity name"),
         structuredData: z.record(z.unknown()).optional().describe("Type-specific structured fields"),
         permanence: z.enum(["canonical", "active", "ephemeral"]).optional(),
@@ -832,6 +841,14 @@ Organize memories by life domain: general, work, health, finance, relationships,
       const allowedIndices: number[] = [];
       for (let i = 0; i < params.entries.length; i++) {
         const e = params.entries[i];
+        if (e.entityType === "snippet") {
+          permFailures.push({
+            index: i,
+            status: "failed",
+            error: "entityType 'snippet' must be written via memory_write_snippet (validated path), not memory_bulk_upload.",
+          });
+          continue;
+        }
         const d = e.domain ?? "general";
         if (!domainAllowed.get(d)) {
           permFailures.push({
@@ -875,6 +892,469 @@ Organize memories by life domain: general, work, health, finance, relationships,
         skipped,
         results: merged,
         durationMs: coreResult.durationMs,
+      });
+    },
+  );
+
+  // --- Helpers for snippet tools ---
+
+  function titleCaseSlug(s: string): string {
+    return s.split("-").map((p) => (p.length > 0 ? p[0].toUpperCase() + p.slice(1) : p)).join(" ");
+  }
+
+  const SNIPPET_PAST_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
+  const SNIPPET_FUTURE_WINDOW_MS = 60 * 60 * 1000;
+  const SNIPPET_RATE_CAP_PER_HOUR = 500;
+  const SNIPPET_QUERY_MAX_WINDOW_DAYS = 366;
+
+  server.tool(
+    "memory_write_snippet",
+    "Write a high-frequency progress event (shipped/advanced/started/stalled/blocked) against a registered life domain. Use this — not memory_write — for structured progress capture from Notion, GitHub, Gmail, calendar pollers, or manual check-ins. Defaults: entityType='snippet', permanence='ephemeral', ttl=60d, confidence=1.0. Auto-pins goal-linked ships (active+180d) and meta.milestone=true (canonical). Dedups on (source_system, source_id, event_timestamp) when source_id is supplied. Rate-limited to 500 per (agent, life_domain) per hour. Call memory_register_domain first if the life_domain is new.\n\nExample: memory_write_snippet({ snippet_type: 'shipped', life_domain: 'work', content: 'Shipped PR #42 adding Foo', source_system: 'github', event_timestamp: '2026-04-24T16:00:00Z', linked_goal_id: 'T4', source_id: 'pr-42', sourceAgentId: 'capture-task', sourceAgentName: 'Progress Capture' })",
+    {
+      // Explicit string bounds prevent a caller from filling the DB with
+      // megabyte-scale blobs via the high-frequency snippet path.
+      snippet_type: z.enum(["shipped", "advanced", "started", "stalled", "blocked"]).describe("Event classification"),
+      life_domain: z.string().max(63).describe("Slug-form life domain (lowercase, hyphens). Must be registered and not archived."),
+      content: z.string().min(1).max(2000).describe("One-line description of the event (max 2KB)"),
+      source_system: z.string().min(1).max(100).describe("Origin system (e.g. 'notion', 'github', 'gmail', 'manual')"),
+      event_timestamp: z.string().max(40).describe("ISO 8601 timestamp of when the event occurred (display/ordering only; not trusted for audit)"),
+      linked_goal_id: z.string().max(100).optional().describe("Goal this event advances"),
+      source_url: z.string().max(2000).optional().describe("Deep-link back to the source (PR URL, Notion page, etc.)"),
+      source_id: z.string().max(200).optional().describe("Stable ID from the source system — when set, enables dedup on (source_system, source_id, event_timestamp)"),
+      actor: z.string().max(200).optional().describe("Person who performed the action (may be the user or someone else)"),
+      content_detail: z.string().max(8000).optional().describe("Extended detail if one line isn't enough (max 8KB)"),
+      meta: z.record(z.unknown()).optional().describe("Free-form extension field (max 4KB JSON-stringified). Set meta.milestone=true to force canonical pin."),
+      sourceAgentId: z.string().max(100).describe("Your agent ID"),
+      sourceAgentName: z.string().max(100).describe("Your agent name"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+
+      // 1. Validation — slug shape first, then domain-registry state, then
+      // permission. Order matches the other domain-facing tools
+      // (memory_register_domain / memory_archive_domain) and gives callers the
+      // most specific error for a bad input rather than a generic "not allowed".
+      const nameErr = validateDomainName(params.life_domain);
+      if (nameErr) return textResult({ error: nameErr });
+
+      // Single round-trip: `getDomain` gives us both registration state (null →
+      // unregistered) and archive state in one SELECT, halving the domain-
+      // validation DB cost per write.
+      const domainRow = await getDomain(client, params.life_domain, userId);
+      if (!domainRow) {
+        return textResult({
+          error: "domain_unregistered",
+          hint: `Life domain "${params.life_domain}" is not registered. Call memory_register_domain first.`,
+        });
+      }
+      if (domainRow.archived) {
+        return textResult({
+          error: "domain_archived",
+          hint: `Life domain "${params.life_domain}" is archived. Call memory_register_domain("${params.life_domain}") to unarchive, or write under a different domain.`,
+        });
+      }
+
+      // 2. Permission
+      if (!(await checkPermission(params.sourceAgentId, params.life_domain, "write", userId))) {
+        return textResult({ error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${params.life_domain}"` });
+      }
+
+      const eventDate = new Date(params.event_timestamp);
+      if (isNaN(eventDate.getTime())) {
+        return textResult({ error: `Invalid event_timestamp: "${params.event_timestamp}". Must be a parseable ISO 8601 string.` });
+      }
+      const nowMs = Date.now();
+      const eventMs = eventDate.getTime();
+      if (eventMs < nowMs - SNIPPET_PAST_WINDOW_MS) {
+        return textResult({ error: "event_timestamp_too_old", hint: "event_timestamp must be within the last 180 days." });
+      }
+      if (eventMs > nowMs + SNIPPET_FUTURE_WINDOW_MS) {
+        return textResult({ error: "event_timestamp_in_future", hint: "event_timestamp must not be more than 1 hour ahead of server time." });
+      }
+
+      // `meta` JSON size cap — defends against canonical-pinned megabyte blobs
+      // that survive decay and inflate memory_progress_summary aggregation cost.
+      if (params.meta !== undefined) {
+        const metaSize = JSON.stringify(params.meta).length;
+        if (metaSize > 4000) {
+          return textResult({ error: "meta_too_large", hint: `meta JSON size must be <= 4000 bytes; got ${metaSize}.` });
+        }
+      }
+
+      // 3. Rate-limit (unconditional, D4)
+      const rateRow = (await client.execute({
+        sql: `SELECT COUNT(*) AS c FROM memories
+              WHERE entity_type = 'snippet' AND deleted_at IS NULL
+                AND source_agent_id = ? AND domain = ?
+                AND learned_at > datetime('now', '-1 hour')
+                AND (user_id = ? OR (user_id IS NULL AND ? IS NULL))`,
+        args: [params.sourceAgentId, params.life_domain, userId ?? null, userId ?? null],
+      })).rows[0] as unknown as { c: number };
+      if (rateRow.c >= SNIPPET_RATE_CAP_PER_HOUR) {
+        // sourceAgentId is agent-supplied — strip newlines/control chars + cap
+        // length so a caller cannot inject fake log lines or ANSI escapes.
+        const safeAgent = params.sourceAgentId.replace(/[\r\n\x00-\x1f\x7f]/g, " ").slice(0, 100);
+        process.stderr.write(`[lodis] snippet_rate_cap: agent=${safeAgent} domain=${params.life_domain}\n`);
+        return textResult({
+          error: "snippet_rate_cap_exceeded",
+          hint: `Caller must throttle; cap is ${SNIPPET_RATE_CAP_PER_HOUR} per agent per life_domain per hour.`,
+        });
+      }
+
+      // 4. Dedup (only when source_id present)
+      if (params.source_id !== undefined && params.source_id !== null) {
+        const dup = (await client.execute({
+          sql: `SELECT id FROM memories
+                WHERE entity_type = 'snippet' AND deleted_at IS NULL
+                  AND json_extract(structured_data, '$.source_system') = ?
+                  AND json_extract(structured_data, '$.source_id') = ?
+                  AND json_extract(structured_data, '$.event_timestamp') = ?
+                  AND (user_id = ? OR (user_id IS NULL AND ? IS NULL))
+                LIMIT 1`,
+          args: [params.source_system, params.source_id, params.event_timestamp, userId ?? null, userId ?? null],
+        })).rows[0] as { id: string } | undefined;
+        if (dup) {
+          return textResult({ status: "duplicate", id: dup.id, url: memoryUrl(dup.id) });
+        }
+      }
+
+      // 5. Build structuredData (snake_case per D14)
+      const structured: Record<string, unknown> = {
+        snippet_type: params.snippet_type,
+        life_domain: params.life_domain,
+        source_system: params.source_system,
+        event_timestamp: params.event_timestamp,
+      };
+      if (params.linked_goal_id !== undefined) structured.linked_goal_id = params.linked_goal_id;
+      if (params.source_url !== undefined) structured.source_url = params.source_url;
+      if (params.source_id !== undefined) structured.source_id = params.source_id;
+      if (params.actor !== undefined) structured.actor = params.actor;
+      if (params.content_detail !== undefined) structured.content_detail = params.content_detail;
+      if (params.meta !== undefined) structured.meta = params.meta;
+
+      // 6. Insert — learned_at is server time (D11); event_ts is the agent-supplied display timestamp
+      const id = generateId();
+      const nowIso = now();
+      const defaultExpiresAt = parseTTL("60d");
+
+      await db.insert(memories).values({
+        id,
+        content: params.content,
+        detail: params.content_detail ?? null,
+        domain: params.life_domain,
+        sourceAgentId: params.sourceAgentId,
+        sourceAgentName: params.sourceAgentName,
+        sourceType: "observed",
+        sourceDescription: params.source_system,
+        confidence: 1.0,
+        learnedAt: nowIso,
+        eventTs: params.event_timestamp,
+        hasPiiFlag: 0,
+        entityType: "snippet",
+        entityName: `Progress: ${titleCaseSlug(params.life_domain)}`,
+        structuredData: JSON.stringify(structured),
+        permanence: "ephemeral",
+        expiresAt: defaultExpiresAt,
+        userId: userId ?? null,
+      }).run();
+
+      // Best-effort embedding
+      if (vecAvailable) {
+        try {
+          const embedding = await generateEmbedding(params.content);
+          await insertEmbedding(client, id, embedding);
+        } catch { /* non-fatal */ }
+      }
+
+      // 7. Audit "created" event
+      await db.insert(memoryEvents).values({
+        id: generateId(),
+        memoryId: id,
+        eventType: "created",
+        agentId: params.sourceAgentId,
+        agentName: params.sourceAgentName,
+        newValue: JSON.stringify({ content: params.content, domain: params.life_domain, entity_type: "snippet" }),
+        timestamp: nowIso,
+      }).run();
+
+      // 8. Auto-pin evaluation
+      const action: PinAction | null = evaluateAutoPin({
+        snippet_type: params.snippet_type,
+        life_domain: params.life_domain,
+        linked_goal_id: params.linked_goal_id ?? null,
+        meta: params.meta ?? null,
+      });
+
+      let finalPermanence: string = "ephemeral";
+      let finalExpiresAt: string | null = defaultExpiresAt;
+
+      if (action) {
+        if (action.permanence === "canonical") {
+          await client.execute({
+            sql: `UPDATE memories SET permanence = 'canonical', expires_at = NULL WHERE id = ?`,
+            args: [id],
+          });
+          finalPermanence = "canonical";
+          finalExpiresAt = null;
+        } else {
+          // active with ttl
+          const newExpiresAt = parseTTL(action.ttl);
+          await client.execute({
+            sql: `UPDATE memories SET permanence = ?, expires_at = ? WHERE id = ?`,
+            args: [action.permanence, newExpiresAt, id],
+          });
+          finalPermanence = action.permanence;
+          finalExpiresAt = newExpiresAt;
+        }
+        await db.insert(memoryEvents).values({
+          id: generateId(),
+          memoryId: id,
+          eventType: "auto_pin",
+          agentId: params.sourceAgentId,
+          agentName: params.sourceAgentName,
+          newValue: JSON.stringify({
+            rule: action.reason,
+            permanence: finalPermanence,
+            new_expires_at: finalExpiresAt,
+            previous_expires_at: defaultExpiresAt,
+          }),
+          timestamp: nowIso,
+        }).run();
+      }
+
+      await bumpLastModified(client);
+
+      return textResult({
+        status: "written",
+        id,
+        url: memoryUrl(id),
+        permanence: finalPermanence,
+        expires_at: finalExpiresAt,
+        autoPin: action,
+      });
+    },
+  );
+
+  // --- Shared snippet-query SQL builder. Used by memory_query_progress and
+  // memory_progress_summary so both tools share the same filter/permission
+  // semantics. Returns the list of snippet rows (newest-first by event_ts)
+  // shaped to the public surface — no raw structured_data leaked. ---
+  interface SnippetQueryFilters {
+    date_from: string;
+    date_to: string;
+    life_domain?: string;
+    life_domains?: string[];
+    linked_goal_id?: string;
+    snippet_type?: string;
+    include_archived_domains?: boolean;
+    limit?: number;
+  }
+  interface SnippetSummaryRow {
+    id: string;
+    content: string;
+    snippet_type: string;
+    life_domain: string;
+    linked_goal_id: string | null;
+    source_url: string | null;
+    event_timestamp: string;
+    permanence: string | null;
+    url: string;
+  }
+  async function fetchSnippetRange(
+    filters: SnippetQueryFilters,
+    agentId: string | undefined,
+    userId: string | null,
+  ): Promise<SnippetSummaryRow[]> {
+    let sql = `SELECT id, content, domain, structured_data, permanence, event_ts
+               FROM memories
+               WHERE entity_type = 'snippet' AND deleted_at IS NULL
+                 AND event_ts IS NOT NULL
+                 AND event_ts BETWEEN ? AND ?`;
+    let args: unknown[] = [filters.date_from, filters.date_to];
+    if (filters.life_domain !== undefined) {
+      sql += ` AND domain = ?`;
+      args.push(filters.life_domain);
+    }
+    if (filters.life_domains !== undefined && filters.life_domains.length > 0) {
+      const placeholders = filters.life_domains.map(() => "?").join(",");
+      sql += ` AND domain IN (${placeholders})`;
+      args.push(...filters.life_domains);
+    }
+    if (filters.linked_goal_id !== undefined) {
+      sql += ` AND json_extract(structured_data, '$.linked_goal_id') = ?`;
+      args.push(filters.linked_goal_id);
+    }
+    if (filters.snippet_type !== undefined) {
+      sql += ` AND json_extract(structured_data, '$.snippet_type') = ?`;
+      args.push(filters.snippet_type);
+    }
+    if (!filters.include_archived_domains) {
+      sql += ` AND domain NOT IN (SELECT name FROM domains WHERE archived = 1 AND IFNULL(user_id, '') = IFNULL(?, ''))`;
+      args.push(userId);
+    }
+
+    ({ query: sql, params: args } = await applyReadFilter(sql, args, agentId, userId));
+
+    sql += ` ORDER BY event_ts DESC LIMIT ?`;
+    args.push(filters.limit ?? 200);
+
+    const rows = (await client.execute({
+      sql,
+      args: args as (string | number | null)[],
+    })).rows as unknown as {
+      id: string;
+      content: string;
+      domain: string;
+      structured_data: string | null;
+      permanence: string | null;
+      event_ts: string;
+    }[];
+
+    return rows.map((r) => {
+      let structured: Record<string, unknown> = {};
+      try { structured = r.structured_data ? JSON.parse(r.structured_data) : {}; } catch { /* corrupt row — treat as empty */ }
+      return {
+        id: r.id,
+        content: r.content,
+        snippet_type: (structured.snippet_type as string | undefined) ?? "",
+        life_domain: r.domain,
+        linked_goal_id: (structured.linked_goal_id as string | undefined) ?? null,
+        source_url: (structured.source_url as string | undefined) ?? null,
+        event_timestamp: r.event_ts,
+        permanence: r.permanence,
+        url: memoryUrl(r.id),
+      };
+    });
+  }
+
+  function validateSnippetQueryWindow(date_from: string, date_to: string): string | null {
+    const fromMs = new Date(date_from).getTime();
+    const toMs = new Date(date_to).getTime();
+    if (isNaN(fromMs) || isNaN(toMs)) {
+      return "Invalid date_from or date_to. Must be ISO 8601 strings.";
+    }
+    if (toMs < fromMs) {
+      return "date_to must be >= date_from.";
+    }
+    const maxWindowMs = SNIPPET_QUERY_MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > maxWindowMs) {
+      return `Query window too large. Max ${SNIPPET_QUERY_MAX_WINDOW_DAYS} days; got ${(toMs - fromMs) / (24 * 60 * 60 * 1000)} days.`;
+    }
+    return null;
+  }
+
+  server.tool(
+    "memory_query_progress",
+    "Query snippet (progress-event) rows by time range + optional life_domain / linked_goal_id / snippet_type filters. Returns a newest-first list shaped for display (no structuredData blob). Archived domains are excluded unless include_archived_domains=true. Window capped at 366 days.\n\nExample: memory_query_progress({ date_from: '2026-04-01T00:00:00Z', date_to: '2026-04-24T23:59:59Z', life_domain: 'work', limit: 50 })",
+    {
+      date_from: z.string().describe("ISO 8601 lower bound on event_timestamp"),
+      date_to: z.string().describe("ISO 8601 upper bound on event_timestamp"),
+      life_domain: z.string().optional().describe("Filter to a single life_domain"),
+      linked_goal_id: z.string().optional().describe("Filter to a single goal"),
+      snippet_type: z.enum(["shipped", "advanced", "started", "stalled", "blocked"]).optional().describe("Filter to one event type"),
+      include_archived_domains: z.boolean().optional().describe("Include snippets tagged to archived domains (default false)"),
+      limit: z.number().int().min(1).max(1000).optional().describe("Max rows (default 200, max 1000)"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const windowErr = validateSnippetQueryWindow(params.date_from, params.date_to);
+      if (windowErr) return textResult({ error: windowErr });
+
+      const rows = await fetchSnippetRange(
+        {
+          date_from: params.date_from,
+          date_to: params.date_to,
+          life_domain: params.life_domain,
+          linked_goal_id: params.linked_goal_id,
+          snippet_type: params.snippet_type,
+          include_archived_domains: params.include_archived_domains,
+          limit: params.limit,
+        },
+        params.agentId,
+        userId,
+      );
+
+      return textResult({
+        snippets: rows,
+        count: rows.length,
+        date_range: { from: params.date_from, to: params.date_to },
+      });
+    },
+  );
+
+  server.tool(
+    "memory_progress_summary",
+    "Single-call rollup of snippet rows in a time window. Returns total, by_life_domain, by_snippet_type (includes zero-count keys), by_goal (with top N per goal), stalled list, date_range, and a truncated flag when the window contained more rows than the summary scanned. Use for weekly reviews where multiple memory_query_progress calls would be N round-trips. Window capped at 366 days.\n\nExample: memory_progress_summary({ date_from: '2026-04-17T00:00:00Z', date_to: '2026-04-24T23:59:59Z', top_per_goal: 3 })",
+    {
+      date_from: z.string().describe("ISO 8601 lower bound"),
+      date_to: z.string().describe("ISO 8601 upper bound"),
+      life_domains: z.array(z.string()).max(50).optional().describe("Optional filter to specific domains (max 50)"),
+      top_per_goal: z.number().int().min(1).max(10).optional().describe("Top snippets per goal (default 3, max 10)"),
+      include_archived_domains: z.boolean().optional().describe("Include snippets tagged to archived domains (default false)"),
+      agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const windowErr = validateSnippetQueryWindow(params.date_from, params.date_to);
+      if (windowErr) return textResult({ error: windowErr });
+
+      const topPerGoal = params.top_per_goal ?? 3;
+      const SUMMARY_SCAN_LIMIT = 1000;
+
+      // Push the life_domains filter into SQL so the 1000-row cap isn't
+      // consumed by out-of-scope domains (which would silently under-count the
+      // requested domains). Registered archived domains are excluded by
+      // default; the caller can opt in.
+      const rows = await fetchSnippetRange(
+        {
+          date_from: params.date_from,
+          date_to: params.date_to,
+          life_domains: params.life_domains,
+          include_archived_domains: params.include_archived_domains ?? false,
+          limit: SUMMARY_SCAN_LIMIT,
+        },
+        params.agentId,
+        userId,
+      );
+
+      const by_life_domain: Record<string, number> = {};
+      const by_snippet_type: Record<string, number> = {
+        shipped: 0, advanced: 0, started: 0, stalled: 0, blocked: 0,
+      };
+      const by_goal: Record<string, { count: number; top_snippets: SnippetSummaryRow[] }> = {};
+      const stalled: SnippetSummaryRow[] = [];
+
+      for (const r of rows) {
+        by_life_domain[r.life_domain] = (by_life_domain[r.life_domain] ?? 0) + 1;
+        if (r.snippet_type in by_snippet_type) {
+          by_snippet_type[r.snippet_type] += 1;
+        }
+        if (r.linked_goal_id) {
+          const bucket = by_goal[r.linked_goal_id] ?? { count: 0, top_snippets: [] };
+          bucket.count += 1;
+          if (bucket.top_snippets.length < topPerGoal) {
+            // rows are already DESC by event_ts, so first encounters are the newest
+            bucket.top_snippets.push(r);
+          }
+          by_goal[r.linked_goal_id] = bucket;
+        }
+        if (r.snippet_type === "stalled") stalled.push(r);
+      }
+
+      // Surface truncation to the caller so aggregates can be flagged as
+      // partial. Agents doing weekly reviews should warn users when this is set.
+      const truncated = rows.length === SUMMARY_SCAN_LIMIT;
+
+      return textResult({
+        total: rows.length,
+        truncated,
+        scan_limit: SUMMARY_SCAN_LIMIT,
+        by_life_domain,
+        by_snippet_type,
+        by_goal,
+        stalled,
+        date_range: { from: params.date_from, to: params.date_to },
       });
     },
   );
@@ -1113,7 +1593,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
     {
       query: z.string().describe("Search query — use short, focused terms (e.g. 'job search' not 'job search applications career recruiting')"),
       domain: z.string().optional().describe("Filter by domain"),
-      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Filter by entity type"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Filter by entity type"),
       entityName: z.string().optional().describe("Filter by entity name (case-insensitive)"),
       minConfidence: z.number().optional().describe("Minimum confidence threshold"),
       limit: z.number().optional().describe("Max results (default 20)"),
@@ -1220,7 +1700,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
       token_budget: z.number().optional().describe("Max tokens for the result (default 6000, max 16000)"),
       format: z.enum(["hierarchical", "narrative"]).optional().describe("Output format: 'hierarchical' or 'narrative'. Default: hierarchical"),
       domain: z.string().optional().describe("Filter by domain"),
-      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Filter by entity type"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Filter by entity type"),
       entityName: z.string().optional().describe("Filter by entity name"),
       minConfidence: z.number().optional().describe("Minimum confidence threshold"),
       includeArchived: z.boolean().optional().describe("Include archived memories (default false)"),
@@ -1402,7 +1882,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
     "Retrieve a cached entity profile — a concise summary paragraph about a person, project, organization, or other entity based on all related memories. If no cached profile exists, returns the raw memories so you can synthesize a summary yourself and save it back with save_summary. Use this to get a quick briefing before meetings, when context-switching between projects, or to understand what you know about an entity. Response includes `evidence_memory_ids` — the source memory IDs that fed the profile, so agents can cite specific memories as evidence.",
     {
       entity_name: z.string().describe("Entity name to get a profile for (e.g., 'Sarah Chen', 'Project Alpha')"),
-      entity_type: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Entity type filter (optional — inferred from memories if omitted)"),
+      entity_type: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Entity type filter (optional — inferred from memories if omitted)"),
       save_summary: z.string().optional().describe("If provided, saves this as the entity's profile summary (you generate the summary, Lodis stores it)"),
     },
     async (params, extra) => {
@@ -2114,25 +2594,140 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_list_domains",
-    "List all memory domains with counts",
+    "List all memory domains with counts. Returns per-domain metadata: count of memories, whether it's registered in the domain registry, and whether it's archived. Orphan domains (present in memories but not in the registry — e.g. legacy or generic memory_write values that don't match the slug regex) are returned with registered=false. Archived domains are excluded unless include_archived=true.",
     {
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
+      include_archived: z.boolean().optional().describe("Include archived domains in the response (default false)"),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
-      let query = `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL`;
-      let queryParams: unknown[] = [];
 
-      ({ query, params: queryParams } = await applyReadFilter(query, queryParams, params.agentId, userId));
-
-      query += ` GROUP BY domain ORDER BY count DESC`;
-
-      const results = (await client.execute({
-        sql: query,
-        args: queryParams as (string | number | null)[],
+      // Step 1: counts from memories, permission-filtered.
+      let countsQuery = `SELECT domain, COUNT(*) as count FROM memories WHERE deleted_at IS NULL`;
+      let countsArgs: unknown[] = [];
+      ({ query: countsQuery, params: countsArgs } = await applyReadFilter(countsQuery, countsArgs, params.agentId, userId));
+      countsQuery += ` GROUP BY domain`;
+      const counts = (await client.execute({
+        sql: countsQuery,
+        args: countsArgs as (string | number | null)[],
       })).rows as unknown as { domain: string; count: number }[];
+      const countByDomain = new Map<string, number>();
+      for (const c of counts) countByDomain.set(c.domain, c.count);
 
+      // Step 2: registry rows. We always fetch the ARCHIVED-INCLUSIVE set so
+      // we can tell whether an orphan is actually an archived-registered row
+      // (and suppress it when include_archived=false). Without this, archiving
+      // a domain would make it reappear as a "registered=false" orphan as long
+      // as any memories still reference it — a silently wrong signal to
+      // callers who use `registered` to decide whether it's safe to write.
+      const allRegistryRows = await listDomains(client, { includeArchived: true, userId });
+      const allRegistryByName = new Map(allRegistryRows.map((r) => [r.name, r]));
+      const includeArchived = params.include_archived ?? false;
+
+      const results: Array<{
+        domain: string;
+        count: number;
+        archived: boolean;
+        registered: boolean;
+        description: string | null;
+      }> = [];
+
+      for (const r of allRegistryRows) {
+        if (r.archived && !includeArchived) continue;
+        results.push({
+          domain: r.name,
+          count: countByDomain.get(r.name) ?? 0,
+          archived: r.archived,
+          registered: true,
+          description: r.description,
+        });
+      }
+      for (const [name, count] of countByDomain) {
+        // Skip names that are already in the registry (archived or not) — they
+        // were handled above. Only truly unregistered names fall through here.
+        if (allRegistryByName.has(name)) continue;
+        results.push({
+          domain: name,
+          count,
+          archived: false,
+          registered: false,
+          description: null,
+        });
+      }
+
+      results.sort((a, b) => b.count - a.count);
       return textResult({ domains: results });
+    },
+  );
+
+  server.tool(
+    "memory_register_domain",
+    "Register a new life domain in the registry, or unarchive one that was previously archived. Names must be lowercase-hyphenated (regex ^[a-z][a-z0-9-]{0,62}$). Idempotent — calling on an active registered domain returns status='noop'. When parent_name is provided, the parent must already exist. Requires write permission on the new domain (agents without access to the domain cannot register it).\n\nExample: memory_register_domain({ name: 'advisory', description: 'Board advisory work', sourceAgentId: 'assistant', sourceAgentName: 'Assistant' })",
+    {
+      name: z.string().describe("Lowercase-hyphenated slug name (e.g. 'work', 'sunrise-labs')"),
+      description: z.string().optional().describe("Human-readable description"),
+      parent_name: z.string().optional().describe("Optional parent domain (must already exist)"),
+      sourceAgentId: z.string().describe("Your agent ID"),
+      sourceAgentName: z.string().describe("Your agent name"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const nameErr = validateDomainName(params.name);
+      if (nameErr) return textResult({ error: nameErr });
+      if (!(await checkPermission(params.sourceAgentId, params.name, "write", userId))) {
+        return textResult({ error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${params.name}"` });
+      }
+      try {
+        const r = await registerDomain(client, {
+          name: params.name,
+          description: params.description,
+          parentName: params.parent_name,
+          userId,
+        });
+        await bumpLastModified(client);
+        return textResult({
+          status: r.status,
+          name: r.row.name,
+          archived: r.row.archived,
+          parent_name: r.row.parentName,
+          description: r.row.description,
+        });
+      } catch (err) {
+        return textResult({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  server.tool(
+    "memory_archive_domain",
+    "Archive a life domain. Active snippets are preserved. Future memory_write_snippet calls to this domain are rejected until it is unarchived via memory_register_domain. Requires write permission on the target domain. Returns status='noop' if the domain is unknown or already archived.\n\nExample: memory_archive_domain({ name: 'phoenix', reason: 'Mill exit complete; domain retired.', sourceAgentId: 'assistant', sourceAgentName: 'Assistant' })",
+    {
+      name: z.string().max(63).describe("Domain name to archive"),
+      reason: z.string().max(500).optional().describe("Free-form reason (stderr-logged, not persisted)"),
+      sourceAgentId: z.string().max(100).describe("Your agent ID"),
+      sourceAgentName: z.string().max(100).describe("Your agent name"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const nameErr = validateDomainName(params.name);
+      if (nameErr) return textResult({ error: nameErr });
+      if (!(await checkPermission(params.sourceAgentId, params.name, "write", userId))) {
+        return textResult({ error: `Agent "${params.sourceAgentId}" is not allowed to write to domain "${params.name}"` });
+      }
+      try {
+        const r = await archiveDomain(client, {
+          name: params.name,
+          reason: params.reason,
+          userId,
+          // Injected logger keeps `@lodis/core` portable across non-Node
+          // runtimes while still producing audit output in this server.
+          log: (msg) => { process.stderr.write(msg + "\n"); },
+        });
+        await bumpLastModified(client);
+        return textResult({ status: r.status, name: params.name });
+      } catch (err) {
+        return textResult({ error: err instanceof Error ? err.message : String(err) });
+      }
     },
   );
 
@@ -2141,7 +2736,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
     "Browse the user's memories by domain. Use this to show the user what you know about them in a specific area, or to review memories before a task.",
     {
       domain: z.string().optional().describe("Filter by domain"),
-      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Filter by entity type"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Filter by entity type"),
       entityName: z.string().optional().describe("Filter by entity name (case-insensitive)"),
       permanence: z.enum(["canonical", "active", "ephemeral", "archived"]).optional().describe("Filter by permanence tier"),
       includeArchived: z.boolean().optional().describe("Include archived memories (default false)"),
@@ -2287,7 +2882,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         returned: untyped.length,
         total: totalRow.c,
         message: `${totalRow.c} memories need classification. Use memory_update to set entity_type and entity_name on each.`,
-        valid_entity_types: ["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"],
+        valid_entity_types: ["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"],
       });
     },
   );
@@ -2296,7 +2891,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
     "memory_list_entities",
     "List all known entities grouped by type. Useful for discovering what the system knows about people, organizations, projects, etc.",
     {
-      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision"]).optional().describe("Filter to a specific entity type"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Filter to a specific entity type"),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params, extra) => {
@@ -2911,7 +3506,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
       domain: z.string().optional().describe("Limit analysis to a specific domain"),
       entity_type: z.enum([
         "person", "organization", "place", "project", "preference",
-        "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision",
+        "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet",
       ]).optional().describe("Limit analysis to a specific entity type"),
       entity_name: z.string().optional().describe("Limit analysis to a specific entity"),
       focus: z.enum(["cleanup", "gaps", "both"]).optional().describe("Focus on cleanup issues, knowledge gaps, or both. Default: both"),

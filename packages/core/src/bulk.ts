@@ -21,6 +21,7 @@ const VALID_ENTITY_TYPES: EntityType[] = [
   "skill",
   "resource",
   "decision",
+  "snippet",
 ];
 
 export interface BulkEntry {

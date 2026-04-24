@@ -45,7 +45,8 @@ export type EntityType =
   | "routine"
   | "skill"
   | "resource"
-  | "decision";
+  | "decision"
+  | "snippet";
 
 export interface PersonData {
   name: string;

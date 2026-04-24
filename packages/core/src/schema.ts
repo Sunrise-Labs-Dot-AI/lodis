@@ -35,6 +35,19 @@ export const memories = sqliteTable("memories", {
   archivedAt: text("archived_at"),
   userId: text("user_id"),
   updatedAt: text("updated_at"),
+  // Agent-supplied event timestamp for snippet rows. Display/ordering only —
+  // `learned_at` remains the trusted server-side insertion time. See plan D11.
+  eventTs: text("event_ts"),
+});
+
+export const domains = sqliteTable("domains", {
+  name: text("name").notNull(),
+  description: text("description"),
+  parentName: text("parent_name"),
+  archived: integer("archived").notNull().default(0),
+  archivedAt: text("archived_at"),
+  createdAt: text("created_at").notNull(),
+  userId: text("user_id"),
 });
 
 export const memoryConnections = sqliteTable("memory_connections", {

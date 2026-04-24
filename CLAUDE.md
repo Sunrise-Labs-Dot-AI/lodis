@@ -90,9 +90,9 @@ MCP tool responses include a `url` field on every memory record so clients (Clau
 
 ## Database Schema
 
-Nine tables + two virtual tables:
+Ten tables + two virtual tables:
 
-- **memories** — core storage (id, content, detail, summary, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at, permanence, expires_at, archived_at, user_id)
+- **memories** — core storage (id, content, detail, summary, domain, source_agent_id/name, cross_agent_id/name, source_type, source_description, confidence, confirmed_count, corrected_count, mistake_count, used_count, learned_at, confirmed_at, last_used_at, deleted_at, has_pii_flag, entity_type, entity_name, structured_data, embedding, updated_at, permanence, expires_at, archived_at, event_ts, user_id) — `event_ts` is a snippet-only column (agent-supplied event timestamp; `learned_at` remains the trusted server time)
 - **memory_connections** — relationship graph (source_memory_id, target_memory_id, relationship, updated_at, user_id)
 - **memory_events** — audit trail (id, memory_id, event_type, agent_id, agent_name, old_value, new_value, timestamp, user_id)
 - **agent_permissions** — per-agent read/write by domain (agent_id, domain, can_read, can_write, user_id)
@@ -100,6 +100,7 @@ Nine tables + two virtual tables:
 - **user_settings** — BYOK provider config, tier, encrypted API keys (user_id, tier, byok_provider, byok_api_key_enc, byok_base_url, byok_extraction_model, byok_analysis_model, created_at, updated_at)
 - **api_tokens** — API token management (id, user_id, name, token_hash, scopes, expires_at, revoked_at, created_at)
 - **lodis_meta** — key-value metadata (key, value) — tracks last_modified for cache invalidation
+- **domains** — life-domain registry for snippet writes (name, description, parent_name, archived, archived_at, created_at, user_id). Validated lowercase-hyphenated slugs only; generic `memory_write` does not consult this table (see Snippet section).
 - **memory_fts** — FTS5 virtual table over content, detail, entity_name, source_agent_name
 - **memory_embeddings** — sqlite-vec virtual table (float[384])
 
@@ -107,14 +108,24 @@ IDs are `hex(randomblob(16))`. Timestamps are ISO 8601 TEXT. Confidence is REAL 
 
 ## Entity Types
 
-Memories are classified into 13 entity types: `person`, `organization`, `place`, `project`, `preference`, `event`, `goal`, `fact`, `lesson`, `routine`, `skill`, `resource`, `decision`. Each has:
+Memories are classified into 14 entity types: `person`, `organization`, `place`, `project`, `preference`, `event`, `goal`, `fact`, `lesson`, `routine`, `skill`, `resource`, `decision`, `snippet`. Each has:
 - `entity_type` — the classification
 - `entity_name` — canonical name for dedup (e.g., "Sarah Chen")
 - `structured_data` — JSON with type-specific fields (role, org, category, etc.)
 
 Entity extraction runs in the background via LLM on every `memory_write` (fire-and-forget). Auto-creates connections between entities (works_at, involves, located_at, part_of, about, informed_by, uses).
 
-## MCP Tools (30)
+## Snippet (progress events)
+
+`snippet` is a first-class type for high-frequency progress capture (hourly pollers against Notion, GitHub, Gmail, etc.). Written exclusively via `memory_write_snippet` (generic `memory_write` rejects `entityType: "snippet"` with a redirect error). Snippets are indexed by an agent-supplied `event_timestamp` (stored in a dedicated `event_ts` column) and a validated `life_domain` (must be registered in the `domains` table and not archived).
+
+Defaults: `permanence = ephemeral`, `expires_at = parseTTL("60d")`, `confidence = 1.0`, `source_type = observed`, `entity_name = "Progress: " + titleCase(life_domain)`. Auto-pin rules (`packages/core/src/snippet-rules.ts`): goal-linked ship → `permanence = active` + 180d TTL; `meta.milestone = true` → `permanence = canonical` (nulls `expires_at`). First match wins; goal-linked ship takes precedence.
+
+Rate-limit: 500 writes per `(source_agent_id, life_domain)` per hour, unconditional (applies even when `source_id` is supplied — dedup bypass via random `source_id` would otherwise defeat the cap). `event_timestamp` must fall in `[now − 180d, now + 1h]`. `learned_at` is the server-side insertion time and is the trusted value for audit + rate-limiting; `event_ts` is display/ordering only.
+
+By design, generic `memory_write` does **not** consult the `domains` registry and does **not** lowercase the `domain` param. This means an agent writing `domain: "Fitness"` via generic `memory_write` is stored as an **orphan** (unregistered) row, distinct from the registered `fitness`. `memory_list_domains` surfaces this drift with `registered: false`. Only `memory_write_snippet` enforces the registry.
+
+## MCP Tools (34)
 
 | Tool | Description |
 |------|-------------|
@@ -137,7 +148,12 @@ Entity extraction runs in the background via LLM on every `memory_write` (fire-a
 | `memory_classify` | Auto-classify memories with entity types via LLM |
 | `memory_list_entities` | Discover known entities by type |
 | `memory_list` | Browse by domain, type, or confidence |
-| `memory_list_domains` | List all domains with counts |
+| `memory_list_domains` | List all domains with counts, `registered`/`archived` flags, and optional `include_archived` |
+| `memory_write_snippet` | Validated writer for progress snippets (shipped/advanced/started/stalled/blocked). Enforces the domain registry, rate-limits, and auto-pin rules. Dedups on `(source_system, source_id, event_timestamp)` when `source_id` is supplied. |
+| `memory_query_progress` | Time-ranged snippet query filtered by `life_domain`/`linked_goal_id`/`snippet_type`; uses the indexed `event_ts` column. Window capped at 366 days. |
+| `memory_progress_summary` | Single-call rollup: `{ total, by_life_domain, by_snippet_type, by_goal, stalled, date_range }` for weekly reviews. |
+| `memory_register_domain` | Register/unarchive a slug-form life domain in the registry. Requires write permission on the domain. |
+| `memory_archive_domain` | Archive a life domain so snippet writes are rejected until unarchived. Requires write permission on the domain. |
 | `memory_set_permissions` | Per-agent read/write access control by domain |
 | `memory_scrub` | Detect and redact PII patterns |
 | `memory_onboard` | Guided onboarding: scan connected tools → informed interview → seed |

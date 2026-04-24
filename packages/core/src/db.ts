@@ -6,6 +6,7 @@ import { mkdirSync, chmodSync } from "fs";
 import * as schema from "./schema.js";
 import { setupFTS } from "./fts.js";
 import { setupVec } from "./vec.js";
+import { seedDomainsFromMemories } from "./domains.js";
 
 export type LodisDatabase = LibSQLDatabase<typeof schema>;
 
@@ -343,6 +344,64 @@ async function runMigrations(client: Client): Promise<void> {
       ALTER TABLE context_retrievals ADD COLUMN reranker_engaged INTEGER;
       ALTER TABLE context_retrievals ADD COLUMN reranker_error TEXT;
     `);
+  });
+
+  await runMigration(client, "add_domain_registry_and_snippet_support", async () => {
+    // Domain registry — flex-validated life domains with archive/unarchive
+    // lifecycle. See plan D3, D9, D10.
+    await client.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS domains (
+        name          TEXT    NOT NULL,
+        description   TEXT,
+        parent_name   TEXT,
+        archived      INTEGER NOT NULL DEFAULT 0,
+        archived_at   TEXT,
+        created_at    TEXT    NOT NULL,
+        user_id       TEXT
+      );
+    `);
+    await client.execute({
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_name_user
+            ON domains(IFNULL(user_id, ''), name)`,
+      args: [],
+    });
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_domains_archived
+            ON domains(archived) WHERE archived = 1`,
+      args: [],
+    });
+
+    // Real event_timestamp column for snippets (D11). Nullable — only populated
+    // by memory_write_snippet. `learned_at` remains the trusted server time.
+    await client.executeMultiple(`ALTER TABLE memories ADD COLUMN event_ts TEXT`);
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_event_ts
+            ON memories(event_ts)
+            WHERE event_ts IS NOT NULL AND deleted_at IS NULL`,
+      args: [],
+    });
+
+    // Rate-limit index (D4) — snippets-only partial index keeps it cheap.
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_snippet_agent_domain_learned
+            ON memories(source_agent_id, domain, learned_at)
+            WHERE entity_type = 'snippet' AND deleted_at IS NULL`,
+      args: [],
+    });
+
+    // Dedup expression index for (source_system, source_id) on snippet rows.
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_snippet_source
+            ON memories(json_extract(structured_data, '$.source_system'),
+                        json_extract(structured_data, '$.source_id'))
+            WHERE entity_type = 'snippet' AND deleted_at IS NULL`,
+      args: [],
+    });
+
+    // Seed registry from current distinct slug-valid domain values. Orphan
+    // (non-slug) domains remain un-seeded and visible via memory_list_domains
+    // with registered=false — see plan D8/D9.
+    await seedDomainsFromMemories(client);
   });
 }
 

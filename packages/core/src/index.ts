@@ -29,7 +29,21 @@ export type { BulkEntry, BulkInsertOptions, BulkInsertResult, BulkResultEntry, B
 export { getOrGenerateProfile, saveProfile, getProfile, isProfileStale, listProfiles } from "./entity-profiles.js";
 export type { EntityProfile } from "./entity-profiles.js";
 export { generateToken, hashToken } from "./tokens.js";
-export { userSettings, apiTokens } from "./schema.js";
+export { userSettings, apiTokens, domains } from "./schema.js";
+export {
+  DOMAIN_NAME_RE,
+  validateDomainName,
+  registerDomain,
+  archiveDomain,
+  isDomainRegistered,
+  isDomainArchived,
+  getDomain,
+  listDomains,
+  seedDomainsFromMemories,
+} from "./domains.js";
+export type { DomainRow, RegisterDomainInput, ArchiveDomainInput } from "./domains.js";
+export { evaluateAutoPin } from "./snippet-rules.js";
+export type { PinAction, SnippetForRules } from "./snippet-rules.js";
 export type { Client } from "@libsql/client";
 export { CHAPTERS, listChapters, getChapter, isKnownChapterId, chapterToMarkdown, tocToMarkdown } from "./tutorial/index.js";
 export type { Chapter, ChapterId, Section, ToolReference, TryItNext, ChapterFormat } from "./tutorial/index.js";

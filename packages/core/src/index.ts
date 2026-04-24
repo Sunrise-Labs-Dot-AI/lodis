@@ -3,7 +3,21 @@ export * from "./types.js";
 export * from "./confidence.js";
 export * from "./db.js";
 export { setupFTS, searchFTS } from "./fts.js";
-export { generateEmbedding, generateEmbeddings, getEmbedder, backfillEmbeddings, EMBEDDING_DIM } from "./embeddings.js";
+export {
+  generateEmbedding,
+  generateEmbeddings,
+  getEmbedder,
+  backfillEmbeddings,
+  regenerateEmbeddings,
+  buildEmbedText,
+  legacyEmbedText,
+  extractTags,
+  embedTextForShape,
+  currentEmbeddingShape,
+  contextualEmbeddingsEnabled,
+  EMBEDDING_DIM,
+} from "./embeddings.js";
+export type { EmbedTextInput, EmbeddingShape, RegenerateEmbeddingsOptions, RegenerateEmbeddingsResult } from "./embeddings.js";
 export { setupVec, insertEmbedding, deleteEmbedding, searchVec } from "./vec.js";
 export { hybridSearch } from "./search.js";
 export type { SearchResult, ExpandedResult } from "./search.js";

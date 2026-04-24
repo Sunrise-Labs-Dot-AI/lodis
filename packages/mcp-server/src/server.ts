@@ -17,6 +17,8 @@ import {
   applyCorrect,
   applyMistake,
   generateEmbedding,
+  embedTextForShape,
+  currentEmbeddingShape,
   insertEmbedding,
   searchVec,
   hybridSearch,
@@ -674,11 +676,25 @@ Organize memories by life domain: general, work, health, finance, relationships,
         })
         .run();
 
-      // Store embedding (reuse from dedup or generate fresh)
+      // Store embedding (reuse from dedup or generate fresh).
+      // W1a: embed text respects the currently-enabled shape. When
+      // LODIS_CONTEXTUAL_EMBEDDINGS_ENABLED=1, `buildEmbedText` prepends
+      // `[entity_name] [entity_type] [domain] [tags]` to the text fed to
+      // MiniLM — improves cross-encoder + vec match on compound queries.
+      // NOTE: dedup similarity above may have used legacy shape; that's
+      // fine — dedup compares raw facts, and the threshold has slack.
+      const writeShape = currentEmbeddingShape();
       if (vecAvailable) {
         try {
           if (!embedding) {
-            const embeddingText = params.content + (params.detail ? " " + params.detail : "");
+            const embeddingText = embedTextForShape(writeShape, {
+              content: params.content,
+              detail: params.detail ?? null,
+              entity_name: params.entityName ?? null,
+              entity_type: params.entityType ?? null,
+              domain: params.domain ?? "general",
+              structured_data: params.structuredData ?? null,
+            });
             embedding = await generateEmbedding(embeddingText);
           }
           await insertEmbedding(client, id, embedding);
@@ -686,6 +702,12 @@ Organize memories by life domain: general, work, health, finance, relationships,
           // Embedding failure is non-fatal
         }
       }
+      // Record the shape under which this memory was last embedded — enables
+      // the backfill/rollback scripts to skip already-migrated rows.
+      await client.execute({
+        sql: `UPDATE memories SET embedding_shape = ? WHERE id = ?`,
+        args: [writeShape, id],
+      });
 
       await db.insert(memoryEvents)
         .values({
@@ -1424,14 +1446,31 @@ Organize memories by life domain: general, work, health, finance, relationships,
           });
           memoryId = existingId;
 
-          // Re-generate embedding
+          // Re-generate embedding. W1a: use the currently-enabled shape so
+          // doc-derived memories participate in the contextual-embeddings
+          // experiment on equal footing with hand-written memories. Previously
+          // hardcoded to `${doc.title} ${doc.summary}` which excluded detail
+          // metadata; buildEmbedText pulls entity_name (=title), entity_type,
+          // domain, and tags from structured_data into the bracketed prefix.
           if (vecAvailable) {
             try {
-              const embeddingText = `${doc.title} ${doc.summary}`;
+              const writeShape = currentEmbeddingShape();
+              const embeddingText = embedTextForShape(writeShape, {
+                content,
+                detail: null,
+                entity_name: doc.title,
+                entity_type: "resource",
+                domain,
+                structured_data: structuredData,
+              });
               const emb = await generateEmbedding(embeddingText);
               // Delete old embedding and insert new
               try { await client.execute({ sql: `DELETE FROM memory_embeddings WHERE rowid IN (SELECT rowid FROM memory_embeddings WHERE id = ?)`, args: [existingId] }); } catch { /* ignore */ }
               await insertEmbedding(client, existingId, emb);
+              await client.execute({
+                sql: `UPDATE memories SET embedding_shape = ? WHERE id = ?`,
+                args: [writeShape, existingId],
+              });
             } catch { /* non-fatal */ }
           }
 
@@ -1459,12 +1498,25 @@ Organize memories by life domain: general, work, health, finance, relationships,
             userId: userId ?? null,
           }).run();
 
-          // Generate embedding
+          // Generate embedding (same W1a shape semantics as the update
+          // branch above).
           if (vecAvailable) {
             try {
-              const embeddingText = `${doc.title} ${doc.summary}`;
+              const writeShape = currentEmbeddingShape();
+              const embeddingText = embedTextForShape(writeShape, {
+                content,
+                detail: null,
+                entity_name: doc.title,
+                entity_type: "resource",
+                domain,
+                structured_data: structuredData,
+              });
               const emb = await generateEmbedding(embeddingText);
               await insertEmbedding(client, memoryId, emb);
+              await client.execute({
+                sql: `UPDATE memories SET embedding_shape = ? WHERE id = ?`,
+                args: [writeShape, memoryId],
+              });
             } catch { /* non-fatal */ }
           }
 
@@ -1986,13 +2038,25 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       await db.update(memories).set(updates).where(eq(memories.id, params.id)).run();
 
-      // Re-embed if content changed
+      // Re-embed if content changed. W1a: use the currently-enabled embed
+      // shape so newly-edited memories match the shape of bulk-migrated ones.
       if (params.content !== undefined && vecAvailable) {
         try {
-          const detail = params.detail ?? existing.detail;
-          const embeddingText = params.content + (detail ? " " + detail : "");
+          const writeShape = currentEmbeddingShape();
+          const embeddingText = embedTextForShape(writeShape, {
+            content: params.content,
+            detail: params.detail ?? existing.detail,
+            entity_name: (params.entityName ?? existing.entityName) ?? null,
+            entity_type: (params.entityType ?? existing.entityType) ?? null,
+            domain: params.domain ?? existing.domain,
+            structured_data: existing.structuredData ?? null,
+          });
           const embedding = await generateEmbedding(embeddingText);
           await insertEmbedding(client, params.id, embedding);
+          await client.execute({
+            sql: `UPDATE memories SET embedding_shape = ? WHERE id = ?`,
+            args: [writeShape, params.id],
+          });
         } catch {
           // Non-fatal
         }

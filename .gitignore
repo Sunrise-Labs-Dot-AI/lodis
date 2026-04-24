@@ -13,3 +13,4 @@ handoff-*.md
 SESSION_LOG.md
 .claude/
 packages/landing/.vercel/
+packages/dashboard/.vercel/

@@ -38,6 +38,12 @@ export const memories = sqliteTable("memories", {
   // Agent-supplied event timestamp for snippet rows. Display/ordering only —
   // `learned_at` remains the trusted server-side insertion time. See plan D11.
   eventTs: text("event_ts"),
+  /** Shape of the text fed to generateEmbedding when this row's embedding was
+   *  last written. Introduced in W1a (retrieval-wave-1 plan). NULL = legacy
+   *  `content + " " + detail` (pre-W1a default); "v1-bracketed" =
+   *  buildEmbedText with metadata prefix. Used by the migration script to
+   *  skip already-migrated rows and by rollback tooling to revert shape. */
+  embeddingShape: text("embedding_shape"),
 });
 
 export const domains = sqliteTable("domains", {

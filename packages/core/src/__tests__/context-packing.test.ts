@@ -4,7 +4,7 @@ import { resolve } from "path";
 import { tmpdir } from "os";
 import { randomBytes } from "crypto";
 import type { Client } from "@libsql/client";
-import { computeScoreDistribution, sanitizeFollowUpTarget, contextSearch } from "../context-packing.js";
+import { computeScoreDistribution, sanitizeFollowUpTarget, contextSearch, resolveRerankTopK } from "../context-packing.js";
 import { createDatabase } from "../db.js";
 
 describe("computeScoreDistribution", () => {
@@ -170,5 +170,139 @@ describe("contextSearch reranker diagnostics", () => {
     const res = await contextSearch(client, "anything");
     expect(res.meta.rerankerEngaged).toBe(false);
     expect(res.meta.rerankerError).toBeUndefined();
+  });
+});
+
+describe("contextSearch query-extraction telemetry", () => {
+  let dbPath: string;
+  let client: Client;
+  let originalExtractionEnabled: string | undefined;
+  let originalExtractionDisabled: string | undefined;
+  let originalRerankerDisabled: string | undefined;
+
+  beforeEach(async () => {
+    dbPath = resolve(tmpdir(), `lodis-ctx-qe-${randomBytes(8).toString("hex")}.db`);
+    const result = await createDatabase({ url: "file:" + dbPath });
+    client = result.client;
+    originalExtractionEnabled = process.env.LODIS_QUERY_EXTRACTION_ENABLED;
+    originalExtractionDisabled = process.env.LODIS_QUERY_EXTRACTION_DISABLED;
+    originalRerankerDisabled = process.env.LODIS_RERANKER_DISABLED;
+    // Reranker off to keep tests fast (no model load).
+    process.env.LODIS_RERANKER_DISABLED = "1";
+    delete process.env.LODIS_QUERY_EXTRACTION_ENABLED;
+    delete process.env.LODIS_QUERY_EXTRACTION_DISABLED;
+  });
+
+  afterEach(() => {
+    const restore = (key: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore("LODIS_QUERY_EXTRACTION_ENABLED", originalExtractionEnabled);
+    restore("LODIS_QUERY_EXTRACTION_DISABLED", originalExtractionDisabled);
+    restore("LODIS_RERANKER_DISABLED", originalRerankerDisabled);
+    try {
+      client.close();
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+      if (existsSync(dbPath + "-wal")) unlinkSync(dbPath + "-wal");
+      if (existsSync(dbPath + "-shm")) unlinkSync(dbPath + "-shm");
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  it("always emits queryExtraction meta, even when extraction is disabled (post-review fix for observable rollback)", async () => {
+    // Per code-review for PR #84 (Saboteur-1 / New-Hire-3 findings): meta.queryExtraction
+    // must always be present so dashboards can distinguish "rollback engaged"
+    // from "retrieval path never deployed." Mode "disabled" is a valid state,
+    // not an absent field.
+    const res = await contextSearch(client, "a long query with many words about something");
+    expect(res.meta.queryExtraction).toBeDefined();
+    expect(res.meta.queryExtraction?.mode).toBe("disabled");
+    expect(typeof res.meta.queryExtraction?.originalTokens).toBe("number");
+  });
+
+  it("reports mode=passthrough for short queries when extraction is enabled", async () => {
+    process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+    // 5 tokens → ≤10 → passthrough.
+    const res = await contextSearch(client, "short query only five tokens");
+    expect(res.meta.queryExtraction?.mode).toBe("passthrough");
+    expect(res.meta.queryExtraction?.originalTokens).toBe(5);
+  });
+
+  it("reports mode=keywords for long queries with extractable signal", async () => {
+    process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+    // 15 tokens with proper nouns and substantive words — extraction keeps them.
+    const q =
+      "What did Person_0091 meet with the realtor Magda about for Marin County property search last November";
+    const res = await contextSearch(client, q);
+    expect(res.meta.queryExtraction?.mode).toBe("keywords");
+    expect(res.meta.queryExtraction?.originalTokens).toBe(16);
+  });
+
+  it("reports mode=fallback when extraction leaves <3 signal tokens", async () => {
+    process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+    // 13 stopwords-only. All drop. Falls back to original query.
+    const q = "is the of to a an it he she they them their this that these those or but";
+    const res = await contextSearch(client, q);
+    expect(res.meta.queryExtraction?.mode).toBe("fallback");
+  });
+});
+
+describe("resolveRerankTopK (W1c)", () => {
+  const original = process.env.LODIS_RERANK_TOPK;
+  afterEach(() => {
+    if (original === undefined) delete process.env.LODIS_RERANK_TOPK;
+    else process.env.LODIS_RERANK_TOPK = original;
+  });
+
+  it("defaults to 60 when LODIS_RERANK_TOPK is unset", () => {
+    delete process.env.LODIS_RERANK_TOPK;
+    expect(resolveRerankTopK()).toBe(60);
+  });
+
+  it("respects a valid integer override", () => {
+    process.env.LODIS_RERANK_TOPK = "80";
+    expect(resolveRerankTopK()).toBe(80);
+  });
+
+  it("accepts the boundary value 200", () => {
+    process.env.LODIS_RERANK_TOPK = "200";
+    expect(resolveRerankTopK()).toBe(200);
+  });
+
+  it("accepts the boundary value 1", () => {
+    process.env.LODIS_RERANK_TOPK = "1";
+    expect(resolveRerankTopK()).toBe(1);
+  });
+
+  it("floors non-integer positive values", () => {
+    process.env.LODIS_RERANK_TOPK = "42.9";
+    expect(resolveRerankTopK()).toBe(42);
+  });
+
+  it("falls back to default on garbage values", () => {
+    process.env.LODIS_RERANK_TOPK = "not-a-number";
+    expect(resolveRerankTopK()).toBe(60);
+  });
+
+  it("falls back to default on 0", () => {
+    process.env.LODIS_RERANK_TOPK = "0";
+    expect(resolveRerankTopK()).toBe(60);
+  });
+
+  it("falls back to default on negative values", () => {
+    process.env.LODIS_RERANK_TOPK = "-5";
+    expect(resolveRerankTopK()).toBe(60);
+  });
+
+  it("falls back to default on values exceeding the 200 cap", () => {
+    process.env.LODIS_RERANK_TOPK = "500";
+    expect(resolveRerankTopK()).toBe(60);
+  });
+
+  it("falls back to default on empty string", () => {
+    process.env.LODIS_RERANK_TOPK = "";
+    expect(resolveRerankTopK()).toBe(60);
   });
 });

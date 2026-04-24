@@ -2,6 +2,20 @@ import type { Client } from "@libsql/client";
 import { searchFTS } from "./fts.js";
 import { searchVec } from "./vec.js";
 import { generateEmbedding } from "./embeddings.js";
+import { extractSignalTerms, type QueryExtractionMode } from "./query-extraction.js";
+
+/**
+ * Narrower projection of QueryExtractionResult for public return shape.
+ * Deliberately OMITS `effectiveQuery` (the extracted short form) to prevent
+ * PII from the user's query from ending up in caller-side logs that stringify
+ * the whole return (e.g. `console.log(await hybridSearch(...))`). Per
+ * code-review Saboteur-7 on PR #84. Internal callsites that need
+ * effectiveQuery (e.g. cache key) compute it locally.
+ */
+export interface HybridSearchExtractionSummary {
+  mode: QueryExtractionMode;
+  originalTokens: number;
+}
 
 const RRF_K = 60;
 
@@ -180,7 +194,7 @@ export async function hybridSearch(
     maxDepth?: number;
     similarityThreshold?: number;
   } = {},
-): Promise<{ results: ExpandedResult[]; cached: boolean }> {
+): Promise<{ results: ExpandedResult[]; cached: boolean; extraction: HybridSearchExtractionSummary }> {
   const userId = options.userId ?? null;
   const limit = options.limit ?? 20;
   const expand = options.expand ?? true;
@@ -188,8 +202,45 @@ export async function hybridSearch(
   const similarityThreshold = options.similarityThreshold ?? 0.5;
   const fetchLimit = limit * 3;
 
+  // --- Query preprocessing ---
+  // Long natural-language questions (e.g. MRCR needle questions) flood FTS5
+  // with common tokens and dilute the vector embedding. When enabled, extract
+  // signal terms for retrieval but keep the ORIGINAL query for the caller
+  // (e.g. context-packing passes original to the reranker, which benefits
+  // from full question context). Env-gated (opt-in in v1). See query-extraction.ts.
+  const extraction = extractSignalTerms(query);
+  const effectiveQuery = extraction.effectiveQuery;
+  // Narrow projection for public return — hides effectiveQuery so callers
+  // can't accidentally log the rewritten query (PII risk, Saboteur-7).
+  const extractionSummary: HybridSearchExtractionSummary = {
+    mode: extraction.mode,
+    originalTokens: extraction.originalTokens,
+  };
+
   // --- Check result cache ---
-  const cacheKey = JSON.stringify({ query, userId, ...options });
+  // Cache key includes BOTH effectiveQuery AND original query to avoid
+  // collisions: two distinct long queries that collapse to the same short
+  // form must NOT share a cache slot (would serve one query's results for
+  // another).
+  //
+  // Keys are built in a FIXED, EXPLICIT order (no `...options` spread) so two
+  // callers passing `{limit: 10, domain: "work"}` vs `{domain: "work", limit: 10}`
+  // produce the SAME serialized key. Object-literal spread preserves caller
+  // order, which differs across refactors — a silent cache-bloat risk that
+  // spreads into stale hits at scale (Saboteur-3 on PR #84).
+  const cacheKey = JSON.stringify({
+    originalQuery: query,
+    effectiveQuery,
+    userId: userId ?? null,
+    domain: options.domain ?? null,
+    entityType: options.entityType ?? null,
+    entityName: options.entityName ?? null,
+    minConfidence: options.minConfidence ?? null,
+    limit,
+    expand,
+    maxDepth,
+    similarityThreshold,
+  });
   const currentLastModifiedResult = await client.execute({
     sql: `SELECT value FROM lodis_meta WHERE key = 'last_modified'`,
     args: [],
@@ -198,10 +249,23 @@ export async function hybridSearch(
 
   const cachedEntry = resultCache.get(cacheKey);
   if (cachedEntry && cachedEntry.lastModified === currentLastModified?.value) {
-    return { results: cachedEntry.results, cached: true };
+    return { results: cachedEntry.results, cached: true, extraction: extractionSummary };
   }
 
-  // 1. FTS5 keyword search -> resolve rowids to memory IDs
+  // 1. FTS5 keyword search -> resolve rowids to memory IDs.
+  // Pass the FULL original query, not the extraction-short-form. Rationale:
+  //   - BM25 (via FTS5) self-weights low-IDF tokens toward zero, so keeping
+  //     stopwords doesn't dilute the signal — they just don't contribute.
+  //     Classical IR has been comfortable with bag-of-words verbose queries
+  //     since TREC; modern benchmarks reproduce the effect.
+  //   - Dense search below gets `effectiveQuery` for the OPPOSITE reason:
+  //     bi-encoder embeddings (all-MiniLM-L6-v2, 384d) average across tokens,
+  //     so extraneous words literally pull the vector toward the corpus
+  //     centroid. Measured on MRCR: an 80-word needle question put the
+  //     relevant memories at hybrid ranks 18/35/188; the short form
+  //     "Marin Tiburon Redwood" put them at 1/2/5.
+  //   - The split is the cheap fix. See handoff-retrieval-research-2026-04-24.md
+  //     §Split-Query-Treatment for the referenced literature.
   const ftsIds: string[] = [];
   try {
     const ftsResults = await searchFTS(client, query, fetchLimit);
@@ -222,7 +286,7 @@ export async function hybridSearch(
   const vecIds: string[] = [];
   let queryEmbedding: Float32Array | null = null;
   try {
-    queryEmbedding = await generateEmbedding(query);
+    queryEmbedding = await generateEmbedding(effectiveQuery);
     const vecResults = await searchVec(client, queryEmbedding, fetchLimit);
     vecIds.push(...vecResults.map((r) => r.memory_id));
   } catch {
@@ -284,7 +348,7 @@ export async function hybridSearch(
   const candidateLimit = hasFilters ? rankedIds.length : limit;
   const topIds = rankedIds.slice(0, candidateLimit);
   if (topIds.length === 0) {
-    return { results: [], cached: false };
+    return { results: [], cached: false, extraction: extractionSummary };
   }
 
   const placeholders = topIds.map(() => "?").join(",");
@@ -343,5 +407,5 @@ export async function hybridSearch(
     resultCache.set(cacheKey, { results: expandedResults, lastModified: currentLastModified.value });
   }
 
-  return { results: expandedResults, cached: false };
+  return { results: expandedResults, cached: false, extraction: extractionSummary };
 }

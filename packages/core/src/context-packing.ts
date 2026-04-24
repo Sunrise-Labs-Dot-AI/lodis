@@ -3,6 +3,7 @@ import { hybridSearch, type ExpandedResult } from "./search.js";
 import { effectivePermanence } from "./confidence.js";
 import { getProfile } from "./entity-profiles.js";
 import { rerank } from "./reranker.js";
+import type { QueryExtractionMode } from "./query-extraction.js";
 
 // --- Token estimation ---
 
@@ -17,6 +18,34 @@ function memoryRerankText(r: ExpandedResult): string {
   const content = (r.memory.content as string | null) ?? "";
   const detail = r.memory.detail as string | null;
   return detail ? `${content} ${detail}` : content;
+}
+
+/**
+ * Resolve the reranker topK — how many memories the cross-encoder returns
+ * (NOT how many it scores; it scores all 200 candidates regardless).
+ *
+ * Default: **60**, raised from 40 based on Pinecone and Cohere retrieval-
+ * system guidance that top-30-to-50 is the minimum-useful rerank output for
+ * two-stage pipelines, with top-50-to-100 being the common production sweet
+ * spot. See `handoff-retrieval-research-2026-04-24.md` §Reranking-SOTA for
+ * the source links.
+ *
+ * Upper bound: **200**, because Modal's reference reranker service
+ * (`modal/rerank_app.py`) caps candidate input at 200 and `hybridSearch`
+ * passes at most 200 to the reranker — so the reranker will never RETURN
+ * more than it RECEIVED. Asking for topK > 200 is nonsensical.
+ *
+ * Invalid / out-of-range values (zero, negative, >200, NaN, empty string)
+ * fall BACK to default rather than saturating at the bound — saturating
+ * can mask a config typo (`LODIS_RERANK_TOPK=6000` silently becomes 200);
+ * falling back makes the typo observable via `queryExtraction` telemetry
+ * showing the default value in use.
+ */
+export function resolveRerankTopK(): number {
+  const raw = process.env.LODIS_RERANK_TOPK;
+  if (!raw) return 60;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 200 ? Math.floor(n) : 60;
 }
 
 // --- Types ---
@@ -95,6 +124,12 @@ export interface ContextMeta {
   /** Error message if the reranker threw (truncated). Callers/dashboards can
    *  use this to detect silent fallback to RRF ordering. */
   rerankerError?: string;
+  /** How the query was preprocessed before hybrid retrieval. See
+   *  query-extraction.ts. Omitted when extraction is disabled via env. */
+  queryExtraction?: {
+    mode: QueryExtractionMode;
+    originalTokens: number;
+  };
 }
 
 export interface HierarchicalResult {
@@ -609,7 +644,7 @@ export async function contextSearch(
   // scores to guide expansion. When disabled, fall back to the legacy single-
   // stage path (limit=50 + expand). LODIS_RERANKER_DISABLED=1 opts out.
   const stage1Limit = rerankerEnabled ? 200 : 50;
-  const { results } = await hybridSearch(client, query, {
+  const { results, extraction } = await hybridSearch(client, query, {
     userId: options.userId,
     domain: options.domain,
     entityType: options.entityType,
@@ -630,7 +665,12 @@ export async function contextSearch(
   // We track `rerankerEngaged` and `rerankerError` in ContextMeta so callers
   // / dashboards can detect silent fallback — the bare catch in the v0 of
   // this code made Stage-2 regressions undetectable from the response.
-  const rerankTopK = 40;
+  // Default 60 (raised from 40); see resolveRerankTopK() above for the
+  // rationale + handoff-retrieval-research-2026-04-24.md §Reranking-SOTA
+  // for the published guidance this is based on. Reranker scores all 200
+  // candidates regardless; topK only bounds how many come out. No extra
+  // reranker latency. Env-configurable for experimentation/rollback.
+  const rerankTopK = resolveRerankTopK();
   let reranked: ExpandedResult[];
   let rerankerEngaged: boolean | undefined;
   let rerankerError: string | undefined;
@@ -706,6 +746,7 @@ export async function contextSearch(
         suggestedFollowUps,
         rerankerEngaged,
         ...(rerankerError ? { rerankerError } : {}),
+        queryExtraction: { mode: extraction.mode, originalTokens: extraction.originalTokens },
       },
     };
   }
@@ -757,6 +798,7 @@ export async function contextSearch(
       suggestedFollowUps,
       rerankerEngaged,
       ...(rerankerError ? { rerankerError } : {}),
+      queryExtraction: { mode: extraction.mode, originalTokens: extraction.originalTokens },
     },
   };
 }

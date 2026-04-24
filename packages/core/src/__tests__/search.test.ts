@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { randomBytes } from "crypto";
 import { createDatabase, bumpLastModified } from "../db.js";
 import { searchFTS } from "../fts.js";
+import { hybridSearch } from "../search.js";
 import type { Client } from "@libsql/client";
 
 function tempDbPath(): string {
@@ -205,6 +206,107 @@ describe("search", () => {
       });
       const after = afterResult.rows[0].value as string;
       expect(after).not.toBe(before);
+    });
+  });
+
+  describe("W1b split-query routing", () => {
+    // W1b: hybridSearch routes the FULL original query to FTS5 (BM25 tolerates
+    // verbose queries), and the extraction short form to the vec/embedding
+    // path (bi-encoders dilute on length). When extraction is disabled, both
+    // paths see the same string. The split only observably matters in
+    // `keywords` mode; in `passthrough`/`fallback`/`disabled` modes
+    // effectiveQuery === query.
+    //
+    // Integration-level assertions — we can't mock searchFTS without
+    // restructuring imports, so tests verify via the extraction metadata
+    // + behavioral outcomes on a real fixture.
+
+    const originalExtractionEnabled = process.env.LODIS_QUERY_EXTRACTION_ENABLED;
+    const originalRerankerDisabled = process.env.LODIS_RERANKER_DISABLED;
+
+    beforeEach(() => {
+      // Reranker off for speed (no model load); W1b is orthogonal to the reranker.
+      process.env.LODIS_RERANKER_DISABLED = "1";
+    });
+
+    afterEach(() => {
+      if (originalExtractionEnabled === undefined) delete process.env.LODIS_QUERY_EXTRACTION_ENABLED;
+      else process.env.LODIS_QUERY_EXTRACTION_ENABLED = originalExtractionEnabled;
+      if (originalRerankerDisabled === undefined) delete process.env.LODIS_RERANKER_DISABLED;
+      else process.env.LODIS_RERANKER_DISABLED = originalRerankerDisabled;
+    });
+
+    it("extraction disabled: FTS and vec receive the same string (effectiveQuery === query)", async () => {
+      delete process.env.LODIS_QUERY_EXTRACTION_ENABLED;
+      await insertMemory(client, "m1", "Marin County property search notes");
+
+      const longQuery = "What are the details about the Marin County property search and notes that I have";
+      const result = await hybridSearch(client, longQuery, { limit: 10, expand: false });
+
+      expect(result.extraction.mode).toBe("disabled");
+      expect(result.extraction.originalTokens).toBeGreaterThan(0);
+    });
+
+    it("extraction enabled + short query: passthrough, both paths see same string", async () => {
+      process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+      await insertMemory(client, "m1", "Marin County property search");
+
+      const shortQuery = "Marin County property search";
+      const result = await hybridSearch(client, shortQuery, { limit: 10, expand: false });
+
+      expect(result.extraction.mode).toBe("passthrough");
+      expect(result.extraction.originalTokens).toBe(4);
+    });
+
+    it("extraction enabled + long query: engages keywords mode; original query still routed to FTS for signal preservation", async () => {
+      process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+      await insertMemory(client, "m1", "Marin County property search notes from realtor");
+
+      // 11+ tokens to trigger extraction. Mix of stopwords + signal.
+      const longQuery = "What are the specific Marin County property search notes from the realtor for this year";
+      const result = await hybridSearch(client, longQuery, { limit: 10, expand: false });
+
+      expect(result.extraction.mode).toBe("keywords");
+      // extraction summary exposes only {mode, originalTokens} — effectiveQuery
+      // is deliberately omitted from the public return to avoid logging the
+      // rewritten query (PII risk, Saboteur-7). mode="keywords" is sufficient
+      // evidence that the short form differs from the full query.
+      expect(result.extraction.originalTokens).toBeGreaterThan(10);
+      // Memory still found — both paths had enough signal to retrieve it.
+      expect(result.results.length).toBeGreaterThan(0);
+      expect(result.results.map((r) => r.id)).toContain("m1");
+    });
+
+    it("cache key disambiguates two long queries (Saboteur-1 regression guard; strengthened per Saboteur-9)", async () => {
+      process.env.LODIS_QUERY_EXTRACTION_ENABLED = "1";
+      await insertMemory(client, "m1", "Marin County property search memo from realtor");
+
+      // Two queries with similar rare tokens but distinguishable content.
+      // The PREVIOUS version of this test asserted only `cached === false` for
+      // both calls — which would pass trivially even if the cache key were
+      // buggy, because the SECOND call reads the lastModified at-call-time
+      // and finds it doesn't match any prior entry when last_modified was bumped
+      // in between. This version asserts that the cache ACTUALLY holds distinct
+      // entries AND that serving each query uses its own slot.
+      const q1 = "What are the specific details about the Marin County property search I am doing";
+      const q2 = "Have I started the Marin County property search for my family move";
+
+      const r1 = await hybridSearch(client, q1, { limit: 10, expand: false });
+      // r1 should miss cache (first call ever for this key).
+      expect(r1.cached).toBe(false);
+      // Second call with SAME query should be served from cache (proves the
+      // first write populated the cache at all).
+      const r1cached = await hybridSearch(client, q1, { limit: 10, expand: false });
+      expect(r1cached.cached).toBe(true);
+      // r2 is a DIFFERENT original query, even though stopwords differ. The
+      // cache key includes originalQuery — this must NOT collide with r1's
+      // slot. So r2 should miss cache (as if it's the first time) even though
+      // r1's slot is warm in the same process.
+      const r2 = await hybridSearch(client, q2, { limit: 10, expand: false });
+      expect(r2.cached).toBe(false);
+      // Both should have engaged extraction; both should hit mode=keywords.
+      expect(r1.extraction.mode).toBe("keywords");
+      expect(r2.extraction.mode).toBe("keywords");
     });
   });
 });

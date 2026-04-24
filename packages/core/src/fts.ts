@@ -41,6 +41,12 @@ export async function setupFTS(client: Client): Promise<void> {
  * Preprocess a search query for FTS5.
  * - Splits on whitespace into tokens
  * - Wraps each token in double quotes to escape FTS5 operators
+ * - Escapes embedded double-quotes (SQLite FTS5 convention: "" inside a
+ *   phrase is a literal quote) — without this, a user query containing
+ *   `say "hello"` produces `"say" OR ""hello""` which breaks FTS5's
+ *   phrase parser and silently collapses the MATCH (Security-3 on PR #84,
+ *   adversarial agents could selectively degrade retrieval by crafting
+ *   quote-containing queries that throw inside searchFTS's try/catch).
  * - Joins with OR so any matching token contributes results
  */
 function preprocessFTSQuery(query: string): string {
@@ -49,9 +55,9 @@ function preprocessFTSQuery(query: string): string {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
   if (tokens.length === 0) return query;
-  // Quote each token to prevent FTS5 syntax errors from special chars,
-  // then join with OR for broad matching
-  return tokens.map((t) => `"${t}"`).join(" OR ");
+  // Quote each token to prevent FTS5 syntax errors from special chars;
+  // escape embedded " by doubling per SQLite FTS5 convention.
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(" OR ");
 }
 
 export async function searchFTS(

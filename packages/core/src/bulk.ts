@@ -1,6 +1,6 @@
 import type { Client, InStatement } from "@libsql/client";
 import { randomBytes } from "crypto";
-import { generateEmbeddings } from "./embeddings.js";
+import { generateEmbeddings, embedTextForShape, currentEmbeddingShape, type EmbeddingShape } from "./embeddings.js";
 import { searchVec } from "./vec.js";
 import { getInitialConfidence, parseTTL } from "./confidence.js";
 import { detectSensitiveData } from "./pii.js";
@@ -118,6 +118,14 @@ export async function bulkInsertMemories(
   const batchSize = Math.max(1, opts.batchSize ?? 100);
   const userId = opts.userId ?? null;
 
+  // Resolve the embed shape ONCE for this entire call. Per Saboteur-2 on
+  // PR #86: calling currentEmbeddingShape() separately in the prep loop and
+  // the INSERT loop allows the env flag to flip mid-run (multi-process envs
+  // or dynamic-config reloads) — the embed text would be built under shape A
+  // but the row's embedding_shape column would record shape B, producing a
+  // shape-vector mismatch that the migration script would skip silently.
+  const shape: EmbeddingShape = currentEmbeddingShape();
+
   const results: BulkResultEntry[] = [];
   const prepared: PreparedEntry[] = [];
 
@@ -136,8 +144,19 @@ export async function bulkInsertMemories(
 
       const sourceType: SourceType = e.sourceType ?? "observed";
       const detail = e.detail ?? null;
-      const embeddingText = e.content + (detail ? " " + detail : "");
-      const hasPii = detectSensitiveData(embeddingText).length > 0 ? 1 : 0;
+      // Embed text uses the call-level shape snapshot. PII detection runs on
+      // the raw content+detail so metadata brackets don't false-positive.
+      // See embeddings.ts W1a module comment.
+      const rawText = e.content + (detail ? " " + detail : "");
+      const embeddingText = embedTextForShape(shape, {
+        content: e.content,
+        detail,
+        entity_name: e.entityName ?? null,
+        entity_type: e.entityType ?? null,
+        domain: e.domain ?? "general",
+        structured_data: e.structuredData ?? null,
+      });
+      const hasPii = detectSensitiveData(rawText).length > 0 ? 1 : 0;
 
       let permanence: string | null = e.permanence ?? null;
       let expiresAt: string | null = null;
@@ -221,6 +240,7 @@ export async function bulkInsertMemories(
     const chunk = toInsert.slice(start, start + batchSize);
     const stmts: InStatement[] = [];
 
+    // `shape` resolved once at top of bulkInsertMemories (see comment there).
     for (const p of chunk) {
       stmts.push({
         sql: `INSERT INTO memories (
@@ -229,8 +249,8 @@ export async function bulkInsertMemories(
           source_type, source_description,
           confidence, learned_at, has_pii_flag,
           entity_type, entity_name, structured_data,
-          permanence, expires_at, user_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          permanence, expires_at, user_id, embedding_shape
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           p.id,
           p.content,
@@ -249,6 +269,7 @@ export async function bulkInsertMemories(
           p.permanence,
           p.expiresAt,
           userId,
+          shape,
         ],
       });
 

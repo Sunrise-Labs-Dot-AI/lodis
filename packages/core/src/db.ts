@@ -403,6 +403,19 @@ async function runMigrations(client: Client): Promise<void> {
     // with registered=false — see plan D8/D9.
     await seedDomainsFromMemories(client);
   });
+
+  await runMigration(client, "add_embedding_shape_column", async () => {
+    // W1a (retrieval-wave-1 plan): track which embed-text shape a row's
+    // embedding was written under. NULL = legacy `content + " " + detail`
+    // (pre-W1a default). "v1-bracketed" = buildEmbedText with metadata prefix.
+    // Used by the migration script to skip already-migrated rows and by
+    // rollback tooling to target rows at a specific shape.
+    await client.executeMultiple(`
+      ALTER TABLE memories ADD COLUMN embedding_shape TEXT;
+      CREATE INDEX IF NOT EXISTS idx_memories_embedding_shape
+        ON memories(embedding_shape) WHERE deleted_at IS NULL;
+    `);
+  });
 }
 
 export async function createDatabase(config?: {

@@ -2,6 +2,7 @@ import type { Client } from "@libsql/client";
 import { searchFTS } from "./fts.js";
 import { searchVec } from "./vec.js";
 import { generateEmbedding } from "./embeddings.js";
+import { extractSignalTerms, type QueryExtractionResult } from "./query-extraction.js";
 
 const RRF_K = 60;
 
@@ -180,7 +181,7 @@ export async function hybridSearch(
     maxDepth?: number;
     similarityThreshold?: number;
   } = {},
-): Promise<{ results: ExpandedResult[]; cached: boolean }> {
+): Promise<{ results: ExpandedResult[]; cached: boolean; extraction: QueryExtractionResult }> {
   const userId = options.userId ?? null;
   const limit = options.limit ?? 20;
   const expand = options.expand ?? true;
@@ -188,8 +189,26 @@ export async function hybridSearch(
   const similarityThreshold = options.similarityThreshold ?? 0.5;
   const fetchLimit = limit * 3;
 
+  // --- Query preprocessing ---
+  // Long natural-language questions (e.g. MRCR needle questions) flood FTS5
+  // with common tokens and dilute the vector embedding. When enabled, extract
+  // signal terms for retrieval but keep the ORIGINAL query for the caller
+  // (e.g. context-packing passes original to the reranker, which benefits
+  // from full question context). Env-gated (opt-in in v1). See query-extraction.ts.
+  const extraction = extractSignalTerms(query);
+  const effectiveQuery = extraction.effectiveQuery;
+
   // --- Check result cache ---
-  const cacheKey = JSON.stringify({ query, userId, ...options });
+  // Cache key includes BOTH effectiveQuery AND original query to avoid
+  // collisions: two distinct long queries that collapse to the same short
+  // form must NOT share a cache slot (would serve one query's results for
+  // another).
+  const cacheKey = JSON.stringify({
+    query: effectiveQuery,
+    originalQuery: query,
+    userId,
+    ...options,
+  });
   const currentLastModifiedResult = await client.execute({
     sql: `SELECT value FROM lodis_meta WHERE key = 'last_modified'`,
     args: [],
@@ -198,10 +217,15 @@ export async function hybridSearch(
 
   const cachedEntry = resultCache.get(cacheKey);
   if (cachedEntry && cachedEntry.lastModified === currentLastModified?.value) {
-    return { results: cachedEntry.results, cached: true };
+    return { results: cachedEntry.results, cached: true, extraction };
   }
 
-  // 1. FTS5 keyword search -> resolve rowids to memory IDs
+  // 1. FTS5 keyword search -> resolve rowids to memory IDs.
+  // Pass the FULL original query, not the extraction-short-form: BM25 tolerates
+  // verbose queries well (low-IDF tokens self-weight low), so keeping every
+  // signal term preserves recall on long natural-language questions. Dense
+  // search below gets effectiveQuery for the opposite reason — bi-encoder
+  // embeddings dilute on verbose input. W1b in retrieval-wave-1 plan.
   const ftsIds: string[] = [];
   try {
     const ftsResults = await searchFTS(client, query, fetchLimit);
@@ -222,7 +246,7 @@ export async function hybridSearch(
   const vecIds: string[] = [];
   let queryEmbedding: Float32Array | null = null;
   try {
-    queryEmbedding = await generateEmbedding(query);
+    queryEmbedding = await generateEmbedding(effectiveQuery);
     const vecResults = await searchVec(client, queryEmbedding, fetchLimit);
     vecIds.push(...vecResults.map((r) => r.memory_id));
   } catch {
@@ -284,7 +308,7 @@ export async function hybridSearch(
   const candidateLimit = hasFilters ? rankedIds.length : limit;
   const topIds = rankedIds.slice(0, candidateLimit);
   if (topIds.length === 0) {
-    return { results: [], cached: false };
+    return { results: [], cached: false, extraction };
   }
 
   const placeholders = topIds.map(() => "?").join(",");
@@ -343,5 +367,5 @@ export async function hybridSearch(
     resultCache.set(cacheKey, { results: expandedResults, lastModified: currentLastModified.value });
   }
 
-  return { results: expandedResults, cached: false };
+  return { results: expandedResults, cached: false, extraction };
 }

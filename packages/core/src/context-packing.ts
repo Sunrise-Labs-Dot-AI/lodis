@@ -3,6 +3,7 @@ import { hybridSearch, type ExpandedResult } from "./search.js";
 import { effectivePermanence } from "./confidence.js";
 import { getProfile } from "./entity-profiles.js";
 import { rerank } from "./reranker.js";
+import type { QueryExtractionMode } from "./query-extraction.js";
 
 // --- Token estimation ---
 
@@ -17,6 +18,20 @@ function memoryRerankText(r: ExpandedResult): string {
   const content = (r.memory.content as string | null) ?? "";
   const detail = r.memory.detail as string | null;
   return detail ? `${content} ${detail}` : content;
+}
+
+/**
+ * Resolve the reranker topK (how many memories the cross-encoder returns).
+ * Default 60 (raised from 40 per W1c in retrieval-wave-1 plan). Override via
+ * LODIS_RERANK_TOPK env var. Reranker scores all 200 candidates regardless;
+ * topK only bounds the output. Clamped to 1-200; invalid values fall back
+ * to default. Exported for testability.
+ */
+export function resolveRerankTopK(): number {
+  const raw = process.env.LODIS_RERANK_TOPK;
+  if (!raw) return 60;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 200 ? Math.floor(n) : 60;
 }
 
 // --- Types ---
@@ -95,6 +110,12 @@ export interface ContextMeta {
   /** Error message if the reranker threw (truncated). Callers/dashboards can
    *  use this to detect silent fallback to RRF ordering. */
   rerankerError?: string;
+  /** How the query was preprocessed before hybrid retrieval. See
+   *  query-extraction.ts. Omitted when extraction is disabled via env. */
+  queryExtraction?: {
+    mode: QueryExtractionMode;
+    originalTokens: number;
+  };
 }
 
 export interface HierarchicalResult {
@@ -609,7 +630,7 @@ export async function contextSearch(
   // scores to guide expansion. When disabled, fall back to the legacy single-
   // stage path (limit=50 + expand). LODIS_RERANKER_DISABLED=1 opts out.
   const stage1Limit = rerankerEnabled ? 200 : 50;
-  const { results } = await hybridSearch(client, query, {
+  const { results, extraction } = await hybridSearch(client, query, {
     userId: options.userId,
     domain: options.domain,
     entityType: options.entityType,
@@ -630,7 +651,10 @@ export async function contextSearch(
   // We track `rerankerEngaged` and `rerankerError` in ContextMeta so callers
   // / dashboards can detect silent fallback — the bare catch in the v0 of
   // this code made Stage-2 regressions undetectable from the response.
-  const rerankTopK = 40;
+  // rerankTopK default raised 40 → 60 (W1c in retrieval-wave-1 plan). Reranker
+  // scores all 200 candidates regardless; topK only bounds how many come out.
+  // No extra reranker latency. Env-configurable for experimentation/rollback.
+  const rerankTopK = resolveRerankTopK();
   let reranked: ExpandedResult[];
   let rerankerEngaged: boolean | undefined;
   let rerankerError: string | undefined;
@@ -706,6 +730,9 @@ export async function contextSearch(
         suggestedFollowUps,
         rerankerEngaged,
         ...(rerankerError ? { rerankerError } : {}),
+        ...(extraction.mode !== "disabled"
+          ? { queryExtraction: { mode: extraction.mode, originalTokens: extraction.originalTokens } }
+          : {}),
       },
     };
   }
@@ -757,6 +784,9 @@ export async function contextSearch(
       suggestedFollowUps,
       rerankerEngaged,
       ...(rerankerError ? { rerankerError } : {}),
+      ...(extraction.mode !== "disabled"
+        ? { queryExtraction: { mode: extraction.mode, originalTokens: extraction.originalTokens } }
+        : {}),
     },
   };
 }

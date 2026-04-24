@@ -7,6 +7,8 @@ export { generateEmbedding, generateEmbeddings, getEmbedder, backfillEmbeddings,
 export { setupVec, insertEmbedding, deleteEmbedding, searchVec } from "./vec.js";
 export { hybridSearch } from "./search.js";
 export type { SearchResult, ExpandedResult } from "./search.js";
+export { extractSignalTerms } from "./query-extraction.js";
+export type { QueryExtractionResult, QueryExtractionMode } from "./query-extraction.js";
 export { rerank, getReranker, DEFAULT_RERANKER_MODEL, LocalReranker, HttpReranker, selectRerankerProvider } from "./reranker.js";
 export type { RerankCandidate, RerankResult, RerankOptions, RerankerProvider } from "./reranker.js";
 export { contextSearch, computeScoreDistribution, sanitizeFollowUpTarget } from "./context-packing.js";

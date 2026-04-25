@@ -98,6 +98,18 @@ const authToken = process.env.LODIS_AUTH_TOKEN;
 const { client } = await createDatabase(dbUrl ? { url: dbUrl, authToken } : undefined);
 console.error(`[L4] connected to ${dbUrl ?? "default local Lodis DB"}`);
 
+// Nh-N8 in code-review round 1: hosted DBs are multi-tenant. Without --user-id,
+// USER_ID is null and the ownership check `user_id IS NULL` matches only
+// rows with a NULL user_id — typically zero rows on hosted Turso → silent
+// "no memories to process" exit. Warn loudly.
+if (dbUrl && !USER_ID) {
+  console.error(
+    "[L4] WARNING: connected to a remote DB without --user-id; only memories with " +
+      "user_id IS NULL will be processed (typically zero on hosted Turso). " +
+      "Pass --user-id <id> to target a specific user's memories.",
+  );
+}
+
 // ---------- State file ----------
 function loadState() {
   if (!fs.existsSync(STATE_PATH)) {
@@ -123,10 +135,17 @@ console.error(
 
 // ---------- Prompt construction (XML-delimited, instruction-isolated) ----------
 function escapeXml(s) {
+  // Escapes both element-content (& < >) AND attribute-context (" ').
+  // Element-content alone would be sufficient for current usage but quote
+  // escaping is defense-in-depth (Sec-N5 in code-review round 1) — if a
+  // future edit interpolates a user string into an attribute value, the
+  // function is already safe.
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const RELATIONSHIP_VOCAB = [
@@ -189,8 +208,12 @@ async function classifyConnections(source, candidates) {
     }),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "<unreadable>");
-    throw new Error(`Anthropic ${res.status}: ${body.slice(0, 300)}`);
+    // Sec-W1 fix in code-review round 1: do NOT echo Anthropic's response body
+    // to stderr — error messages from Anthropic 400-class responses can include
+    // chunks of the rejected payload (i.e., user memory content), and any
+    // upstream-proxy error could include token fragments. Status code only.
+    // Drop the body unread to avoid even capturing it in node memory.
+    throw new Error(`Anthropic API ${res.status}`);
   }
   const data = await res.json();
   const inputTokens = data.usage?.input_tokens ?? 0;
@@ -212,30 +235,27 @@ async function classifyConnections(source, candidates) {
   return { connections: parsed, inputTokens, outputTokens, cost };
 }
 
-// ---------- PII filter wrapper ----------
+// ---------- Source selection ----------
+// Push BOTH the PII filter AND the resume-cursor (already-processed IDs) into
+// the SQL of selectSourceMemoriesForProposals. Code-review round 1 caught two
+// bugs in the previous client-side approach:
+//   (Sb-C2) PII livelock: client-side filter AFTER LIMIT — if the oldest 40
+//     rows are all PII, fresh=[] → loop exits before non-PII ever processed.
+//   (Perf-W8) Over-fetch degradation: as processedSet grows, the fixed 4×
+//     over-fetch ratio yields fewer fresh rows per call → premature exit.
+// Server-side filter eliminates both.
 async function selectFiltered(client, userId, opts) {
-  const sources = await selectSourceMemoriesForProposals(client, userId, opts);
-  if (INCLUDE_PII) return sources;
-  // Re-query to drop has_pii_flag=1 rows. selectSourceMemoriesForProposals
-  // doesn't expose this filter; doing it here keeps the helper pure.
-  if (sources.length === 0) return [];
-  const ids = sources.map((s) => s.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const r = await client.execute({
-    sql: `SELECT id FROM memories
-            WHERE id IN (${placeholders})
-              AND (has_pii_flag IS NULL OR has_pii_flag = 0)`,
-    args: ids,
+  return selectSourceMemoriesForProposals(client, userId, {
+    ...opts,
+    excludePii: !INCLUDE_PII,
+    excludeIds: [...processedSet],
   });
-  const allowed = new Set(r.rows.map((row) => row.id));
-  return sources.filter((s) => allowed.has(s.id));
 }
 
 // ---------- Main loop ----------
 let totalProposed = 0;
 let totalCommitted = 0;
 let totalEmpty = 0;
-let totalSkippedPii = 0;
 let runStartedAt = Date.now();
 
 console.error(
@@ -246,31 +266,30 @@ console.error(
 
 // eslint-disable-next-line no-constant-condition
 while (true) {
-  if (state.estimated_cost_usd >= MAX_COST_USD) {
-    console.error(`[L4] cost cap reached ($${state.estimated_cost_usd.toFixed(4)} >= $${MAX_COST_USD}); stopping`);
-    saveState(state);
-    process.exit(2);
-  }
   if (LIMIT > 0 && totalProposed >= LIMIT) {
     console.error(`[L4] caller limit ${LIMIT} reached; stopping`);
     break;
   }
 
-  // Fetch a batch of unprocessed source memories.
-  const fetchSize = BATCH_SIZE * 4; // over-fetch in case many are already processed
-  const sources = await selectFiltered(client, USER_ID, { limit: fetchSize, minAgeHours: 0 });
-  const fresh = sources.filter((s) => !processedSet.has(s.id));
-  if (fresh.length === 0) {
+  // SQL-side filter handles PII + already-processed IDs, so the response is
+  // guaranteed-fresh — no over-fetch, no JS re-filter, no livelock.
+  const batch = await selectFiltered(client, USER_ID, { limit: BATCH_SIZE, minAgeHours: 0 });
+  if (batch.length === 0) {
     console.error("[L4] no more unprocessed source memories; done");
     break;
   }
-  totalSkippedPii += sources.length - fresh.length; // approximate; PII filter overlap
-
-  const batch = fresh.slice(0, BATCH_SIZE);
 
   for (const source of batch) {
-    // Stamp BEFORE the API call (Saboteur F1: empty results MUST be stamped
-    // too so re-runs don't re-process them).
+    // Cost cap check INSIDE the inner loop (Sb-W5 fix in code-review round 1):
+    // checking once per outer batch could overshoot by BATCH_SIZE × per-call.
+    // With state-file resume, an abort here is recoverable on re-run.
+    if (state.estimated_cost_usd >= MAX_COST_USD) {
+      console.error(`[L4] cost cap reached ($${state.estimated_cost_usd.toFixed(4)} >= $${MAX_COST_USD}); stopping`);
+      saveState(state);
+      process.exit(2);
+    }
+    // Stamp BEFORE the API call (Sb-F1 from plan-review: empty results MUST be
+    // stamped too so re-runs don't re-process them).
     processedSet.add(source.id);
     state.processed = [...processedSet];
     saveState(state);
@@ -345,12 +364,33 @@ while (true) {
 }
 
 // ---------- Final report ----------
+// Count PII-flagged zero-edge memories the script would have skipped if not
+// in --include-pii mode. One-shot accurate count instead of accumulating an
+// approximate during the loop.
+let piiSkippedCount = 0;
+if (!INCLUDE_PII) {
+  try {
+    const r = await client.execute({
+      sql: `SELECT COUNT(*) AS c FROM memories m
+             LEFT JOIN memory_connections mc ON mc.source_memory_id = m.id
+            WHERE mc.source_memory_id IS NULL
+              AND m.deleted_at IS NULL
+              AND m.user_id IS ?
+              AND m.entity_type IS NOT 'snippet'
+              AND m.has_pii_flag = 1`,
+      args: [USER_ID],
+    });
+    piiSkippedCount = (r.rows[0]?.c) ?? 0;
+  } catch {
+    // Best-effort; not worth aborting the report
+  }
+}
 const elapsedSec = ((Date.now() - runStartedAt) / 1000).toFixed(1);
 console.log(`\n# Wave 2.5 L4 backfill — final report\n`);
 console.log(`- Memories processed this run: ${totalProposed}`);
 console.log(`- Edges committed this run: ${totalCommitted}`);
 console.log(`- Memories with no edges (LLM returned empty or low-confidence): ${totalEmpty}`);
-console.log(`- PII-skipped (approximate, this run): ${totalSkippedPii}`);
+console.log(`- PII-flagged zero-edge memories skipped (excluded server-side): ${piiSkippedCount}${INCLUDE_PII ? " [N/A: --include-pii set]" : ""}`);
 console.log(`- Estimated total cost (lifetime): $${state.estimated_cost_usd.toFixed(4)}`);
 console.log(`- Total memories ever processed: ${processedSet.size}`);
 console.log(`- Total edges ever committed: ${state.edges_committed}`);

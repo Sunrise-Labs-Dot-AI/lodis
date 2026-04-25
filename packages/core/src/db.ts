@@ -435,19 +435,68 @@ async function runMigrations(client: Client): Promise<void> {
     //     plan-review round 2: without this, L2a degrades to a full scan on
     //     the hottest write path on Turso multi-tenant DBs at 100K+ rows.
     //
+    // (3) target_memory_id covering index: fetchPprEdges uses
+    //     `WHERE source_memory_id IN (200) AND target_memory_id IN (200)`.
+    //     The unique edge index covers source-side; this one covers target-side
+    //     so both IN-clauses are index-accelerated. Perf-W7 in code-review.
+    //
     // Both are CREATE ... IF NOT EXISTS — safe re-run. Rollback: DROP INDEX
     // (universally supported, no Turso libSQL version dependency).
-    await client.execute({
-      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
-              ON memory_connections(source_memory_id, target_memory_id, relationship)`,
-      args: [],
-    });
+
+    // CRITICAL: dedup pre-pass for the unique index (Sb-C1 in code-review
+    // round 1). On a dirty production DB, pre-existing duplicate
+    // (source, target, relationship) rows from older `memory_connect` /
+    // `memory_index` paths (which had no uniqueness enforcement) would cause
+    // CREATE UNIQUE INDEX to fail. The runMigration wrapper SILENTLY swallows
+    // that error AND still inserts the migration name into _migrations — so a
+    // failed CREATE leaves the index missing AND the migration marked done,
+    // and all subsequent INSERT OR IGNORE statements silently degrade to
+    // plain INSERT, accumulating duplicates forever.
+    //
+    // Mitigation: wrap the dedup DELETE + CREATE UNIQUE INDEX in a single
+    // transaction so no concurrent writer can insert a new duplicate between
+    // dedup and create. SQLite serializes writes, so the transaction's
+    // exclusive lock guarantees atomicity.
+    await client.executeMultiple(`
+      BEGIN IMMEDIATE;
+      DELETE FROM memory_connections
+       WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM memory_connections
+          GROUP BY source_memory_id, target_memory_id, relationship
+       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
+        ON memory_connections(source_memory_id, target_memory_id, relationship);
+      COMMIT;
+    `);
     await client.execute({
       sql: `CREATE INDEX IF NOT EXISTS idx_memories_entity_name_nocase
               ON memories(entity_name COLLATE NOCASE)
               WHERE deleted_at IS NULL AND entity_name IS NOT NULL`,
       args: [],
     });
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memory_connections_target
+              ON memory_connections(target_memory_id)`,
+      args: [],
+    });
+
+    // Verification: confirm the unique index actually exists. The
+    // runMigration wrapper marks the migration done unconditionally, so a
+    // throw here doesn't trigger automatic retry — but a loud stderr warning
+    // gives operators an actionable signal. Manual recovery: DELETE FROM
+    // _migrations WHERE name = 'wave2_5_connection_indexes' and re-run.
+    const verify = await client.execute({
+      sql: `SELECT 1 FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_memory_connections_unique'`,
+      args: [],
+    });
+    if (verify.rows.length === 0) {
+      process.stderr.write(
+        "[lodis] CRITICAL: wave2_5_connection_indexes unique index missing after CREATE — " +
+        "INSERT OR IGNORE on memory_connections will silently degrade to plain INSERT and accumulate duplicates. " +
+        "Recovery: DELETE FROM _migrations WHERE name = 'wave2_5_connection_indexes' and restart.\n",
+      );
+    }
   });
 }
 

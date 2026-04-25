@@ -355,11 +355,14 @@ Organize memories by life domain: general, work, health, finance, relationships,
       // recent memory_context or memory_search call). Resolved + inserted
       // synchronously; results returned in connections_result.applied/dropped.
       // No LLM is involved server-side — the agent does the inference.
+      // Cap at 50 per write (Sec-N4 in code-review round 1: unbounded would
+      // be a DoS surface — even with the batched implementation, very large
+      // lists are pathological). 50 matches the default L3 candidate-limit.
       connections: z.array(z.object({
         targetMemoryId: z.string().optional().describe("ID of the related memory (preferred over targetEntityName)"),
         targetEntityName: z.string().optional().describe("Entity name to resolve (case-insensitive, user-scoped)"),
         relationship: z.enum(RELATIONSHIP_VALUES).describe("Relationship type"),
-      })).optional().describe("Optional list of connections to typed neighbors. Best populated from memories already loaded in the caller's context."),
+      })).max(50).optional().describe("Optional list of up to 50 connections to typed neighbors. Best populated from memories already loaded in the caller's context."),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
@@ -856,30 +859,31 @@ Organize memories by life domain: general, work, health, finance, relationships,
           );
         } catch (err) {
           // L1 is sync but its failure must not block the write itself —
-          // the row already persisted. Surface as zero-applied with an
-          // error reason so the caller sees something went wrong.
+          // the row already persisted. Sb-W6 in code-review round 1: previously
+          // labelled all dropped entries as "not_found" which misled agents
+          // into creating duplicate "missing" entities. Use transient_error
+          // so the caller knows to retry rather than re-create the target.
           process.stderr.write(`[lodis] L1 connections failed for ${id}: ${(err as Error)?.message ?? String(err)}\n`);
           connectionsResult = {
             applied: 0,
             dropped: (params.connections as ConnectionInput[]).map((c) => ({
               ...c,
-              reason: "not_found" as const,
+              reason: "transient_error" as const,
             })),
           };
         }
       }
 
-      // Wave 2.5 L2a: server-deterministic auto-edge by entity_name, async.
-      // Runs via setImmediate AFTER the response is returned — the write
-      // commit and the response are NOT blocked. Failures log to stderr.
+      // Wave 2.5 L2a: server-deterministic auto-edge by entity_name. Awaited
+      // synchronously now (Sb-C3 + Perf-C3 in code-review round 1: setImmediate
+      // is silently dropped on Vercel when the lambda freezes, causing zero
+      // L2a edges to land in production). After the multi-value INSERT
+      // optimization in applyEntityNameAutoEdges (Perf-W2), this is 1-2 round
+      // trips total — adds ~16ms on Turso, acceptable on the write path.
       // Opt-out via LODIS_L2_ENRICHMENT_DISABLED=1 (handled inside helper).
+      // Helper never throws — failures log to stderr and return {applied: 0}.
       if (params.entityName) {
-        const capturedId = id;
-        const capturedEntityName = params.entityName;
-        const capturedUserId = userId ?? null;
-        setImmediate(() => {
-          void applyEntityNameAutoEdges(client, capturedId, capturedEntityName, capturedUserId);
-        });
+        await applyEntityNameAutoEdges(client, id, params.entityName, userId ?? null);
       }
 
       // Check if onboarding hint should be added for near-empty databases
@@ -990,22 +994,20 @@ Organize memories by life domain: general, work, health, finance, relationships,
         ...(r.id ? { url: memoryUrl(r.id) } : {}),
       }));
 
-      // Wave 2.5 L2a: enqueue async entity-name auto-edge per written row.
-      // L1 isn't applied here — bulk_upload is for canonical-source imports
-      // where the caller hasn't curated connections per-entry. L2a is the
-      // safety net. setImmediate per row so the response is unblocked;
-      // the helper internally checks LODIS_L2_ENRICHMENT_DISABLED.
-      const capturedUserId = userId ?? null;
-      for (const r of coreResult.results) {
-        if (r.status !== "written" || !r.id) continue;
-        const sourceEntry = allowedEntries[r.index];
-        if (!sourceEntry?.entityName) continue;
-        const capturedId = r.id;
-        const capturedEntityName = sourceEntry.entityName;
-        setImmediate(() => {
-          void applyEntityNameAutoEdges(client, capturedId, capturedEntityName, capturedUserId);
-        });
-      }
+      // Wave 2.5: L2a INTENTIONALLY NOT applied to bulk_upload (Sb-C3 + Perf-C3
+      // in code-review round 1: setImmediate at this scale silently drops on
+      // Vercel — 5K queued tasks die with the lambda. Awaiting them all
+      // serially would add minutes of latency to the response.)
+      //
+      // Bulk imports are by definition canonical-source dumps without per-entry
+      // curation; running L2a per-row could also create 10x edge explosions
+      // when a CSV import shares an entity_name across many rows.
+      //
+      // Operators should run scripts/wave-2.5-backfill-connections.mjs after a
+      // large bulk_upload to populate connections via the L4 path (LLM
+      // classification, idempotent, resumable). The L4 path also handles the
+      // long-tail entity-relationship inference that L2a's deterministic
+      // entity-name match wouldn't catch.
 
       const merged = [...permFailures, ...remapped].sort((a, b) => a.index - b.index);
       const written = merged.filter((r) => r.status === "written").length;
@@ -2486,10 +2488,34 @@ Organize memories by life domain: general, work, health, finance, relationships,
   // task that drains the disconnected-memories queue on the user's cadence.
   server.tool(
     "memory_propose_connections",
-    "Surface up to N source memories that have no outgoing connections, each with a server-pre-filtered list of plausible target candidates. Use in a recurring task: call this, then have your LLM classify which candidates are real connections at what relationship type, then commit via memory_connect_batch. Server does NO LLM inference — caller does. Excludes snippets (low-graph-relevance progress events). Source memories selected by zero outgoing edges + 6h cooldown (gives write-time L1+L2a a chance to land first).",
+    `Surface zero-edge source memories with server-pre-filtered candidates for an LLM caller to classify.
+
+WORKFLOW (3 steps):
+  1. Call memory_propose_connections({ agentId: <your id>, limit: 50 }).
+     Response: { proposals: [{ source, candidates }], meta }.
+  2. For each proposal, inspect source.content + each candidate.content_snippet.
+     Decide which candidates are REAL connections to the source memory, and
+     pick a relationship from the vocabulary: influences, supports, contradicts,
+     related, learned-together, works_at, involves, located_at, part_of, about,
+     informed_by, uses, references. (suggested_relationship_hints is advisory.)
+  3. Commit via memory_connect_batch({ agentId, connections: [{ source_memory_id: source.id,
+     target_memory_id: candidate.id, relationship: <chosen> }, ...] }).
+     Skip proposals where you commit no edges — they will resurface in the next
+     run, which is fine.
+
+The server does NO LLM inference; your LLM classifies. Server selection: zero
+outgoing edges + 6h cooldown (gives write-time L1+L2a a chance to land first).
+Snippets are excluded as both source and candidate. Permission-restricted
+domains are excluded (count surfaced via meta.excluded_for_permissions).
+If meta.queue_saturated is true, the limit was hit and more memories likely
+need attention — schedule another run sooner than your normal cadence.`,
     {
       agentId: z.string().describe("Your agent ID (used for permission filtering on source memories)"),
-      limit: z.number().int().min(1).max(500).optional().describe("Max source memories to return per call (default 50)"),
+      // Cap at 50 (down from 500) per Sb-W4 in code-review round 1: 500 sources
+      // × 3 SQL queries each = 1500 concurrent libSQL queries, exceeding MCP
+      // tool timeouts. 50 matches the default + the recommended daily cadence;
+      // backpressure via meta.queue_saturated tells callers to schedule sooner.
+      limit: z.number().int().min(1).max(50).optional().describe("Max source memories to return per call (default 50, max 50)"),
       minAgeHours: z.number().min(0).optional().describe("Minimum age of source memory in hours (default 6)"),
       candidateLimit: z.number().int().min(1).max(50).optional().describe("Max candidates per source memory (default 10)"),
       includeAlreadyConnected: z.boolean().optional().describe("Include memories that already have outgoing edges (default false)"),
@@ -2516,22 +2542,50 @@ Organize memories by life domain: general, work, health, finance, relationships,
       }
 
       const candidateLimit = params.candidateLimit ?? 10;
-      const proposals = await Promise.all(
+      const rawProposals = await Promise.all(
         allowedSources.map(async (source) => ({
           source,
           candidates: await generateCandidatesForMemory(client, source, userId, { limit: candidateLimit }),
         })),
       );
 
+      // Sec-W2 in code-review round 1: filter candidates by domain read-permission
+      // so that a source memory in domain A doesn't leak content snippets from
+      // candidate memories in domain B (where the agent lacks read access),
+      // even if they share an entity_name. Cache permission results per domain.
+      const candidateDomainAllowed = new Map<string, boolean>();
+      for (const { candidates } of rawProposals) {
+        for (const c of candidates) {
+          if (!candidateDomainAllowed.has(c.domain)) {
+            candidateDomainAllowed.set(
+              c.domain,
+              await checkPermission(params.agentId, c.domain, "read", userId),
+            );
+          }
+        }
+      }
+      let candidatesExcluded = 0;
+      const proposals = rawProposals.map(({ source, candidates }) => {
+        const filtered = candidates.filter((c) => {
+          if (candidateDomainAllowed.get(c.domain)) return true;
+          candidatesExcluded++;
+          return false;
+        });
+        return { source, candidates: filtered };
+      });
+
       const limit = params.limit ?? 50;
-      const queueDepthEstimated = sources.length === limit ? "exhausted_limit" : "under_limit";
+      // Boolean backpressure signal — name + type now match (was a misnamed
+      // string sentinel: Nh-C2 in code-review round 1).
+      const queueSaturated = sources.length >= limit;
       return textResult({
         proposals,
         meta: {
           excluded_for_permissions: excluded,
-          // Backpressure signal: if we hit the limit, more memories likely
-          // need attention — caller should schedule another run sooner.
-          queue_depth_estimated: queueDepthEstimated,
+          candidates_excluded_for_permissions: candidatesExcluded,
+          /** True when the per-call limit was hit. More memories likely need
+           *  attention — caller should schedule another run sooner. */
+          queue_saturated: queueSaturated,
         },
       });
     },
@@ -2543,7 +2597,17 @@ Organize memories by life domain: general, work, health, finance, relationships,
   // index (added in the wave2_5_connection_indexes migration).
   server.tool(
     "memory_connect_batch",
-    "Commit multiple typed edges in one call. Per-edge user_id check on both endpoints; cross-user attempts return reason='not_owned_or_missing'. Idempotent re-runs are safe (duplicates returned in dropped[]). Use to commit the output of an LLM classification pass over memory_propose_connections proposals.",
+    `Commit multiple typed edges in one call. Use to land the output of step 3
+of the memory_propose_connections workflow — pass each (proposal.source.id,
+candidate.id, chosen relationship) triple as one connections[] entry.
+
+Security: per-edge user_id check on BOTH endpoints; cross-user attempts and
+nonexistent targets both return dropped[].reason='not_owned_or_missing' (these
+two are reported as one reason — the security check rejects either case).
+Permission check on source domain returns 'permission_denied'. Idempotent
+re-runs are safe — duplicates return 'duplicate' (no extra rows written; this
+depends on the unique edge index from the wave2_5_connection_indexes
+migration). Self-references return 'self_reference'.`,
     {
       agentId: z.string().describe("Your agent ID (for write permission check on each source domain)"),
       connections: z.array(z.object({
@@ -2558,12 +2622,19 @@ Organize memories by life domain: general, work, health, finance, relationships,
       // Permission pre-flight: filter out edges where the caller lacks write
       // permission on the source memory's domain. Look up source domains in
       // a single batched query to avoid N round-trips.
+      // Sec-N3 + Sb-N7 in code-review round 1: include deleted_at filter
+      // (don't permission-check against deleted memories' domains) AND
+      // unconditionally use `user_id IS ?` (handles NULL safely; no
+      // conditional clause that could leak a domain string from another
+      // user's memory in mixed-tenancy local DBs).
       const sourceIds = Array.from(new Set(params.connections.map((c) => c.source_memory_id)));
       const placeholders = sourceIds.map(() => "?").join(",");
-      const userClause = userId ? ` AND user_id = ?` : `` ;
-      const args: Array<string | null> = [...sourceIds, ...(userId ? [userId] : [])];
+      const args: Array<string | null> = [...sourceIds, userId ?? null];
       const sourceRows = (await client.execute({
-        sql: `SELECT id, domain FROM memories WHERE id IN (${placeholders})${userClause}`,
+        sql: `SELECT id, domain FROM memories
+                WHERE id IN (${placeholders})
+                  AND user_id IS ?
+                  AND deleted_at IS NULL`,
         args,
       })).rows as unknown as Array<{ id: string; domain: string }>;
       const sourceDomain = new Map<string, string>(sourceRows.map((r) => [r.id, r.domain]));

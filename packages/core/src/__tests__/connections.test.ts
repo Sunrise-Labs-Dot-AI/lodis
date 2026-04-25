@@ -347,6 +347,42 @@ describe("connections module — DB-backed integration tests", () => {
       expect(sources.length).toBe(2);
     });
 
+    it("excludePii=true filters has_pii_flag=1 rows server-side (Sb-C2 fix)", async () => {
+      const old = "2026-01-01T00:00:00Z";
+      // Insert two PII rows oldest, then a non-PII row. With LIMIT 2 + client-
+      // side PII filter (the bug shape from /code-review round 1), we'd get
+      // both PII back, drop them, and miss the non-PII. With excludePii at SQL
+      // we should skip the PII rows server-side and return the non-PII directly.
+      await client.execute({
+        sql: `INSERT INTO memories (id, content, domain, source_agent_id, source_agent_name, source_type, confidence, learned_at, updated_at, entity_type, has_pii_flag) VALUES (?, ?, 'general', 'a', 't', 'stated', 0.9, ?, ?, 'fact', 1)`,
+        args: ["pii_a", "pii content a", old, old],
+      });
+      await client.execute({
+        sql: `INSERT INTO memories (id, content, domain, source_agent_id, source_agent_name, source_type, confidence, learned_at, updated_at, entity_type, has_pii_flag) VALUES (?, ?, 'general', 'a', 't', 'stated', 0.9, ?, ?, 'fact', 1)`,
+        args: ["pii_b", "pii content b", old, old],
+      });
+      await insertMemory(client, "clean", "z", { learnedAt: old, entityType: "fact" });
+      const sources = await selectSourceMemoriesForProposals(client, null, {
+        limit: 2,
+        minAgeHours: 0,
+        excludePii: true,
+      });
+      // Both PII rows excluded server-side; non-PII row returned.
+      expect(sources.map((s) => s.id)).toEqual(["clean"]);
+    });
+
+    it("excludeIds skips listed IDs at the SQL layer (Perf-W8 fix — resume cursor)", async () => {
+      const old = "2026-01-01T00:00:00Z";
+      await insertMemory(client, "m1", "x", { learnedAt: old, entityType: "fact" });
+      await insertMemory(client, "m2", "y", { learnedAt: old, entityType: "fact" });
+      await insertMemory(client, "m3", "z", { learnedAt: old, entityType: "fact" });
+      const sources = await selectSourceMemoriesForProposals(client, null, {
+        minAgeHours: 0,
+        excludeIds: ["m1", "m2"],
+      });
+      expect(sources.map((s) => s.id)).toEqual(["m3"]);
+    });
+
     it("includeAlreadyConnected=true returns even memories with edges", async () => {
       const old = "2026-01-01T00:00:00Z";
       await insertMemory(client, "src", "x", { learnedAt: old, entityType: "fact" });

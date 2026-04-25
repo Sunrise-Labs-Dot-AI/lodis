@@ -232,20 +232,34 @@ export function applyPprPass(
   }
 
   // ---------- Order ----------
+  // Sb-N9 in code-review round 1: when uniform reranker output meets a
+  // non-trivial graph, both zRerank and zPpr collapse to all-zero — the blend
+  // is then identically zero and the original tie-break (id.localeCompare)
+  // produced an alphabetical ordering, silently replacing rerank ordering
+  // with meaningless lexical sort. Fall back to input order on the
+  // degenerate-blend case so the upstream rerank/RRF order is preserved.
   const ordered = candidates.map((c, i) => ({
     id: c.id,
     finalScore: finalScores[i],
     rerankScore: c.rerankScore,
     pprScore: r[i],
+    inputIdx: i,
   }));
   ordered.sort((a, b) => {
     const d = b.finalScore - a.finalScore;
     if (Math.abs(d) > 1e-10) return d;
-    return a.id.localeCompare(b.id); // stable tie-break by id
+    // Tie-break: preserve input order (stable). NOT id.localeCompare —
+    // that produces meaningless alphabetical ordering on degenerate blends.
+    return a.inputIdx - b.inputIdx;
   });
-
+  // Strip the helper field from the public shape.
   return {
-    ordered,
+    ordered: ordered.map((o) => ({
+      id: o.id,
+      finalScore: o.finalScore,
+      rerankScore: o.rerankScore,
+      pprScore: o.pprScore,
+    })),
     meta: {
       iterations: iter,
       converged,

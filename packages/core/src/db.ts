@@ -498,6 +498,68 @@ async function runMigrations(client: Client): Promise<void> {
       );
     }
   });
+
+  await runMigration(client, "wave2_5_covering_indexes", async () => {
+    // Wave 2.5 follow-up — covering composites for the L2a + L3 hot paths.
+    //
+    // Perf-W6 (round 2 verdict: still INSUFFICIENT) and Perf-F1 in code-review:
+    // wave2_5_connection_indexes added an `entity_name COLLATE NOCASE` index but
+    // not a covering composite for the `ORDER BY updated_at DESC NULLS LAST`
+    // clause that L2a (every write) and L3 candidate-generation (50× per
+    // memory_propose_connections call) actually issue. The pre-existing index
+    // satisfies the equality lookup but the planner has to filesort the matched
+    // rows on every call (`USE TEMP B-TREE FOR ORDER BY` in EXPLAIN). At 100K
+    // memories with a hot entity_name like "James" or "Anthropic" this is a
+    // real perf cliff on the write path.
+    //
+    // (1) entity_name + updated_at composite — leading column is
+    //     `entity_name COLLATE NOCASE` so it strictly supersedes the older
+    //     idx_memories_entity_name_nocase for any query that index satisfied
+    //     (planner verified — see verification block below). updated_at DESC
+    //     means the index walks pre-sorted, so ORDER BY ... LIMIT short-circuits
+    //     without a temp B-tree.
+    //
+    // (2) domain + updated_at composite with `entity_type IS NOT 'snippet'`
+    //     partial predicate — matches the same-domain branch of
+    //     generateCandidatesForMemory exactly. Without this the planner falls
+    //     through to idx_memories_user_id (entire user partition scan) and
+    //     filesorts. The snippet exclusion is in the partial-index WHERE so
+    //     the index doesn't bloat with the high-frequency snippet table
+    //     (snippets are ~99% of write volume on agents that poll Notion/GH).
+    //
+    // Both indexes are CREATE ... IF NOT EXISTS — safe re-run. The older
+    // single-column `idx_memories_entity_name_nocase` is dropped because the
+    // new composite has the same leading-column shape and SQLite consistently
+    // picks the new one (verified below). Keeping both wastes write amp.
+    //
+    // Rollback: DROP INDEX idx_memories_entity_name_nocase_updated;
+    //           DROP INDEX idx_memories_domain_updated;
+    //           CREATE INDEX idx_memories_entity_name_nocase
+    //             ON memories(entity_name COLLATE NOCASE)
+    //             WHERE deleted_at IS NULL AND entity_name IS NOT NULL;
+    //           DELETE FROM _migrations WHERE name = 'wave2_5_covering_indexes';
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_entity_name_nocase_updated
+              ON memories(entity_name COLLATE NOCASE, updated_at DESC)
+              WHERE deleted_at IS NULL AND entity_name IS NOT NULL`,
+      args: [],
+    });
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_domain_updated
+              ON memories(domain, updated_at DESC)
+              WHERE deleted_at IS NULL AND entity_type IS NOT 'snippet'`,
+      args: [],
+    });
+    // Drop the now-redundant single-column entity_name index. The new composite
+    // has `entity_name COLLATE NOCASE` as its leading column with a strict-
+    // superset partial predicate (same WHERE clause), so any query that used
+    // the old index can use the new one. Verified via EXPLAIN QUERY PLAN
+    // against L2a + L3 entity_name lookups — planner picks the composite.
+    await client.execute({
+      sql: `DROP INDEX IF EXISTS idx_memories_entity_name_nocase`,
+      args: [],
+    });
+  });
 }
 
 export async function createDatabase(config?: {

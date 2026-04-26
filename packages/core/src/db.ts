@@ -126,7 +126,60 @@ async function runMigration(client: Client, name: string, fn: () => Promise<void
   }
 }
 
-async function runMigrations(client: Client): Promise<void> {
+/**
+ * @internal Migration-only helper. Exported solely so the unit test can drive
+ * both branches without going through `runMigrations`. Do NOT call from
+ * application code — outside the migration's caller-side error handling and
+ * the `runMigration` once-per-process gate, this function does not protect
+ * against concurrent writers between separate invocations.
+ *
+ * WHY two branches: Turso/libSQL remote does not honor a multi-statement
+ * `BEGIN IMMEDIATE; …; COMMIT;` inside `client.executeMultiple` — that path
+ * ships a Hrana batch script which is NOT a SQLite-style interactive
+ * transaction, so the would-be exclusive write lock is never acquired and a
+ * concurrent writer can race in between dedup and CREATE UNIQUE INDEX. Local
+ * SQLite (WAL) does honor it.
+ *
+ * What `client.batch(stmts, "write")` buys us on Turso: atomicity (either
+ * both statements apply or neither does) and a clean rollback signal on
+ * failure. It does NOT, by itself, prevent a concurrent writer from making
+ * CREATE UNIQUE INDEX fail — but the rejection becomes a thrown error the
+ * caller can act on, instead of a half-applied state with a phantom index.
+ * The caller (the wave2_5 migration body) is responsible for surfacing that
+ * rejection loudly so it isn't swallowed by `runMigration`'s outer try/catch.
+ */
+export async function ensureUniqueConnectionIndex(
+  client: Client,
+  isRemote: boolean,
+): Promise<void> {
+  if (isRemote && typeof client.batch !== "function") {
+    throw new Error(
+      "ensureUniqueConnectionIndex: isRemote=true but client.batch is missing — " +
+        "refusing to fall back to executeMultiple, which would silently lose serializable semantics on Turso.",
+    );
+  }
+
+  const dedupSql = `DELETE FROM memory_connections
+       WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM memory_connections
+          GROUP BY source_memory_id, target_memory_id, relationship
+       )`;
+  const createIndexSql = `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
+        ON memory_connections(source_memory_id, target_memory_id, relationship)`;
+
+  if (isRemote) {
+    await client.batch([dedupSql, createIndexSql], "write");
+  } else {
+    await client.executeMultiple(`
+      BEGIN IMMEDIATE;
+      ${dedupSql};
+      ${createIndexSql};
+      COMMIT;
+    `);
+  }
+}
+
+async function runMigrations(client: Client, isRemote: boolean): Promise<void> {
   await client.executeMultiple(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`);
 
   await runMigration(client, "add_has_pii_flag", async () => {
@@ -455,19 +508,30 @@ async function runMigrations(client: Client): Promise<void> {
     //
     // Mitigation: wrap the dedup DELETE + CREATE UNIQUE INDEX in a single
     // transaction so no concurrent writer can insert a new duplicate between
-    // dedup and create. SQLite serializes writes, so the transaction's
-    // exclusive lock guarantees atomicity.
-    await client.executeMultiple(`
-      BEGIN IMMEDIATE;
-      DELETE FROM memory_connections
-       WHERE rowid NOT IN (
-         SELECT MIN(rowid) FROM memory_connections
-          GROUP BY source_memory_id, target_memory_id, relationship
-       );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
-        ON memory_connections(source_memory_id, target_memory_id, relationship);
-      COMMIT;
-    `);
+    // dedup and create. On local SQLite (WAL), `BEGIN IMMEDIATE` via
+    // executeMultiple acquires a real exclusive write lock. On Turso remote,
+    // executeMultiple ships a Hrana batch script that does NOT honor
+    // `BEGIN IMMEDIATE` the same way — `ensureUniqueConnectionIndex` switches
+    // to `client.batch(..., "write")` (atomicity + clean rollback signal,
+    // not race-prevention) when isRemote is true.
+    //
+    // CRITICAL: an inner try/catch is required here. `runMigration`'s outer
+    // catch swallows any throw and still inserts into `_migrations` — so a
+    // batch rollback (Turso multi-Lambda race, transient 5xx, network blip)
+    // would otherwise mark the migration done with no signal AND skip the
+    // verification SELECT below. We catch, log to stderr with recovery
+    // instructions, and fall through so the verify SELECT also runs as a
+    // second backstop.
+    try {
+      await ensureUniqueConnectionIndex(client, isRemote);
+    } catch (err) {
+      process.stderr.write(
+        "[lodis] CRITICAL: wave2_5_connection_indexes dedup+CREATE UNIQUE INDEX failed: " +
+          (err instanceof Error ? err.message : String(err)) +
+          "\n  Likely causes: concurrent writer race on Turso (rolled back batch), transient libSQL error, or pre-existing duplicates that the dedup couldn't resolve.\n" +
+          "  Recovery: DELETE FROM _migrations WHERE name = 'wave2_5_connection_indexes' and restart.\n",
+      );
+    }
     await client.execute({
       sql: `CREATE INDEX IF NOT EXISTS idx_memories_entity_name_nocase
               ON memories(entity_name COLLATE NOCASE)
@@ -527,7 +591,13 @@ export async function createDatabase(config?: {
   }
 
   await client.executeMultiple(CREATE_TABLES_SQL);
-  await runMigrations(client);
+  // Polarity: `runMigrations` and `ensureUniqueConnectionIndex` take `isRemote`
+  // (not `isLocal`) because the bug they guard against — Hrana batch scripts
+  // not honoring BEGIN IMMEDIATE — is specific to remote DBs. Keep this
+  // negation explicit; flipping it silently regresses to the unsafe path on
+  // Turso with no type error.
+  const isRemote = !isLocal;
+  await runMigrations(client, isRemote);
   await setupFTS(client);
 
   // Rebuild FTS index content (needed after migration drops and recreates the FTS table)

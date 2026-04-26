@@ -126,7 +126,44 @@ async function runMigration(client: Client, name: string, fn: () => Promise<void
   }
 }
 
-async function runMigrations(client: Client): Promise<void> {
+/**
+ * Dedupe + create the unique edge index for memory_connections atomically.
+ *
+ * On local SQLite (WAL), `BEGIN IMMEDIATE` acquires a real exclusive write
+ * lock and `executeMultiple` runs the script on a single connection, so
+ * dedup + CREATE UNIQUE INDEX are guaranteed atomic against other writers.
+ *
+ * On Turso/libSQL remote, `executeMultiple` ships a Hrana batch script that
+ * does NOT honor `BEGIN IMMEDIATE` the way local SQLite does — concurrent
+ * Lambdas can each pass the dedup pass while a third inserts a new
+ * duplicate, causing `CREATE UNIQUE INDEX` to fail. Use `client.batch`
+ * with mode `"write"` for a real serializable interactive transaction.
+ */
+export async function ensureUniqueConnectionIndex(
+  client: Client,
+  isRemote: boolean,
+): Promise<void> {
+  const dedupSql = `DELETE FROM memory_connections
+       WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM memory_connections
+          GROUP BY source_memory_id, target_memory_id, relationship
+       )`;
+  const createIndexSql = `CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
+        ON memory_connections(source_memory_id, target_memory_id, relationship)`;
+
+  if (isRemote) {
+    await client.batch([dedupSql, createIndexSql], "write");
+  } else {
+    await client.executeMultiple(`
+      BEGIN IMMEDIATE;
+      ${dedupSql};
+      ${createIndexSql};
+      COMMIT;
+    `);
+  }
+}
+
+async function runMigrations(client: Client, isRemote: boolean): Promise<void> {
   await client.executeMultiple(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`);
 
   await runMigration(client, "add_has_pii_flag", async () => {
@@ -455,19 +492,15 @@ async function runMigrations(client: Client): Promise<void> {
     //
     // Mitigation: wrap the dedup DELETE + CREATE UNIQUE INDEX in a single
     // transaction so no concurrent writer can insert a new duplicate between
-    // dedup and create. SQLite serializes writes, so the transaction's
-    // exclusive lock guarantees atomicity.
-    await client.executeMultiple(`
-      BEGIN IMMEDIATE;
-      DELETE FROM memory_connections
-       WHERE rowid NOT IN (
-         SELECT MIN(rowid) FROM memory_connections
-          GROUP BY source_memory_id, target_memory_id, relationship
-       );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_connections_unique
-        ON memory_connections(source_memory_id, target_memory_id, relationship);
-      COMMIT;
-    `);
+    // dedup and create. On local SQLite (WAL), `BEGIN IMMEDIATE` via
+    // executeMultiple acquires a real exclusive write lock. On Turso remote,
+    // executeMultiple ships a Hrana batch script that does NOT honor
+    // `BEGIN IMMEDIATE` the same way — `ensureUniqueConnectionIndex` switches
+    // to `client.batch(..., "write")` (a real serializable interactive
+    // transaction) when isRemote is true. Without this, two concurrent
+    // Lambdas could each pass the dedup pass while a third inserts a new
+    // duplicate, causing CREATE UNIQUE INDEX to fail silently.
+    await ensureUniqueConnectionIndex(client, isRemote);
     await client.execute({
       sql: `CREATE INDEX IF NOT EXISTS idx_memories_entity_name_nocase
               ON memories(entity_name COLLATE NOCASE)
@@ -527,7 +560,7 @@ export async function createDatabase(config?: {
   }
 
   await client.executeMultiple(CREATE_TABLES_SQL);
-  await runMigrations(client);
+  await runMigrations(client, !isLocal);
   await setupFTS(client);
 
   // Rebuild FTS index content (needed after migration drops and recreates the FTS table)

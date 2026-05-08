@@ -288,16 +288,27 @@ export default function SetupGuide() {
               Cloud mode syncs your memories across devices via Turso. All data encrypted at rest with AES-256-GCM.
             </p>
 
+            <div className="glass p-5 mb-6 border border-border-hover">
+              <p className="text-sm text-text-muted">
+                <span className="font-semibold text-glow">Cloud access is invite-only during beta.</span>{" "}
+                Email{" "}
+                <a href="mailto:james@sunriselabs.ai" className="text-glow hover:underline">
+                  james@sunriselabs.ai
+                </a>{" "}
+                to request an invitation. Once you have one, follow the steps below.
+              </p>
+            </div>
+
             <ol className="space-y-4 mb-8">
               <li className="glass p-5">
                 <div className="flex items-baseline gap-2 mb-1">
                   <span className="font-mono text-sm text-glow bg-glow/10 rounded-full w-7 h-7 flex items-center justify-center shrink-0">
                     1
                   </span>
-                  <span className="font-semibold text-sm">Sign up</span>
+                  <span className="font-semibold text-sm">Activate your invite</span>
                 </div>
                 <p className="text-sm text-text-muted ml-10">
-                  Create an account at{" "}
+                  Use your invite link to create an account at{" "}
                   <a
                     href="https://app.lodis.ai/sign-up"
                     className="text-glow hover:underline"

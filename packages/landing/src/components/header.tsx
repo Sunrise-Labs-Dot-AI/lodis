@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DogfoodBanner } from "./dogfood-banner";
 
 const navLinks = [
   { href: "/how-it-works", label: "How it works", external: false },
   { href: "https://github.com/Sunrise-Labs-Dot-AI/lodis", label: "GitHub", external: true },
   { href: "/setup", label: "Setup Guide", external: false },
   { href: "https://app.lodis.ai/sign-in", label: "Sign In", external: false },
-  { href: "https://app.lodis.ai/sign-up", label: "Sign Up", external: false },
+  { href: "mailto:james@sunriselabs.ai", label: "Request Access", external: true },
 ];
 
 export function Header() {
@@ -24,7 +25,9 @@ export function Header() {
   }, [open]);
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-void/60 border-b border-border">
+    <header className="fixed top-0 left-0 right-0 z-50">
+      <DogfoodBanner />
+      <div className="backdrop-blur-xl bg-void/60 border-b border-border">
       <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
         <a
           href="/"
@@ -73,6 +76,7 @@ export function Header() {
             )}
           </svg>
         </button>
+      </div>
       </div>
 
       {/* Mobile sheet */}

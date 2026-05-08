@@ -4,8 +4,23 @@ import { registerClient } from "@/lib/oauth";
 /**
  * Dynamic Client Registration (RFC 7591)
  * Public endpoint — no auth required.
+ *
+ * Kill switch: when LODIS_OAUTH_DCR_DISABLED=1, returns 503. Already-issued
+ * client_ids continue to work via /api/oauth/authorize. Used pre-launch to
+ * close the public-DCR phishing chain until manual approval ships.
  */
 export async function POST(req: Request) {
+  if (process.env.LODIS_OAUTH_DCR_DISABLED === "1") {
+    return NextResponse.json(
+      {
+        error: "registration_disabled",
+        error_description:
+          "Dynamic Client Registration is currently disabled. Email hello@sunriselabs.ai to register a client.",
+      },
+      { status: 503 },
+    );
+  }
+
   try {
     const body = await req.json();
     const redirectUris = body.redirect_uris as string[] | undefined;

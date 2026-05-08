@@ -45,6 +45,8 @@ import {
   listProfiles,
   isProfileStale,
   bulkInsertMemories,
+  resolveBulkRemoveTargets,
+  bulkRemoveMemories,
   listChapters,
   getChapter,
   isKnownChapterId,
@@ -2255,6 +2257,95 @@ Organize memories by life domain: general, work, health, finance, relationships,
       await bumpLastModified(client);
 
       return textResult({ id: params.id, removed: true });
+    },
+  );
+
+  server.tool(
+    "memory_remove_bulk",
+    "Soft-delete many memories at once, scoped by a filter. Use to retire benchmark / test data, drop a whole domain, or de-pollute by entity name. ALWAYS dry-runs first by default — pass dryRun=false explicitly to commit. Filter requires at least one of `domain` / `entityName` / `ids[]` (refuses match-all). Permissions are checked per affected domain (write op); if any domain blocks, nothing is deleted. Soft-delete preserves the row; recover by removing `deleted_at` directly in the DB or re-importing via memory_bulk_upload from a prior memory_export. NOT a substitute for memory_remove on individual rows the user asks you to forget.",
+    {
+      filter: z.object({
+        domain: z.string().optional().describe("Match all non-deleted memories in this domain (exact match)"),
+        entityName: z.string().optional().describe("Match all non-deleted memories with this entity_name (case-insensitive)"),
+        ids: z.array(z.string()).max(5000).optional().describe("Explicit id list (max 5000, 32-char hex each)"),
+      }).describe("At least one of domain/entityName/ids must be present"),
+      reason: z.string().min(1).max(500).describe("Why these are being removed (audit-logged on each memory_events row)"),
+      dryRun: z.boolean().optional().describe("If true (default), returns the count + sample ids without deleting. Pass false to commit."),
+      batchSize: z.number().int().min(1).max(500).optional().describe("Memories per DB transaction chunk (default 100)"),
+      maxToRemove: z.number().int().min(1).max(50000).optional().describe("Safety cap on scope (default 10000). If filter would match more, the call errors before touching anything."),
+      agentId: z.string().optional().describe("Your agent ID (used for permission checks)"),
+      agentName: z.string().optional().describe("Your agent name (audit trail)"),
+    },
+    async (params, extra) => {
+      const userId = getUserId(extra as Record<string, unknown>);
+      const dryRun = params.dryRun ?? true;
+      const maxToRemove = params.maxToRemove ?? 10_000;
+
+      let resolved;
+      try {
+        resolved = await resolveBulkRemoveTargets(
+          client,
+          { domain: params.filter.domain, entityName: params.filter.entityName, ids: params.filter.ids },
+          { userId, maxToScan: maxToRemove },
+        );
+      } catch (err) {
+        return textResult({ error: err instanceof Error ? err.message : String(err) });
+      }
+
+      if (resolved.overflowed) {
+        return textResult({
+          error: `Filter matches more than maxToRemove=${maxToRemove} memories. Refusing to proceed without an explicit higher cap. Increase maxToRemove or narrow the filter.`,
+          byDomain: resolved.byDomain,
+          sampleIds: resolved.sampleIds,
+        });
+      }
+
+      // Permission pre-flight: every distinct domain in scope must allow write
+      // for the calling agent. Fail fast — if any domain blocks, nothing runs.
+      const blocked: string[] = [];
+      for (const d of Object.keys(resolved.byDomain)) {
+        if (!(await checkPermission(params.agentId, d, "write", userId))) {
+          blocked.push(d);
+        }
+      }
+      if (blocked.length > 0) {
+        return textResult({
+          error: `Agent is not allowed to write to domain(s): ${blocked.join(", ")}. No memories deleted.`,
+          byDomain: resolved.byDomain,
+        });
+      }
+
+      if (dryRun) {
+        return textResult({
+          dryRun: true,
+          wouldRemove: resolved.targets.length,
+          byDomain: resolved.byDomain,
+          sampleIds: resolved.sampleIds,
+        });
+      }
+
+      // Stderr log mirrors archiveDomain's audit pattern. Reason is sanitized
+      // inside bulkRemoveMemories so we don't double-strip here.
+      process.stderr.write(
+        `[lodis] memory_remove_bulk: agent=${params.agentId ?? "-"} userId=${userId ?? "-"} count=${resolved.targets.length} domains=${Object.keys(resolved.byDomain).join(",")}\n`,
+      );
+
+      const result = await bulkRemoveMemories(client, resolved.targets, {
+        sourceAgentId: params.agentId ?? null,
+        sourceAgentName: params.agentName ?? null,
+        userId,
+        reason: params.reason,
+        batchSize: params.batchSize,
+      });
+
+      return textResult({
+        dryRun: false,
+        removed: result.removed,
+        failed: result.failed,
+        byDomain: result.byDomain,
+        results: result.results,
+        durationMs: result.durationMs,
+      });
     },
   );
 

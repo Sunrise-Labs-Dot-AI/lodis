@@ -64,7 +64,7 @@ packages/
 
 ## Releases (npm publish)
 
-Only `packages/mcp-server` is published to npm (as `lodis`). All other workspace packages are private or internal-only.
+Only `packages/mcp-server` is published to npm (as `lodis-mcp`). All other workspace packages are private or internal-only.
 
 ```bash
 # 1. From the repo root, build and test everything

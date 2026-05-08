@@ -13,7 +13,7 @@ Add to your Claude Code config (`~/.claude.json`):
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis"]
+      "args": ["-y", "lodis-mcp"]
     }
   }
 }
@@ -21,7 +21,7 @@ Add to your Claude Code config (`~/.claude.json`):
 
 That's it. Your AI now has persistent memory.
 
-> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis` in your MCP config and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
+> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis-mcp` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis-mcp` in your MCP config (`"args": ["-y", "lodis-mcp"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
 
 ## Getting Started
 
@@ -132,7 +132,7 @@ Features:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis"]
+      "args": ["-y", "lodis-mcp"]
     }
   }
 }
@@ -144,7 +144,7 @@ Features:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis"]
+      "args": ["-y", "lodis-mcp"]
     }
   }
 }
@@ -156,7 +156,7 @@ Features:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis"]
+      "args": ["-y", "lodis-mcp"]
     }
   }
 }

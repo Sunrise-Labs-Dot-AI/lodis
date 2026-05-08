@@ -22,11 +22,12 @@ async function insertMemory(
     entityType?: string;
     entityName?: string;
     learnedAt?: string;
+    userId?: string | null;
   } = {},
 ) {
   await client.execute({
-    sql: `INSERT INTO memories (id, content, domain, source_agent_id, source_agent_name, source_type, confidence, learned_at, entity_type, entity_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO memories (id, content, domain, source_agent_id, source_agent_name, source_type, confidence, learned_at, entity_type, entity_name, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id,
       content,
@@ -38,6 +39,7 @@ async function insertMemory(
       opts.learnedAt ?? new Date().toISOString(),
       opts.entityType ?? null,
       opts.entityName ?? null,
+      opts.userId ?? null,
     ],
   });
 }
@@ -275,6 +277,82 @@ describe("search", () => {
       // Memory still found — both paths had enough signal to retrieve it.
       expect(result.results.length).toBeGreaterThan(0);
       expect(result.results.map((r) => r.id)).toContain("m1");
+    });
+
+    it("LODIS_BATCHED_SCORE_FETCH=1 preserves multi-tenant isolation in score-weighted results", async () => {
+      // Regression guard for the P0 N+1 fix: the batched score-fetch path must
+      // honor the same user_id scoping as the legacy per-row path, so that a
+      // caller in tenant A cannot have tenant B's memories surface in their
+      // results via the score-boost loop. (Cross-tenant rows would fail the
+      // final SELECT's user_id filter anyway, but if the boost loop returned
+      // their boosted scores, ordering of the legitimate tenant-A results
+      // could shift — and at minimum the user_id predicate must remain
+      // structurally present in both code paths.)
+      const originalBatched = process.env.LODIS_BATCHED_SCORE_FETCH;
+      try {
+        process.env.LODIS_BATCHED_SCORE_FETCH = "1";
+
+        await insertMemory(client, "a1", "Tenant A: Marin County notes", { userId: "user-a" });
+        await insertMemory(client, "a2", "Tenant A: Tiburon listing", { userId: "user-a" });
+        await insertMemory(client, "b1", "Tenant B: Marin County notes", { userId: "user-b" });
+        await insertMemory(client, "b2", "Tenant B: Tiburon listing", { userId: "user-b" });
+
+        const result = await hybridSearch(client, "Marin Tiburon", {
+          userId: "user-a",
+          limit: 10,
+          expand: false,
+        });
+
+        const ids = result.results.map((r) => r.id);
+        expect(ids).toContain("a1");
+        expect(ids).not.toContain("b1");
+        expect(ids).not.toContain("b2");
+      } finally {
+        if (originalBatched === undefined) delete process.env.LODIS_BATCHED_SCORE_FETCH;
+        else process.env.LODIS_BATCHED_SCORE_FETCH = originalBatched;
+      }
+    });
+
+    it("LODIS_BATCHED_SCORE_FETCH=1 produces same ranked IDs as the legacy per-row path", async () => {
+      // Parity check: the batched path must score-and-rank identically to the
+      // legacy loop on the same fixture. If this drifts, the perf optimization
+      // has changed retrieval behavior — a regression we want to catch loudly.
+      const originalBatched = process.env.LODIS_BATCHED_SCORE_FETCH;
+      try {
+        await insertMemory(client, "m1", "Marin County property search notes", {
+          confidence: 0.95,
+          learnedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+        });
+        await insertMemory(client, "m2", "Tiburon property listing", {
+          confidence: 0.6,
+          learnedAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+        });
+        await insertMemory(client, "m3", "Marin Tiburon Redwood overview", {
+          confidence: 0.8,
+          learnedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        });
+
+        delete process.env.LODIS_BATCHED_SCORE_FETCH;
+        const legacy = await hybridSearch(client, "Marin Tiburon property", {
+          limit: 10,
+          expand: false,
+        });
+
+        process.env.LODIS_BATCHED_SCORE_FETCH = "1";
+        // Different cache key (different env-derived behavior is implicit, but
+        // the cache key only includes options, not env — bump last_modified to
+        // force a re-fetch and avoid serving the legacy result from cache).
+        await bumpLastModified(client);
+        const batched = await hybridSearch(client, "Marin Tiburon property", {
+          limit: 10,
+          expand: false,
+        });
+
+        expect(batched.results.map((r) => r.id)).toEqual(legacy.results.map((r) => r.id));
+      } finally {
+        if (originalBatched === undefined) delete process.env.LODIS_BATCHED_SCORE_FETCH;
+        else process.env.LODIS_BATCHED_SCORE_FETCH = originalBatched;
+      }
     });
 
     it("cache key disambiguates two long queries (Saboteur-1 regression guard; strengthened per Saboteur-9)", async () => {

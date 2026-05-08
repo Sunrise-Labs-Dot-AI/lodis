@@ -36,19 +36,6 @@ export interface ExpandedResult extends SearchResult {
 
 // --- Helpers ---
 
-async function getEmbeddingDistance(
-  client: Client,
-  memoryId: string,
-  queryEmbedding: Float32Array,
-): Promise<number | null> {
-  const result = await client.execute({
-    sql: `SELECT vector_distance_cos(embedding, vector(?)) as distance FROM memories WHERE id = ? AND embedding IS NOT NULL`,
-    args: [JSON.stringify(Array.from(queryEmbedding)), memoryId],
-  });
-  if (result.rows.length === 0 || result.rows[0].distance == null) return null;
-  return result.rows[0].distance as number;
-}
-
 function recencyBoost(learnedAt: string | null): number {
   if (!learnedAt) return 1.0;
   const ageMs = Date.now() - new Date(learnedAt).getTime();
@@ -94,7 +81,25 @@ export async function utilityBoost(
 
 // --- Graph Expansion ---
 
-async function expandConnections(
+/**
+ * BFS expansion of the memory graph, scored by query-relative cosine distance.
+ *
+ * Per-neighbor distance is computed inline in the JOIN via vector_distance_cos
+ * — eliminates the per-row N+1 the prior implementation incurred via a
+ * separate SELECT per neighbor. Neighbors with NULL embeddings are filtered
+ * by the WHERE clause (vector_distance_cos returns NULL on NULL input).
+ *
+ * Security:
+ *   - user_id scoping when supplied (matches the rest of the search pipeline).
+ *   - has_pii_flag IS NOT 1 — scrubbed-but-not-deleted memories are NEVER
+ *     surfaced as connected[] entries on innocuous searches. Without this
+ *     filter, re-enabling expansion would surface scrubbed credit cards or
+ *     personal data via the graph (Security F2 in the plan review).
+ *
+ * Exported so context-packing can run expansion AFTER rerank/PPR on a small
+ * post-rerank seed set, instead of on the wide Stage-1 candidate pool.
+ */
+export async function expandConnections(
   client: Client,
   results: SearchResult[],
   queryEmbedding: Float32Array | null,
@@ -106,6 +111,7 @@ async function expandConnections(
     return results.map((r) => ({ ...r, connected: [] }));
   }
 
+  const queryVec = JSON.stringify(Array.from(queryEmbedding));
   const seen = new Set<string>(results.map((r) => r.id));
 
   const expanded: ExpandedResult[] = [];
@@ -117,37 +123,56 @@ async function expandConnections(
       const { memoryId, depth } = queue.shift()!;
       if (depth >= maxDepth) continue;
 
-      // Get outgoing + incoming connections
+      // Outgoing + incoming with inline distance and PII filter. The
+      // similarity threshold is enforced server-side (WHERE distance < ?)
+      // since vector_distance_cos returns 1 - cos(angle); smaller = more
+      // similar. We pass `1 - similarityThreshold` as the cap so a threshold
+      // of 0.5 (similarity ≥ 0.5) rejects rows with distance > 0.5.
+      const distanceCap = 1 - similarityThreshold;
       const outgoingResult = await client.execute({
-        sql: `SELECT mc.target_memory_id as id, mc.relationship, m.*
+        sql: `SELECT mc.target_memory_id as id, mc.relationship, m.*,
+                    vector_distance_cos(m.embedding, vector(?)) AS _distance
              FROM memory_connections mc
              JOIN memories m ON m.id = mc.target_memory_id
-             WHERE mc.source_memory_id = ? AND m.deleted_at IS NULL${userId ? ' AND m.user_id = ?' : ''}`,
-        args: userId ? [memoryId, userId] : [memoryId],
+             WHERE mc.source_memory_id = ?
+               AND m.deleted_at IS NULL
+               AND m.has_pii_flag IS NOT 1
+               AND m.embedding IS NOT NULL
+               AND vector_distance_cos(m.embedding, vector(?)) <= ?${userId ? ' AND m.user_id = ?' : ''}`,
+        args: userId
+          ? [queryVec, memoryId, queryVec, distanceCap, userId]
+          : [queryVec, memoryId, queryVec, distanceCap],
       });
 
       const incomingResult = await client.execute({
-        sql: `SELECT mc.source_memory_id as id, mc.relationship, m.*
+        sql: `SELECT mc.source_memory_id as id, mc.relationship, m.*,
+                    vector_distance_cos(m.embedding, vector(?)) AS _distance
              FROM memory_connections mc
              JOIN memories m ON m.id = mc.source_memory_id
-             WHERE mc.target_memory_id = ? AND m.deleted_at IS NULL${userId ? ' AND m.user_id = ?' : ''}`,
-        args: userId ? [memoryId, userId] : [memoryId],
+             WHERE mc.target_memory_id = ?
+               AND m.deleted_at IS NULL
+               AND m.has_pii_flag IS NOT 1
+               AND m.embedding IS NOT NULL
+               AND vector_distance_cos(m.embedding, vector(?)) <= ?${userId ? ' AND m.user_id = ?' : ''}`,
+        args: userId
+          ? [queryVec, memoryId, queryVec, distanceCap, userId]
+          : [queryVec, memoryId, queryVec, distanceCap],
       });
 
       const allConns = [
-        ...outgoingResult.rows.map((r) => r as unknown as Record<string, unknown> & { id: string; relationship: string }),
-        ...incomingResult.rows.map((r) => r as unknown as Record<string, unknown> & { id: string; relationship: string }),
+        ...outgoingResult.rows.map((r) => r as unknown as Record<string, unknown> & { id: string; relationship: string; _distance: number | null }),
+        ...incomingResult.rows.map((r) => r as unknown as Record<string, unknown> & { id: string; relationship: string; _distance: number | null }),
       ];
 
       for (const conn of allConns) {
         if (seen.has(conn.id)) continue;
         seen.add(conn.id);
 
-        // Check semantic similarity to query via SQL distance function
-        const distance = await getEmbeddingDistance(client, conn.id, queryEmbedding);
+        const distance = conn._distance;
         if (distance == null) continue;
-
         const similarity = 1 - distance;
+        // SQL already enforced similarity >= threshold via distanceCap, but
+        // re-check defensively (NaN, FP edge, schema drift).
         if (similarity < similarityThreshold) continue;
 
         connected.push({
@@ -304,22 +329,56 @@ export async function hybridSearch(
     scores.set(id, (scores.get(id) ?? 0) + 1 / (RRF_K + rank + 1));
   });
 
-  // 4. Apply confidence weighting, recency boost, and optional utility boost
+  // 4. Apply confidence weighting, recency boost, and optional utility boost.
+  //
+  // Two equivalent paths, gated by LODIS_BATCHED_SCORE_FETCH:
+  //   - off (default): per-candidate SELECT, one round-trip per ID.
+  //   - on: single IN-clause query, then iterate the result map in memory.
+  // The batched path is the perf win at default Stage-1 candidate pool size
+  // (200 with reranker on); the legacy path stays reachable as a kill-switch
+  // for one release in case the batched query interacts badly with libsql
+  // IN-clause arg-count limits or any caller-specific edge case.
+  //
+  // Invariants (must match between paths):
+  //   - Column projection: confidence, learned_at, referenced_count, noise_count.
+  //   - user_id scoping ONLY when userId provided (mirrors per-row path; null
+  //     userId means no scoping, same as today).
+  //   - deleted_at IS NULL.
+  //   - Missing rows: skip the boost (raw RRF score stays in `scores`); no
+  //     default multiplier. Cross-tenant rows are filtered out at the final
+  //     SELECT below regardless.
   const utilityRankingEnabled = process.env.LODIS_UTILITY_RANKING === "1";
-  for (const [id, rawScore] of scores.entries()) {
-    const memResult = await client.execute({
-      sql: `SELECT confidence, learned_at, referenced_count, noise_count FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-      args: userId ? [id, userId] : [id],
+  const batchedScoreFetchEnabled = process.env.LODIS_BATCHED_SCORE_FETCH === "1";
+
+  if (batchedScoreFetchEnabled && scores.size > 0) {
+    const ids = [...scores.keys()];
+    const placeholders = ids.map(() => "?").join(",");
+    const memsResult = await client.execute({
+      sql: `SELECT id, confidence, learned_at, referenced_count, noise_count
+           FROM memories
+           WHERE id IN (${placeholders})
+             AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+      args: userId ? [...ids, userId] : ids,
     });
-    const mem = memResult.rows[0] as unknown as {
-      confidence: number;
-      learned_at: string | null;
-      referenced_count: number;
-      noise_count: number;
-    } | undefined;
-    if (mem) {
-      const confidenceBoost = 0.5 + (mem.confidence as number) * 0.5;
-      const recency = recencyBoost(mem.learned_at as string | null);
+    const memMap = new Map<
+      string,
+      { confidence: number; learned_at: string | null; referenced_count: number; noise_count: number }
+    >();
+    for (const row of memsResult.rows) {
+      const r = row as unknown as {
+        id: string;
+        confidence: number;
+        learned_at: string | null;
+        referenced_count: number;
+        noise_count: number;
+      };
+      memMap.set(r.id, r);
+    }
+    for (const [id, rawScore] of scores.entries()) {
+      const mem = memMap.get(id);
+      if (!mem) continue;
+      const confidenceBoost = 0.5 + mem.confidence * 0.5;
+      const recency = recencyBoost(mem.learned_at);
       let finalScore = rawScore * confidenceBoost * recency;
       if (utilityRankingEnabled) {
         const uBoost = await utilityBoost(
@@ -331,6 +390,34 @@ export async function hybridSearch(
         finalScore *= uBoost;
       }
       scores.set(id, finalScore);
+    }
+  } else {
+    for (const [id, rawScore] of scores.entries()) {
+      const memResult = await client.execute({
+        sql: `SELECT confidence, learned_at, referenced_count, noise_count FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
+        args: userId ? [id, userId] : [id],
+      });
+      const mem = memResult.rows[0] as unknown as {
+        confidence: number;
+        learned_at: string | null;
+        referenced_count: number;
+        noise_count: number;
+      } | undefined;
+      if (mem) {
+        const confidenceBoost = 0.5 + (mem.confidence as number) * 0.5;
+        const recency = recencyBoost(mem.learned_at as string | null);
+        let finalScore = rawScore * confidenceBoost * recency;
+        if (utilityRankingEnabled) {
+          const uBoost = await utilityBoost(
+            client,
+            id,
+            mem.referenced_count ?? 0,
+            mem.noise_count ?? 0,
+          );
+          finalScore *= uBoost;
+        }
+        scores.set(id, finalScore);
+      }
     }
   }
 

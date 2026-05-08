@@ -1,5 +1,5 @@
 {
-  "name": "lodis",
+  "name": "lodis-mcp",
   "version": "0.6.0",
   "description": "Universal AI memory layer — MCP server with persistent, cross-tool memory for Claude Code, Cursor, Windsurf, and more",
   "type": "module",

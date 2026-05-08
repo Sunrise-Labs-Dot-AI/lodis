@@ -2544,13 +2544,14 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_connect",
-    "Create a relationship between two memories",
+    "Create a relationship between two memories. When `agentId` is supplied, the call requires the agent to have write permission on the source memory's domain (matching memory_connect_batch's per-edge ACL).",
     {
       sourceMemoryId: z.string().describe("Source memory ID"),
       targetMemoryId: z.string().describe("Target memory ID"),
       relationship: z
-        .enum(["influences", "supports", "contradicts", "related", "learned-together", "works_at", "involves", "located_at", "part_of", "about"])
+        .enum(RELATIONSHIP_VALUES)
         .describe("Type of relationship"),
+      agentId: z.string().optional().describe("Your agent ID (when supplied, write permission is checked against the source memory's domain)"),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
@@ -2563,6 +2564,18 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       if (!source || !target) {
         return textResult({ error: "One or both memories not found" });
+      }
+
+      // ACL parity with memory_connect_batch (server.ts ~2660): when an agentId
+      // is supplied, check write permission on the source domain. Without an
+      // agentId the call proceeds (preserves the pre-existing fast-path used
+      // by callers that don't model per-agent permissions). Previously the
+      // single-edge memory_connect had no ACL check at all.
+      if (params.agentId) {
+        const allowed = await checkPermission(params.agentId, source.domain, "write", userId);
+        if (!allowed) {
+          return textResult({ error: "Permission denied for source memory's domain" });
+        }
       }
 
       await db.insert(memoryConnections)
@@ -3023,26 +3036,49 @@ migration). Self-references return 'self_reference'.`,
         .where(and(eq(memoryConnections.targetMemoryId, params.memoryId), userId ? eq(memoryConnections.userId, userId) : undefined))
         .all();
 
-      // Filter out connections where either memory is in a blocked domain
+      // Filter out connections where the *other* memory is in a blocked
+      // domain. Batched: one IN-clause query for every distinct other-side
+      // memory ID, then `checkPermission` runs once per distinct domain
+      // (matching memory_connect_batch's pattern at server.ts ~2661).
+      // Replaces the prior per-connection SELECT + checkPermission loop —
+      // O(distinct_domains) round-trips total instead of O(connections).
+      //
+      // The `if (params.agentId)` guard is kept structurally identical to
+      // pre-existing behavior: when no agentId is supplied, the call returns
+      // unfiltered connections. Widening that fast-path is out of scope here.
       if (params.agentId) {
-        const filterConnection = async (conn: { sourceMemoryId: string; targetMemoryId: string }) => {
-          const otherId = conn.sourceMemoryId === params.memoryId ? conn.targetMemoryId : conn.sourceMemoryId;
-          const other = (await client.execute({
-            sql: `SELECT domain FROM memories WHERE id = ? AND deleted_at IS NULL${userId ? ' AND user_id = ?' : ''}`,
-            args: userId ? [otherId, userId] : [otherId],
-          })).rows[0] as { domain: string } | undefined;
-          if (!other) return false;
-          return checkPermission(params.agentId, other.domain, "read", userId);
+        const otherIds = Array.from(new Set([
+          ...outgoing.map((c) => c.targetMemoryId),
+          ...incoming.map((c) => c.sourceMemoryId),
+        ]));
+        const domainByOtherId = new Map<string, string>();
+        if (otherIds.length > 0) {
+          const placeholders = otherIds.map(() => "?").join(",");
+          const userFilter = userId ? ' AND user_id = ?' : '';
+          const args = userId ? [...otherIds, userId] : otherIds;
+          const rows = (await client.execute({
+            sql: `SELECT id, domain FROM memories
+                    WHERE id IN (${placeholders})
+                      AND deleted_at IS NULL${userFilter}`,
+            args,
+          })).rows as unknown as Array<{ id: string; domain: string }>;
+          for (const r of rows) domainByOtherId.set(r.id, r.domain);
+        }
+
+        const distinctDomains = new Set(domainByOtherId.values());
+        const allowedByDomain = new Map<string, boolean>();
+        for (const d of distinctDomains) {
+          allowedByDomain.set(d, await checkPermission(params.agentId, d, "read", userId));
+        }
+
+        const filterByOtherId = (otherId: string): boolean => {
+          const dom = domainByOtherId.get(otherId);
+          if (dom === undefined) return false; // missing / cross-tenant / soft-deleted
+          return allowedByDomain.get(dom) === true;
         };
 
-        const filteredOutgoing: typeof outgoing = [];
-        for (const conn of outgoing) {
-          if (await filterConnection(conn)) filteredOutgoing.push(conn);
-        }
-        const filteredIncoming: typeof incoming = [];
-        for (const conn of incoming) {
-          if (await filterConnection(conn)) filteredIncoming.push(conn);
-        }
+        const filteredOutgoing = outgoing.filter((c) => filterByOtherId(c.targetMemoryId));
+        const filteredIncoming = incoming.filter((c) => filterByOtherId(c.sourceMemoryId));
 
         return textResult({
           memoryId: params.memoryId,

@@ -1,9 +1,10 @@
 import type { Client } from "@libsql/client";
-import { hybridSearch, type ExpandedResult } from "./search.js";
+import { hybridSearch, expandConnections, type ExpandedResult } from "./search.js";
 import { effectivePermanence } from "./confidence.js";
 import { getProfile } from "./entity-profiles.js";
 import { rerank } from "./reranker.js";
-import type { QueryExtractionMode } from "./query-extraction.js";
+import { extractSignalTerms, type QueryExtractionMode } from "./query-extraction.js";
+import { generateEmbedding } from "./embeddings.js";
 import { applyPprPass, resolvePprConfig, type PprEdge } from "./ppr-rerank.js";
 
 // --- Token estimation ---
@@ -862,6 +863,55 @@ export async function contextSearch(
     // Same trim defensive — when PPR is opted-in, the rerank request asked for
     // the full pool; we still need to trim before downstream packing.
     if (reranked.length > rerankTopK) reranked = reranked.slice(0, rerankTopK);
+  }
+
+  // Post-rerank graph expansion (env-gated, default off when reranker is on).
+  //
+  // The hybridSearch call above passed `expand: !rerankerEnabled` — so when
+  // the reranker is on, expansion was skipped to avoid BFS over the 200
+  // Stage-1 candidates (the original workaround). Now we offer a controlled
+  // re-enable: run expansion AFTER rerank/PPR, on a small post-rerank seed
+  // set (default top 20). Combined with the inline-distance + PII-filter
+  // changes in expandConnections, this restores graph signal in the response
+  // without re-introducing the wide fan-out the original suppression dodged.
+  //
+  // Off by default; opt-in via LODIS_GRAPH_EXPANSION=1. LODIS_GRAPH_EXPANSION_TOPK
+  // bounds the seed set (default 20). Failures fall back silently to no
+  // expansion — must not break retrieval if the embedding model or vector
+  // index is unavailable.
+  if (rerankerEnabled && process.env.LODIS_GRAPH_EXPANSION === "1" && reranked.length > 0) {
+    const seedCap = (() => {
+      const raw = process.env.LODIS_GRAPH_EXPANSION_TOPK;
+      const parsed = raw ? parseInt(raw, 10) : NaN;
+      return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 50) : 20;
+    })();
+    try {
+      const seeds = reranked.slice(0, seedCap);
+      // The reranker is fed the full original query; for vector-distance
+      // expansion we use the same effectiveQuery hybridSearch used for the
+      // dense path, to keep neighbor-similarity comparable to Stage 1.
+      const effective = extractSignalTerms(query).effectiveQuery;
+      const queryEmbedding = await generateEmbedding(effective);
+      const expanded = await expandConnections(
+        client,
+        seeds,
+        queryEmbedding,
+        2, // maxDepth: matches the legacy expand=true path
+        0.4, // similarityThreshold: same default as hybridSearch
+        options.userId ?? null,
+      );
+      const connByIdMap = new Map(expanded.map((e) => [e.memory.id as string, e.connected]));
+      reranked = reranked.map((r) => ({
+        ...r,
+        connected: connByIdMap.get(r.memory.id as string) ?? r.connected,
+      }));
+    } catch (err) {
+      // Silent fall-through — expansion is opt-in, never load-bearing for
+      // retrieval correctness. Stderr so failures are visible in launch logs
+      // (matches the reranker / vec.ts pattern).
+      const msg = String((err as Error)?.message ?? err);
+      process.stderr.write(`[lodis] post-rerank graph expansion threw, skipping: ${msg.slice(0, 200)}\n`);
+    }
   }
 
   // Apply permanence-aware scoring

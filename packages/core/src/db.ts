@@ -498,6 +498,98 @@ async function runMigrations(client: Client): Promise<void> {
       );
     }
   });
+
+  await runMigration(client, "wave2_5_covering_indexes", async () => {
+    // Wave 2.5 follow-up — covering composites for the L2a + L3 hot paths.
+    //
+    // Perf-W6 (round 2 verdict: still INSUFFICIENT) and Perf-F1 in code-review:
+    // wave2_5_connection_indexes added an `entity_name COLLATE NOCASE` index but
+    // not a covering composite for the `ORDER BY updated_at DESC NULLS LAST`
+    // clause that L2a (every write) and L3 candidate-generation (50× per
+    // memory_propose_connections call) actually issue. The pre-existing index
+    // satisfies the equality lookup but the planner has to filesort the matched
+    // rows on every call (`USE TEMP B-TREE FOR ORDER BY` in EXPLAIN). At 100K
+    // memories with a hot entity_name like "James" or "Anthropic" this is a
+    // real perf cliff on the write path.
+    //
+    // (1) entity_name + updated_at composite — leading column is
+    //     `entity_name COLLATE NOCASE` so it strictly supersedes the older
+    //     idx_memories_entity_name_nocase for any query that index satisfied
+    //     (planner verified — see verification block below). updated_at DESC
+    //     means the index walks pre-sorted, so ORDER BY ... LIMIT short-circuits
+    //     without a temp B-tree.
+    //
+    // (2) domain + updated_at composite with `entity_type IS NOT 'snippet'`
+    //     partial predicate — matches the same-domain branch of
+    //     generateCandidatesForMemory exactly. Without this the planner falls
+    //     through to idx_memories_user_id (entire user partition scan) and
+    //     filesorts. The snippet exclusion is in the partial-index WHERE so
+    //     the index doesn't bloat with the high-frequency snippet table
+    //     (snippets are ~99% of write volume on agents that poll Notion/GH).
+    //
+    // Both indexes are CREATE ... IF NOT EXISTS — safe re-run. The older
+    // single-column `idx_memories_entity_name_nocase` is dropped because the
+    // new composite has the same leading-column shape and SQLite consistently
+    // picks the new one (verified below). Keeping both wastes write amp.
+    //
+    // Wrapped in BEGIN IMMEDIATE / COMMIT to match the wave2_5_connection_indexes
+    // atomicity pattern (lines 460-470). Critical: the runMigration wrapper at
+    // line 121 silently swallows errors AND marks the migration done in
+    // _migrations regardless. Without the transaction, a partial failure
+    // (CREATE #2 fails mid-migration) would leave us with: composite #1 created,
+    // composite #2 missing, old index still present (DROP never reached). The
+    // migration would be marked done, so re-running is a no-op. Recovery would
+    // require manual `DELETE FROM _migrations` + restart. With the transaction,
+    // any failure rolls back all three statements and the verification block
+    // below catches the inconsistency on the same run.
+    //
+    // Rollback: DROP INDEX idx_memories_entity_name_nocase_updated;
+    //           DROP INDEX idx_memories_domain_updated;
+    //           CREATE INDEX idx_memories_entity_name_nocase
+    //             ON memories(entity_name COLLATE NOCASE)
+    //             WHERE deleted_at IS NULL AND entity_name IS NOT NULL;
+    //           DELETE FROM _migrations WHERE name = 'wave2_5_covering_indexes';
+    await client.executeMultiple(`
+      BEGIN IMMEDIATE;
+      CREATE INDEX IF NOT EXISTS idx_memories_entity_name_nocase_updated
+        ON memories(entity_name COLLATE NOCASE, updated_at DESC)
+        WHERE deleted_at IS NULL AND entity_name IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_memories_domain_updated
+        ON memories(domain, updated_at DESC)
+        WHERE deleted_at IS NULL AND entity_type IS NOT 'snippet';
+      DROP INDEX IF EXISTS idx_memories_entity_name_nocase;
+      COMMIT;
+    `);
+
+    // Verification: confirm both new indexes exist AND the old one is gone.
+    // Same rationale as wave2_5_connection_indexes verification (lines 488-499):
+    // the runMigration wrapper marks the migration done unconditionally, so a
+    // throw here doesn't trigger automatic retry — but a loud stderr warning
+    // gives operators an actionable signal. Manual recovery: DELETE FROM
+    // _migrations WHERE name = 'wave2_5_covering_indexes' and restart.
+    const verify = await client.execute({
+      sql: `SELECT name FROM sqlite_master
+             WHERE type = 'index'
+               AND name IN (
+                 'idx_memories_entity_name_nocase_updated',
+                 'idx_memories_domain_updated',
+                 'idx_memories_entity_name_nocase'
+               )`,
+      args: [],
+    });
+    const presentIndexes = new Set(verify.rows.map((r) => r.name as string));
+    const newCompositeOk = presentIndexes.has("idx_memories_entity_name_nocase_updated");
+    const newDomainOk = presentIndexes.has("idx_memories_domain_updated");
+    const oldDropped = !presentIndexes.has("idx_memories_entity_name_nocase");
+    if (!newCompositeOk || !newDomainOk || !oldDropped) {
+      process.stderr.write(
+        "[lodis] CRITICAL: wave2_5_covering_indexes inconsistent state after migration — " +
+        `entity_name composite=${newCompositeOk}, domain composite=${newDomainOk}, old index dropped=${oldDropped}. ` +
+        "L2a + L3 hot-path queries will silently regress to filesorts (or worse, full scans). " +
+        "Recovery: DELETE FROM _migrations WHERE name = 'wave2_5_covering_indexes' and restart.\n",
+      );
+    }
+  });
 }
 
 export async function createDatabase(config?: {

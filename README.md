@@ -21,6 +21,8 @@ Add to your Claude Code config (`~/.claude.json`):
 
 That's it. Your AI now has persistent memory.
 
+> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis` in your MCP config and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
+
 ## Getting Started
 
 After installing, tell your AI assistant:
@@ -91,6 +93,7 @@ Features:
 | `memory_correct` | LLM-powered semantic diff correction |
 | `memory_flag_mistake` | Degrade confidence |
 | `memory_remove` | Soft-delete |
+| `memory_remove_bulk` | Soft-delete many memories at once, scoped by domain / entityName / ids[]. Defaults to dryRun. |
 | `memory_pin` | Pin as canonical (decay-immune, high confidence) |
 | `memory_archive` | Archive for reference (deprioritize, freeze confidence) |
 | `memory_connect` | Link memories with typed relationships |

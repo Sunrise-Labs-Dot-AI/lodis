@@ -24,6 +24,8 @@ Add to your MCP config and you're done:
 
 That's it. Your AI agent now has persistent memory.
 
+> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis` in your MCP config and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
+
 ## Getting Started
 
 After installing, tell your AI assistant:
@@ -40,7 +42,7 @@ The assistant will scan your connected tools (calendar, email, GitHub), ask a fe
 
 ## What You Get
 
-Lodis provides 28 MCP tools:
+Lodis provides 29 MCP tools:
 
 | Tool | Description |
 |------|-------------|
@@ -51,6 +53,7 @@ Lodis provides 28 MCP tools:
 | `memory_bulk_upload` | Upload many memories at once (bypasses dedup) for imports from canonical external sources |
 | `memory_update` | Modify a memory's content, detail, or metadata |
 | `memory_remove` | Soft-delete a memory |
+| `memory_remove_bulk` | Soft-delete many memories at once, scoped by domain / entityName / ids[]. Defaults to dryRun. |
 | `memory_confirm` | Confirm a memory is correct (boosts confidence to 0.99) |
 | `memory_correct` | LLM-powered semantic diff correction |
 | `memory_flag_mistake` | Flag a memory as incorrect (degrades confidence) |

@@ -8,7 +8,7 @@ const stdioConfig = `{
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis"]
+      "args": ["-y", "lodis-mcp"]
     }
   }
 }`;

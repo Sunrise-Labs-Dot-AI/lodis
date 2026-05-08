@@ -61,7 +61,7 @@ importers:
       clsx:
         specifier: ^2.1.0
         version: 2.1.1
-      lodis:
+      lodis-mcp:
         specifier: workspace:*
         version: link:../mcp-server
       lucide-react:

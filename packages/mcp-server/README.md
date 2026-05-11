@@ -42,32 +42,41 @@ The assistant will scan your connected tools (calendar, email, GitHub), ask a fe
 
 ## What You Get
 
-Lodis provides 29 MCP tools:
+Lodis provides 39 MCP tools:
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with filters |
+| `memory_get` | Fetch one or many memories by ID (up to 50, deduplicated) |
 | `memory_context` | Token-budget-aware context retrieval |
-| `memory_briefing` | LLM-generated entity profile summaries |
+| `memory_rate_context` | Close the feedback loop on a prior `memory_context` retrieval |
+| `memory_briefing` | LLM-generated entity profile summaries with 24h cache |
 | `memory_write` | Create a new memory with dedup detection and permanence tiers |
 | `memory_bulk_upload` | Upload many memories at once (bypasses dedup) for imports from canonical external sources |
-| `memory_update` | Modify a memory's content, detail, or metadata |
+| `memory_update` | Structural edit — content, detail, domain, or entity fields |
 | `memory_remove` | Soft-delete a memory |
 | `memory_remove_bulk` | Soft-delete many memories at once, scoped by domain / entityName / ids[]. Defaults to dryRun. |
 | `memory_confirm` | Confirm a memory is correct (boosts confidence to 0.99) |
-| `memory_correct` | LLM-powered semantic diff correction |
+| `memory_correct` | Replace content with corrected or user-asserted information; raises confidence to ≥0.90 |
 | `memory_flag_mistake` | Flag a memory as incorrect (degrades confidence) |
 | `memory_pin` | Pin as canonical (decay-immune, high confidence) |
 | `memory_archive` | Archive for reference (deprioritize, freeze confidence) |
 | `memory_connect` | Create typed relationships between memories |
-| `memory_get_connections` | View a memory's relationship graph |
+| `memory_connect_batch` | Commit multiple relationship edges in one call |
+| `memory_get_connections` | Traverse the knowledge graph |
+| `memory_propose_connections` | Server-side candidate selection for the agent connection loop |
 | `memory_split` | Break compound memories into atomic units |
 | `memory_scrub` | Detect and redact PII or secrets from memory content |
 | `memory_list` | Browse memories by domain, sorted by confidence or recency |
-| `memory_list_domains` | List all memory domains with counts |
+| `memory_list_domains` | List all memory domains with counts and registered/archived status |
 | `memory_list_entities` | List extracted entities grouped by type |
 | `memory_classify` | Batch-classify untyped memories using entity extraction |
 | `memory_set_permissions` | Configure per-agent read/write access |
+| `memory_write_snippet` | Write a validated progress event (shipped/advanced/started/stalled/blocked) |
+| `memory_query_progress` | Time-ranged snippet query filtered by domain or linked goal |
+| `memory_progress_summary` | Rollup: totals by domain, type, and goal — for weekly reviews |
+| `memory_register_domain` | Register a life domain slug so snippet writes are accepted |
+| `memory_archive_domain` | Archive a domain so snippet writes are rejected until unarchived |
 | `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
 | `memory_interview` | Agent-driven cleanup and gap-fill |
 | `memory_import` | Import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
@@ -75,11 +84,12 @@ Lodis provides 29 MCP tools:
 | `memory_index` | Index external docs (Drive, Notion, filesystem) |
 | `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works |
 
 ### Key features
 
 - **Hybrid search** — FTS5 full-text + vector embeddings (all-MiniLM-L6-v2, local) merged via Reciprocal Rank Fusion
-- **Entity types** — Memories auto-classified into 13 types: person, organization, place, project, preference, event, goal, fact, lesson, routine, skill, resource, decision
+- **Entity types** — Memories auto-classified into 14 types: person, organization, place, project, preference, event, goal, fact, lesson, routine, skill, resource, decision, snippet
 - **Knowledge graph** — Typed relationships between memories, auto-connected entities
 - **Memory permanence** — Four tiers (canonical, active, ephemeral, archived) control confidence decay and search ranking
 - **Context-packed search** — Token-budget-aware retrieval via `memory_context` for efficient LLM context windows

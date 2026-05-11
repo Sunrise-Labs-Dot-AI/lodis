@@ -23,9 +23,13 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
         example: `memory_search({ query: "design decisions", minConfidence: 0.8 })`,
         featured: true,
       },
+      { name: "memory_get", desc: "Fetch one or many memories by ID (up to 50)" },
       { name: "memory_context", desc: "Token-budget-aware context retrieval" },
-      { name: "memory_update", desc: "Modify content, detail, or metadata" },
+      { name: "memory_rate_context", desc: "Close the feedback loop on a prior context retrieval" },
+      { name: "memory_update", desc: "Structural edit — content, detail, domain, or entity fields" },
       { name: "memory_remove", desc: "Soft-delete with reason tracking" },
+      { name: "memory_remove_bulk", desc: "Bulk soft-delete scoped by domain, entity name, or IDs" },
+      { name: "memory_bulk_upload", desc: "Batch-insert up to 5,000 memories for external imports" },
     ],
   },
   {
@@ -51,7 +55,9 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
         example: `memory_connect({ from, to, relationship: "works_at" })`,
         featured: true,
       },
+      { name: "memory_connect_batch", desc: "Commit multiple relationship edges in one call" },
       { name: "memory_get_connections", desc: "Traverse the knowledge graph" },
+      { name: "memory_propose_connections", desc: "Server-side candidate selection for the connection loop" },
       { name: "memory_split", desc: "Break compound memories into atomic units" },
     ],
   },
@@ -74,6 +80,16 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
     ],
   },
   {
+    label: "Progress",
+    tools: [
+      { name: "memory_write_snippet", desc: "Write a validated progress event (shipped/started/stalled/blocked)" },
+      { name: "memory_query_progress", desc: "Time-ranged snippet query by domain or goal" },
+      { name: "memory_progress_summary", desc: "Rollup: totals by domain, type, and goal for weekly reviews" },
+      { name: "memory_register_domain", desc: "Register a life domain slug for snippet writes" },
+      { name: "memory_archive_domain", desc: "Archive a domain so snippet writes are rejected" },
+    ],
+  },
+  {
     label: "Onboarding",
     tools: [
       {
@@ -84,6 +100,7 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
       },
       { name: "memory_import", desc: "Import from Claude, ChatGPT, Cursor, gitconfig" },
       { name: "memory_interview", desc: "Agent-driven cleanup and gap-fill" },
+      { name: "memory_tutorial", desc: "Interactive chapter-by-chapter tutorial for how Lodis works" },
     ],
   },
   {
@@ -110,7 +127,7 @@ export function Tools() {
       <div className="max-w-6xl mx-auto">
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4 tracking-tight">
-            27 MCP tools.{" "}
+            39 MCP tools.{" "}
             <span className="text-glow">One install.</span>
           </h2>
           <p className="text-text-muted text-center mb-16 text-lg">
@@ -141,7 +158,7 @@ export function Tools() {
         <Reveal>
           <details className="group">
             <summary className="cursor-pointer list-none inline-flex items-center gap-2 text-sm text-text-muted hover:text-text transition-colors">
-              <span className="group-open:hidden">See all 27 tools</span>
+              <span className="group-open:hidden">See all 39 tools</span>
               <span className="hidden group-open:inline">Hide full catalog</span>
               <svg
                 width="14"

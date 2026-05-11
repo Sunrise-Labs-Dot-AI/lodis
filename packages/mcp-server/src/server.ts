@@ -2117,7 +2117,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_update",
-    "Update an existing memory's content, detail, or domain",
+    "Structural edit for an existing memory — change content, detail, domain, entity type, or entity name. Use for shape corrections, domain moves, and field additions. IMPORTANT: if you are rewriting content based on something the user has said or asserted as true (e.g., enriching an imported contact with details from a real conversation), call memory_correct instead — it promotes confidence to ≥0.90 to reflect the stated-truth floor.",
     {
       id: z.string().describe("Memory ID to update"),
       content: z.string().optional().describe("New content"),
@@ -2207,7 +2207,14 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
       await bumpLastModified(client);
 
-      return textResult({ id: params.id, updated: true, changes: updates });
+      const hint =
+        params.content !== undefined &&
+        params.content !== existing.content &&
+        existing.confidence < 0.9
+          ? "Content rewrite detected on a low-confidence record. If this content comes from user-asserted truth, call memory_correct instead — it raises confidence to ≥0.90 to reflect the stated-truth floor."
+          : undefined;
+
+      return textResult({ id: params.id, updated: true, changes: updates, ...(hint !== undefined ? { hint } : {}) });
     },
   );
 
@@ -2412,7 +2419,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_correct",
-    "Replace a memory's content with corrected information. Call this when the user says a memory is wrong and provides the right answer. Raises confidence to at least 0.90 (stated-truth floor); leaves it alone if already higher. Use memory_confirm (not this) to verify an already-correct memory.",
+    "Replace a memory's content with corrected or asserted information. Call this when the user says a memory is wrong, OR when you are writing rich first-party content into a low-confidence memory (e.g., enriching an imported contact skeleton with details from a real conversation). Raises confidence to ≥0.90 (stated-truth floor); leaves it alone if already higher. Use memory_update (not this) for structural changes that do not assert new truth. Use memory_confirm (not this) to verify an already-correct memory.",
     {
       id: z.string().describe("Memory ID to correct"),
       content: z.string().describe("The corrected content"),

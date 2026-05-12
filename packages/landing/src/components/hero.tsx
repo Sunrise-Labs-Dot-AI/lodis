@@ -51,7 +51,7 @@ export function Hero() {
         <div className="max-w-lg mx-auto">
           <CodeBlock className="text-left text-sm">{installConfig}</CodeBlock>
           <p className="text-text-dim text-sm mt-3">
-            Add to Claude Code, Cursor, Windsurf, or any MCP client. That&rsquo;s it.
+            Setup guide includes Codex, Claude Code, Cursor, Windsurf, and other MCP clients.
           </p>
         </div>
 

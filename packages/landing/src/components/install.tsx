@@ -1,6 +1,7 @@
 import { CodeBlock } from "./code-block";
 
 const clients = [
+  { name: "Codex", path: "codex mcp add lodis -- npx -y lodis-mcp" },
   { name: "Claude Code", path: "~/.claude.json" },
   {
     name: "Claude Desktop",
@@ -29,8 +30,8 @@ export function Install() {
         </h2>
 
         <p className="text-text-muted text-center mb-3 text-sm">
-          Same config for every MCP client. Paste it into the file below for the
-          client you use.
+          Paste this JSON into most local MCP clients. Codex users can use the
+          command listed below.
         </p>
 
         <CodeBlock>{config}</CodeBlock>

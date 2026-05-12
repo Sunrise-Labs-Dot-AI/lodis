@@ -1,17 +1,36 @@
 #!/usr/bin/env node
 // One-shot audit: spin up the McpServer in-process, list tools, and flag
-// every Codex-incompatible JSON Schema feature per tool.
+// JSON Schema features that may break downstream clients.
 //
-// Codex (OpenAI Responses API function-calling strict-mode subset) rejects:
-//   - "type": "integer"
-//   - "oneOf" / "anyOf" / "allOf"
-//   - "$ref"
-//   - missing "type" on object/array nodes
-//   - empty properties (parameter-less tool) — separate runtime crash
-//   - additionalProperties expressed as a schema (e.g. z.record) — needs to be
-//     boolean false or absent
+// Two modes:
 //
-// We walk every inputSchema and tag the offenders.
+// 1. Default (codex-compat): rules covering the heuristic Codex CLI's
+//    schema parser actually trips on today. This is what the PR that
+//    introduced this script targets — keeping every Lodis tool reachable
+//    over Codex's lenient MCP-to-Responses-API path.
+//      - "type": "integer"            (Codex flattens to number; the bare
+//                                       "integer" form has been an observed
+//                                       failure mode — see codex#2204)
+//      - oneOf / anyOf / allOf        (union types observed dropped — codex#3152)
+//      - $ref                         (Codex does not flatten refs)
+//      - additionalProperties: {}     (empty schema; no "type" field → reject)
+//      - properties: {} at root       (parameter-less tools crash sessions)
+//
+// 2. --strict (openai-strict): the documented OpenAI Responses API
+//    `strict: true` subset
+//    (https://platform.openai.com/docs/guides/function-calling). Tighter
+//    than codex-compat: every object MUST set additionalProperties: false,
+//    every property MUST appear in `required`, and there are no
+//    free-form fields. Lodis cannot be fully strict-compatible today
+//    without breaking the `structuredData` / `meta` object-typed
+//    parameters that callers actively pass through Claude Code. Use
+//    --strict to surface the remaining gap; do not treat its findings
+//    as merge blockers for codex-compat work.
+//
+// Usage:
+//   node scripts/audit-codex-schemas.mjs              # codex-compat audit
+//   node scripts/audit-codex-schemas.mjs --strict     # strict-mode audit
+//   node scripts/audit-codex-schemas.mjs tool_a tool_b  # dump those schemas
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,10 +69,11 @@ function* walk(node) {
   }
 }
 
-function audit(schema) {
+function audit(schema, strict) {
   const flags = new Set();
   if (!schema || typeof schema !== "object") return { flags, properties: 0 };
   for (const node of walk(schema)) {
+    // --- codex-compat rules (always on) ---
     if (node.type === "integer") flags.add("integer");
     if (Array.isArray(node.oneOf)) flags.add("oneOf");
     if (Array.isArray(node.anyOf)) flags.add("anyOf");
@@ -65,11 +85,26 @@ function audit(schema) {
       node.additionalProperties &&
       typeof node.additionalProperties === "object" &&
       // additionalProperties: {} (empty schema, no `type`) trips Codex's
-      // parser. additionalProperties: true is fine — see emptyProperties
-      // note below for the analogous root-level case.
+      // parser. additionalProperties: true is OK under codex-compat —
+      // strict mode catches it below.
       Object.keys(node.additionalProperties).length === 0
     ) {
       flags.add("openAdditionalProps");
+    }
+    // --- strict-mode-only rules ---
+    if (strict && node.type === "object") {
+      // openai-strict: additionalProperties MUST be the literal `false`.
+      // `true`, `{}`, and absent all fail under strict: true.
+      if (node.additionalProperties !== false) {
+        flags.add("strict:nonFalseAdditionalProps");
+      }
+      // openai-strict: every property MUST appear in `required`. Optional
+      // fields are not allowed; they must be modeled as nullable required.
+      if (node.properties && Object.keys(node.properties).length > 0) {
+        const required = new Set(Array.isArray(node.required) ? node.required : []);
+        const missing = Object.keys(node.properties).filter((k) => !required.has(k));
+        if (missing.length > 0) flags.add("strict:optionalNotRequired");
+      }
     }
   }
   // emptyProperties is a tool-root-only concern. Codex crashes on a
@@ -87,9 +122,15 @@ function audit(schema) {
   return { flags, properties: props };
 }
 
+const args = process.argv.slice(2);
+const strict = args.includes("--strict");
+const dump = args.filter((a) => !a.startsWith("--"));
+
+console.log(`Mode: ${strict ? "openai-strict (full Responses API strict subset)" : "codex-compat (Codex CLI heuristic parser)"}`);
+
 const rows = tools
   .map((t) => {
-    const a = audit(t.inputSchema);
+    const a = audit(t.inputSchema, strict);
     const descLen = (t.description ?? "").length;
     const schemaLen = JSON.stringify(t.inputSchema ?? {}).length;
     return {
@@ -159,10 +200,9 @@ console.log(`\nCodex-compatible (no incompatible features): ${clean.length}`);
 clean.forEach((n) => console.log("  " + n));
 
 const incompatible = rows.filter((r) => r.flags !== "—");
-console.log(`\nCodex-incompatible: ${incompatible.length}`);
+console.log(`\n${strict ? "Strict-mode" : "Codex-compat"} violations: ${incompatible.length}`);
 
 // Dump representative schemas for cross-check against Codex's actual filter.
-const dump = process.argv.slice(2);
 if (dump.length > 0) {
   console.log("\n--- requested schemas ---");
   for (const name of dump) {

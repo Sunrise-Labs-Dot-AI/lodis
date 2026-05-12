@@ -13,7 +13,19 @@ const stdioConfig = `{
   }
 }`;
 
+const codexTomlConfig = `[mcp_servers.lodis]
+command = "npx"
+args = ["-y", "lodis-mcp"]`;
+
 const clients = [
+  {
+    name: "Codex",
+    path: "~/.codex/config.toml",
+    config: codexTomlConfig,
+    note: "Codex shares this config between the CLI and IDE extension. Use /mcp in the TUI or codex mcp list to confirm Lodis is active.",
+    command: "codex mcp add lodis -- npx -y lodis-mcp",
+    isCodex: true,
+  },
   {
     name: "Claude Code",
     path: "~/.claude.json",
@@ -111,6 +123,26 @@ export function SetupTabs() {
           <p className="text-text-dim text-xs mt-4">
             Uses OAuth 2.1 with PKCE. Your memories are stored encrypted in our cloud database.
           </p>
+        </div>
+      ) : client.isCodex ? (
+        <div className="space-y-5">
+          <div>
+            <p className="text-text-muted text-sm mb-3">
+              Fastest path: let Codex write the MCP entry for you.
+            </p>
+            <CodeBlock>{client.command!}</CodeBlock>
+          </div>
+
+          <div>
+            <p className="text-text-dim text-sm font-mono mb-3">
+              {client.path}
+            </p>
+            <CodeBlock>{client.config!}</CodeBlock>
+          </div>
+
+          {client.note && (
+            <p className="text-text-dim text-sm">{client.note}</p>
+          )}
         </div>
       ) : (
         <div>

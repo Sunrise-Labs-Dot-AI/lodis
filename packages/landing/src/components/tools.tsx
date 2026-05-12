@@ -38,7 +38,7 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
       { name: "memory_confirm", desc: "Mark a memory as verified and boost its confidence" },
       {
         name: "memory_correct",
-        desc: "LLM-powered semantic diff correction",
+        desc: "Store corrected or user-asserted information",
         example: `memory_correct({ id, correction: "It's Thursdays, not Tuesdays" })`,
         featured: true,
       },
@@ -67,8 +67,8 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
       { name: "memory_list", desc: "Browse by domain, confidence, or recency" },
       { name: "memory_list_domains", desc: "List all domains with memory counts" },
       { name: "memory_list_entities", desc: "Show extracted entities by type" },
-      { name: "memory_classify", desc: "Auto-classify a memory's entity type via LLM" },
-      { name: "memory_briefing", desc: "LLM-generated entity profile summaries" },
+      { name: "memory_classify", desc: "List untyped memories for agent-side classification" },
+      { name: "memory_briefing", desc: "Cached entity profiles or evidence for synthesis" },
     ],
   },
   {

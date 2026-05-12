@@ -54,20 +54,13 @@ export default function TermsOfService() {
               <li>
                 <span className="text-text font-medium">Local</span> &mdash; A
                 local-only MCP server and dashboard. All data stays on your
-                machine. No cloud services are involved unless you configure your
-                own LLM provider (BYOK).
+                machine. No cloud services are involved unless you explicitly
+                configure or invoke them from your MCP client.
               </li>
               <li>
                 <span className="text-text font-medium">Cloud</span> &mdash; A
                 cloud-hosted MCP server and dashboard. Your memories are stored
-                in our cloud database, encrypted at rest. You supply your own LLM
-                API keys (BYOK).
-              </li>
-              <li>
-                <span className="text-text font-medium">Cloud+</span> &mdash;
-                Same as Cloud, with LLM processing included. Your memory content
-                is sent to third-party LLM providers (Anthropic, OpenAI) for
-                entity extraction and analysis.
+                in our cloud database, encrypted at rest.
               </li>
             </ul>
           </section>
@@ -77,7 +70,7 @@ export default function TermsOfService() {
               3. User Accounts and API Tokens
             </h2>
             <p>
-              Cloud and Cloud+ tiers require an account, authenticated through
+              Cloud tiers require an account, authenticated through
               Clerk (our third-party authentication provider). You are
               responsible for maintaining the security of your account
               credentials.
@@ -107,10 +100,6 @@ export default function TermsOfService() {
               <li>
                 Reverse-engineer, attack, or attempt to disrupt the hosted
                 service.
-              </li>
-              <li>
-                Use the Service to circumvent the usage policies of third-party
-                LLM providers.
               </li>
               <li>
                 Resell or redistribute access to the hosted service without our
@@ -171,30 +160,25 @@ export default function TermsOfService() {
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              7. BYOK API Keys
+              7. External Services
             </h2>
             <p>
-              If you provide your own API keys (&quot;Bring Your Own Key&quot;)
-              for LLM providers, you are responsible for:
+              If you configure external services or credentials through your MCP
+              client, you are responsible for:
             </p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
               <li>
-                Ensuring your usage complies with the LLM provider&apos;s terms
+                Ensuring your usage complies with the provider&apos;s terms
                 of service.
               </li>
               <li>
-                Any costs incurred through those API keys when used by the
+                Any costs incurred through those credentials when used by the
                 Service.
               </li>
               <li>
                 Revoking keys if you suspect unauthorized use.
               </li>
             </ul>
-            <p className="mt-3">
-              On the Cloud tier, your API keys are encrypted at rest in our
-              database and only decrypted in server memory when making LLM calls
-              on your behalf. See our Privacy Policy for details.
-            </p>
           </section>
 
           <section>
@@ -233,8 +217,7 @@ export default function TermsOfService() {
                 Any unauthorized access to or alteration of your data.
               </li>
               <li>
-                Any third-party conduct on the Service, including LLM provider
-                actions.
+                Any third-party conduct on the Service.
               </li>
               <li>Any other matter relating to the Service.</li>
             </ul>

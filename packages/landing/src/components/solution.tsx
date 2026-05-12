@@ -48,7 +48,7 @@ const features = [
   {
     title: "Connect & Understand",
     description:
-      "Memories are auto-classified into 13 entity types. People, projects, and preferences are automatically linked. Entity profiles generate summaries on demand. Contradictions detected.",
+      "Memories support 14 entity types. Agents can classify people, projects, preferences, and snippets, while Lodis handles deterministic links, connection proposals, cached entity profiles, and contradiction review workflows.",
     visual: (
       <div className="glass p-6 space-y-3">
         {[

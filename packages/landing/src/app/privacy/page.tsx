@@ -50,12 +50,12 @@ export default function PrivacyPolicy() {
               The Local tier runs entirely on your machine. Your memories,
               embeddings, configuration, and credentials never leave your
               computer. There is no telemetry, no analytics, and no phone-home
-              behavior. The only network calls the software makes are to your own
-              LLM provider, if you configure one.
+              behavior, except for services you explicitly configure or invoke
+              from your MCP client.
             </p>
 
             <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Cloud and Cloud+ Tiers
+              Cloud Tier
             </h3>
             <p>When you create an account, we collect:</p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
@@ -85,10 +85,6 @@ export default function PrivacyPolicy() {
                 An audit trail of actions taken on your memories (creation,
                 updates, confirmations, corrections).
               </li>
-              <li>
-                <span className="text-text">BYOK API keys</span> (Cloud tier)
-                &mdash; Your LLM provider API keys, if you provide them.
-              </li>
             </ul>
           </section>
 
@@ -103,10 +99,6 @@ export default function PrivacyPolicy() {
               </li>
               <li>
                 To authenticate you and secure your account.
-              </li>
-              <li>
-                To process LLM requests on your behalf (Cloud+ tier, or BYOK
-                calls on Cloud tier).
               </li>
               <li>
                 To send you service-related communications (account security,
@@ -167,15 +159,6 @@ export default function PrivacyPolicy() {
               information about the source content.
             </p>
 
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              BYOK API Keys
-            </h3>
-            <p>
-              If you provide your own LLM API keys (Cloud tier), they are encrypted
-              at rest in our database using a server-managed encryption key. They
-              are decrypted in server memory only when making LLM API calls on
-              your behalf. We do not log your API keys.
-            </p>
           </section>
 
           <section>
@@ -215,23 +198,13 @@ export default function PrivacyPolicy() {
                 .
               </li>
               <li>
-                <span className="text-text">
-                  Anthropic / OpenAI
-                </span>{" "}
-                (Cloud+ tier only) &mdash; Your memory content is sent to these
-                LLM providers for entity extraction, classification, and
-                analysis. This means your plaintext memory content is processed
-                by their systems, subject to their respective privacy policies
-                and data handling practices.
-              </li>
-              <li>
                 <span className="text-text">Vercel</span> &mdash; Hosting for
                 the web dashboard and landing page.
               </li>
             </ul>
             <p className="mt-3">
               On the Local tier, none of these services are involved unless you
-              explicitly configure an LLM provider yourself.
+              explicitly configure or invoke them yourself.
             </p>
           </section>
 
@@ -274,10 +247,6 @@ export default function PrivacyPolicy() {
                 <span className="text-text">Revoke access tokens</span> &mdash;
                 Revoke any Personal Access Token (PAT) at any time to disconnect
                 MCP clients.
-              </li>
-              <li>
-                <span className="text-text">Revoke API keys</span> &mdash;
-                Remove your BYOK API keys from our system at any time.
               </li>
               <li>
                 <span className="text-text">Access your data</span> &mdash;

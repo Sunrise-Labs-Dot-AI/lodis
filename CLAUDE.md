@@ -155,7 +155,7 @@ Rate-limit: 500 writes per `(source_agent_id, life_domain)` per hour, unconditio
 
 By design, generic `memory_write` does **not** consult the `domains` registry and does **not** lowercase the `domain` param. This means an agent writing `domain: "Fitness"` via generic `memory_write` is stored as an **orphan** (unregistered) row, distinct from the registered `fitness`. `memory_list_domains` surfaces this drift with `registered: false`. Only `memory_write_snippet` enforces the registry.
 
-## MCP Tools (35)
+## MCP Tools (39)
 
 | Tool | Description |
 |------|-------------|

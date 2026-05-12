@@ -1,3 +1,5 @@
+import { NotInvitedActions } from "./actions";
+
 export const metadata = {
   title: "Lodis — Private Beta",
 };
@@ -20,12 +22,7 @@ export default function NotInvitedPage() {
           </a>{" "}
           and we&apos;ll add you.
         </p>
-        <a
-          href="/sign-in"
-          className="text-sm text-[var(--muted)] hover:text-[var(--fg)] transition-colors underline"
-        >
-          Back to sign in
-        </a>
+        <NotInvitedActions />
       </div>
     </div>
   );

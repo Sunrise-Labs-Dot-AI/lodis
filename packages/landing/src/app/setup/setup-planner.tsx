@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { CodeBlock } from "@/components/code-block";
 
@@ -150,6 +150,39 @@ context. When the user states a preference, corrects an assumption,
 shares personal context, or provides information useful across future
 conversations, save it with memory_write.`;
 
+const claudeCodePrompt = `## Memory — CRITICAL OVERRIDE
+
+**DO NOT use the built-in file-based auto-memory system.** Never create,
+read, or write to \`MEMORY.md\` or any files in the
+\`~/.claude/projects/.../memory/\` directory. That system is fully
+replaced by Lodis.
+
+**USE Lodis MCP tools for ALL persistent memory.** Lodis is the
+single source of truth.
+
+### At conversation start
+- Call \`memory_search\` with terms relevant to the user's request to
+  retrieve prior context
+
+### When to write
+- \`memory_write\` — user states a preference, corrects an assumption,
+  shares personal context, or says anything useful for future conversations
+- \`memory_confirm\` — user validates a recalled fact
+- \`memory_correct\` — user corrects a stored memory
+- \`memory_flag_mistake\` — a memory turns out to be wrong
+
+### When to search
+- \`memory_search\` — before answering questions where prior context
+  would help
+- \`memory_context\` — token-budget-aware retrieval for building responses
+- \`memory_briefing\` — entity summaries (people, projects, etc.)
+
+### Rules
+- Never duplicate memories to both Lodis and the built-in file system
+- Treat Lodis memories as the persistent record — they survive across
+  all MCP-connected tools (Claude Code, Cursor, Windsurf, Claude Desktop)
+- When the user says "remember this," save immediately via \`memory_write\``;
+
 function getInstructionTarget(client: ClientId) {
   switch (client) {
     case "unsure":
@@ -298,7 +331,11 @@ function getStartPlan(start: StartId) {
   }
 }
 
-function getLimits(clients: ClientId[], storage: StorageId, starts: StartId[]) {
+function getInstructionPrompt(client: ClientId) {
+  return client === "claude-code" ? claudeCodePrompt : promptSnippet;
+}
+
+function getLimits(selectedClients: ClientId[], storage: StorageId, starts: StartId[]) {
   const limits = [
     "Lodis only helps tools that are connected through MCP and instructed to use it.",
     "Lodis will not automatically crawl private apps or files. You choose what to import or index.",
@@ -312,16 +349,16 @@ function getLimits(clients: ClientId[], storage: StorageId, starts: StartId[]) {
     limits.push("If you are not sure where memory should live, do not start with cloud or self-hosted HTTP. Use local setup first.");
   }
 
-  if (clients.includes("claude-ai")) {
+  if (selectedClients.includes("claude-ai")) {
     limits.push("Claude.ai uses hosted OAuth; local stdio config does not apply there.");
     limits.push("The local and self-hosted choices are for local MCP clients, not the browser-based Claude.ai connector.");
   }
 
-  if (clients.includes("codex")) {
+  if (selectedClients.includes("codex")) {
     limits.push("Codex uses TOML in ~/.codex/config.toml, not the JSON used by many MCP clients.");
   }
 
-  if (clients.includes("unsure")) {
+  if (selectedClients.includes("unsure")) {
     limits.push("If you are not sure which client you use, start with the tool already open in front of you and add others later.");
   }
 
@@ -426,26 +463,31 @@ function ChoiceGroup<T extends string>({
         {label}
       </p>
       <div className="grid gap-3">
-        {options.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onChange(option.id)}
-            className={clsx(
-              "text-left rounded-lg border p-4 transition-all duration-200",
-              value === option.id
-                ? "border-border-hover bg-[rgba(125,211,252,0.1)]"
-                : "border-border bg-white/[0.02] hover:border-border-hover"
-            )}
-          >
-            <span className="block text-sm font-semibold text-text">
-              {option.label}
-            </span>
-            <span className="mt-1 block text-sm text-text-muted">
-              {option.description}
-            </span>
-          </button>
-        ))}
+        {options.map((option) => {
+          const selected = value === option.id;
+
+          return (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.id)}
+              className={clsx(
+                "text-left rounded-lg border p-4 transition-all duration-200",
+                selected
+                  ? "border-border-hover bg-[rgba(125,211,252,0.1)]"
+                  : "border-border bg-white/[0.02] hover:border-border-hover"
+              )}
+            >
+              <span className="block text-sm font-semibold text-text">
+                {option.label}
+              </span>
+              <span className="mt-1 block text-sm text-text-muted">
+                {option.description}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -517,6 +559,8 @@ export function SetupPlanner() {
   const [storage, setStorage] = useState<StorageId | null>(null);
   const [selectedStarts, setSelectedStarts] = useState<StartId[]>([]);
   const [step, setStep] = useState(0);
+  const questionRef = useRef<HTMLDivElement>(null);
+  const previousStepRef = useRef(step);
   const effectiveStorage = storage ?? "unsure";
 
   const installPlans = useMemo(
@@ -557,6 +601,15 @@ export function SetupPlanner() {
   };
   const goBack = () => setStep((current) => Math.max(current - 1, 0));
 
+  useEffect(() => {
+    if (previousStepRef.current === step) return;
+
+    previousStepRef.current = step;
+    if (isResultStep) return;
+
+    questionRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+  }, [isResultStep, step]);
+
   return (
     <section id="setup-planner" className="mb-20 scroll-mt-24">
       <div className="mb-8">
@@ -575,7 +628,9 @@ export function SetupPlanner() {
       <div className="rounded-lg border border-border bg-black/20 p-5 sm:p-6">
         <div className="mb-6">
           <div className="flex items-center justify-between gap-4 text-xs font-semibold uppercase tracking-widest text-text-dim">
-            <span>{isResultStep ? "Your setup path" : `Question ${step + 1} of 3`}</span>
+            <span aria-live="polite" aria-atomic="true">
+              {isResultStep ? "Your setup path" : `Question ${step + 1} of 3`}
+            </span>
             <a href="/setup/all" className="text-text-muted hover:text-glow transition-colors">
               Skip to everything
             </a>
@@ -602,7 +657,7 @@ export function SetupPlanner() {
         </div>
 
         {!isResultStep ? (
-          <div>
+          <div ref={questionRef}>
             {step === 0 && (
               <MultiChoiceGroup
                 label="What are you connecting?"
@@ -689,12 +744,12 @@ export function SetupPlanner() {
                 <h3 className="font-semibold mb-2">{installPlan.title}</h3>
                 <p className="text-sm text-text-muted mb-4">{installPlan.intro}</p>
                 <ol className="space-y-2 text-sm text-text-muted mb-4">
-                  {installPlan.steps.map((step, index) => (
-                    <li key={step} className="flex gap-3">
+                  {installPlan.steps.map((planStep, index) => (
+                    <li key={`${installPlan.title}-${index}`} className="flex gap-3">
                       <span className="font-mono text-glow shrink-0">
                         {index + 1}.
                       </span>
-                      <span>{step}</span>
+                      <span>{planStep}</span>
                     </li>
                   ))}
                 </ol>
@@ -719,15 +774,23 @@ export function SetupPlanner() {
 
             <div className="rounded-lg border border-border bg-white/[0.02] p-5">
               <h3 className="font-semibold mb-2">Teach your agents to use Lodis</h3>
-              <div className="space-y-2 text-sm text-text-muted mb-3">
+              <div className="space-y-5">
                 {selectedClients.map((client) => (
-                  <p key={client}>
-                    Put this in{" "}
-                    <code className="font-mono text-glow">{getInstructionTarget(client)}</code>.
-                  </p>
+                  <div key={client} className="border-t border-border pt-4 first:border-t-0 first:pt-0">
+                    <p className="text-sm text-text-muted mb-3">
+                      Put this in{" "}
+                      <code className="font-mono text-glow">{getInstructionTarget(client)}</code>.
+                    </p>
+                    {client === "claude-code" && (
+                      <p className="mb-3 rounded-md border border-border-hover bg-glow/10 px-3 py-2 text-sm text-text">
+                        Claude Code requires a stronger override because it can also read
+                        its own file-based memory system.
+                      </p>
+                    )}
+                    <CodeBlock className="text-xs">{getInstructionPrompt(client)}</CodeBlock>
+                  </div>
                 ))}
               </div>
-              <CodeBlock className="text-xs">{promptSnippet}</CodeBlock>
             </div>
 
             {startPlans.map((startPlan) => (

@@ -41,6 +41,39 @@ fact the user asks you to remember.
   Cursor, Windsurf, and other MCP-connected tools.
 - When the user says "remember this," save immediately via \`memory_write\`.`;
 
+const claudeCodePrompt = `## Memory — CRITICAL OVERRIDE
+
+**DO NOT use the built-in file-based auto-memory system.** Never create,
+read, or write to \`MEMORY.md\` or any files in the
+\`~/.claude/projects/.../memory/\` directory. That system is fully
+replaced by Lodis.
+
+**USE Lodis MCP tools for ALL persistent memory.** Lodis is the
+single source of truth.
+
+### At conversation start
+- Call \`memory_search\` with terms relevant to the user's request to
+  retrieve prior context
+
+### When to write
+- \`memory_write\` — user states a preference, corrects an assumption,
+  shares personal context, or says anything useful for future conversations
+- \`memory_confirm\` — user validates a recalled fact
+- \`memory_correct\` — user corrects a stored memory
+- \`memory_flag_mistake\` — a memory turns out to be wrong
+
+### When to search
+- \`memory_search\` — before answering questions where prior context
+  would help
+- \`memory_context\` — token-budget-aware retrieval for building responses
+- \`memory_briefing\` — entity summaries (people, projects, etc.)
+
+### Rules
+- Never duplicate memories to both Lodis and the built-in file system
+- Treat Lodis memories as the persistent record — they survive across
+  all MCP-connected tools (Claude Code, Cursor, Windsurf, Claude Desktop)
+- When the user says "remember this," save immediately via \`memory_write\``;
+
 const cloudJson = `{
   "mcpServers": {
     "lodis": {
@@ -157,6 +190,8 @@ export default function CompleteSetupReference() {
             <h2 className="text-2xl font-bold mb-2">Agent Instructions</h2>
             <p className="text-text-muted mb-6">
               Add the Lodis memory policy to the instruction surface your client reads.
+              Use the general snippet for most clients; Claude Code needs the stronger
+              override shown below.
             </p>
             <CodeBlock className="mb-8">{systemPrompt}</CodeBlock>
 
@@ -173,6 +208,18 @@ export default function CompleteSetupReference() {
                         Codex AGENTS.md snippet
                       </p>
                       <CodeBlock className="text-xs">{codexPrompt}</CodeBlock>
+                    </div>
+                  )}
+                  {client === "Claude Code" && (
+                    <div className="mt-4">
+                      <p className="mb-3 rounded-md border border-border-hover bg-glow/10 px-3 py-2 text-sm text-text">
+                        Claude Code requires a stronger override because it can also read
+                        its own file-based memory system.
+                      </p>
+                      <p className="text-xs font-semibold uppercase tracking-widest text-text-dim mb-2">
+                        Claude Code CLAUDE.md snippet
+                      </p>
+                      <CodeBlock className="text-xs">{claudeCodePrompt}</CodeBlock>
                     </div>
                   )}
                 </div>

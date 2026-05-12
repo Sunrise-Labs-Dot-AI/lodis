@@ -32,7 +32,7 @@ After installing, tell your AI assistant:
 
 > "Help me set up Lodis"
 
-The assistant will scan your connected tools (calendar, email, GitHub), ask a few targeted questions, and seed 30-50 memories with entity types and connections. Review at `localhost:3838`.
+The assistant will scan your connected tools (calendar, email, GitHub), ask a few targeted questions, and seed 30-50 memories with entity types and connections supplied by the agent. Review at `localhost:3838`.
 
 ### Importing Existing Memories
 
@@ -50,7 +50,7 @@ Lodis provides 39 MCP tools:
 | `memory_get` | Fetch one or many memories by ID (up to 50, deduplicated) |
 | `memory_context` | Token-budget-aware context retrieval |
 | `memory_rate_context` | Close the feedback loop on a prior `memory_context` retrieval |
-| `memory_briefing` | LLM-generated entity profile summaries with 24h cache |
+| `memory_briefing` | Cached entity profiles, or source memories for the calling agent to summarize |
 | `memory_write` | Create a new memory with dedup detection and permanence tiers |
 | `memory_bulk_upload` | Upload many memories at once (bypasses dedup) for imports from canonical external sources |
 | `memory_update` | Structural edit — content, detail, domain, or entity fields |
@@ -70,7 +70,7 @@ Lodis provides 39 MCP tools:
 | `memory_list` | Browse memories by domain, sorted by confidence or recency |
 | `memory_list_domains` | List all memory domains with counts and registered/archived status |
 | `memory_list_entities` | List extracted entities grouped by type |
-| `memory_classify` | Batch-classify untyped memories using entity extraction |
+| `memory_classify` | List untyped memories so the calling agent can classify them |
 | `memory_set_permissions` | Configure per-agent read/write access |
 | `memory_write_snippet` | Write a validated progress event (shipped/advanced/started/stalled/blocked) |
 | `memory_query_progress` | Time-ranged snippet query filtered by domain or linked goal |
@@ -89,11 +89,11 @@ Lodis provides 39 MCP tools:
 ### Key features
 
 - **Hybrid search** — FTS5 full-text + vector embeddings (all-MiniLM-L6-v2, local) merged via Reciprocal Rank Fusion
-- **Entity types** — Memories auto-classified into 14 types: person, organization, place, project, preference, event, goal, fact, lesson, routine, skill, resource, decision, snippet
-- **Knowledge graph** — Typed relationships between memories, auto-connected entities
+- **Entity types** — Memories support 14 types: person, organization, place, project, preference, event, goal, fact, lesson, routine, skill, resource, decision, snippet
+- **Knowledge graph** — Typed relationships between memories, with deterministic same-entity links and agent-reviewed connection proposals
 - **Memory permanence** — Four tiers (canonical, active, ephemeral, archived) control confidence decay and search ranking
 - **Context-packed search** — Token-budget-aware retrieval via `memory_context` for efficient LLM context windows
-- **Entity profiles** — LLM-generated summaries of known entities via `memory_briefing` with 24h cache
+- **Entity profiles** — Cached summaries of known entities via `memory_briefing`, with raw evidence returned when the calling agent needs to synthesize one
 - **Confidence scoring** — 0-1 scale based on confirmations, corrections, mistakes, usage, and time decay
 - **Dedup on write** — Similar memories detected and surfaced to the agent for resolution
 - **Document indexing** — Index external documents (Drive, Notion, filesystem) for unified search
@@ -167,34 +167,15 @@ In `~/.windsurf/mcp.json`:
 - **Local-first**: All data stored in `~/.lodis/lodis.db` (SQLite). No accounts, no cloud, no API keys for core functionality.
 - **Hybrid search**: FTS5 keyword search + sqlite-vec vector embeddings, merged with Reciprocal Rank Fusion (k=60). Confidence-weighted scoring and recency boost.
 - **Embeddings**: all-MiniLM-L6-v2 via Transformers.js — runs locally, no API calls, no cost. ~22MB model cached on first search.
-- **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost to 99%, corrections reset, mistakes degrade. Unused memories decay over time.
-- **Entity extraction**: Memories auto-classified into 13 entity types with structured data. Connections auto-created between related entities.
+- **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost to 99%, user-stated corrections promote confidence, mistakes degrade confidence, and unused memories decay over time.
+- **Semantic interpretation**: Calling agents provide entity types, structured data, corrections, summaries, and connection choices. Lodis keeps the server read/write paths LLM-free.
 - **Source attribution**: Every memory tracks which agent wrote it and how it was acquired.
 - **Audit trail**: All changes logged in an event timeline.
 - **Cross-tool**: Every MCP-compatible tool shares the same memory database.
 
-## LLM Provider (optional)
+## Semantic Reasoning
 
-Entity extraction, correction, and splitting use an LLM. Bring your own API key:
-
-**Anthropic (auto-detected)**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-**OpenAI**
-```bash
-export OPENAI_API_KEY=sk-...
-export LODIS_LLM_PROVIDER=openai
-```
-
-**Ollama (local, free)**
-```bash
-ollama pull llama3.2
-export LODIS_LLM_PROVIDER=ollama
-```
-
-Or configure via `~/.lodis/config.json` for per-task model routing. No LLM? Core features (search, store, connect) work without one.
+Lodis does not call an LLM from its core read/write paths. It exposes structured MCP tools and safe candidate sets; your AI client performs semantic tasks like classification, correction wording, split decisions, connection review, and briefing synthesis, then writes the audited result back to Lodis. Core features (search, store, connect) work without configuring any model provider inside Lodis.
 
 ## Web Dashboard
 

@@ -1,5 +1,3 @@
-import { SignOutButton } from "@clerk/nextjs";
-
 export const metadata = {
   title: "Lodis — Private Beta",
 };
@@ -22,14 +20,12 @@ export default function NotInvitedPage() {
           </a>{" "}
           and we&apos;ll add you.
         </p>
-        <SignOutButton redirectUrl="/sign-in">
-          <button
-            type="button"
-            className="text-sm text-[var(--muted)] hover:text-[var(--fg)] transition-colors underline"
-          >
-            Sign out
-          </button>
-        </SignOutButton>
+        <a
+          href="/sign-in"
+          className="text-sm text-[var(--muted)] hover:text-[var(--fg)] transition-colors underline"
+        >
+          Back to sign in
+        </a>
       </div>
     </div>
   );

@@ -44,7 +44,7 @@ If you have memories in other tools, your AI can import them:
 - **ChatGPT memory export:** "Import this ChatGPT memory export into Lodis"
 - **Cursor rules:** "Import my .cursorrules as Lodis preferences"
 
-The `memory_import` tool handles parsing, deduplication, and entity classification automatically.
+The `memory_import` tool handles parsing and deduplication. Where semantic judgment is needed, the calling agent supplies entity fields or follows up with `memory_classify` / `memory_update`.
 
 ## What It Does
 
@@ -53,7 +53,7 @@ The `memory_import` tool handles parsing, deduplication, and entity classificati
 - **Knows what it knows.** Confidence scoring, source attribution, and entity classification on every memory.
 - **Lets you correct it.** Confirm, correct, split, or remove memories through the dashboard or MCP tools.
 - **Deduplicates on write.** Similar memories are detected and surfaced to the agent for resolution.
-- **Builds a knowledge graph.** Memories connect to each other with typed relationships. 13 entity types (people, organizations, projects, preferences, and more) are automatically extracted and linked.
+- **Builds a knowledge graph.** Memories connect to each other with typed relationships. 14 entity types (people, organizations, projects, preferences, snippets, and more) can be supplied by agents and linked by deterministic helpers or agent-reviewed connection proposals.
 - **Manages memory permanence.** Four tiers — canonical, active, ephemeral (TTL), and archived — control confidence decay and search ranking.
 - **Packs context efficiently.** Token-budget-aware retrieval via `memory_context` delivers the right amount of context for any LLM window.
 - **Generates entity profiles.** On-demand summaries of known people, projects, and organizations via `memory_briefing`.
@@ -73,52 +73,65 @@ Features:
 - Memory browser with filtering by domain, entity type, confidence, and usage
 - Memory detail view with provenance, connections, and event timeline
 - Inline editing — click to edit any memory
-- LLM-powered correction and splitting (requires `ANTHROPIC_API_KEY`)
+- Correction, splitting, and classification workflows that let the calling agent apply semantic judgment while Lodis stores the audited result
 - Knowledge graph visualization
 - Cleanup page for deduplication and maintenance
 - Archive page for browsing archived memories with restore actions
-- Entity profile pages with LLM-generated summaries
-- Settings page with LLM provider configuration
+- Entity profile pages with cached summaries and evidence memories
+- Settings page with database stats, export, sync, and API token management
 
 ## MCP Tools
+
+Lodis provides 39 MCP tools:
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with filters |
+| `memory_get` | Fetch one or many memories by ID (up to 50, deduplicated) |
 | `memory_context` | Token-budget-aware context retrieval |
-| `memory_briefing` | LLM-generated entity profile summaries |
+| `memory_rate_context` | Close the feedback loop on a prior `memory_context` retrieval |
+| `memory_briefing` | Cached entity profile summaries, or source memories for the calling agent to summarize |
 | `memory_write` | Store a memory (with dedup detection and permanence tiers) |
+| `memory_bulk_upload` | Upload many memories at once for imports from canonical external sources |
 | `memory_update` | Modify content, detail, or metadata |
 | `memory_confirm` | Mark a memory as verified (confidence → 0.99) |
-| `memory_correct` | LLM-powered semantic diff correction |
+| `memory_correct` | Replace content with corrected or user-asserted information |
 | `memory_flag_mistake` | Degrade confidence |
 | `memory_remove` | Soft-delete |
 | `memory_remove_bulk` | Soft-delete many memories at once, scoped by domain / entityName / ids[]. Defaults to dryRun. |
 | `memory_pin` | Pin as canonical (decay-immune, high confidence) |
 | `memory_archive` | Archive for reference (deprioritize, freeze confidence) |
 | `memory_connect` | Link memories with typed relationships |
+| `memory_connect_batch` | Commit multiple relationship edges in one call |
+| `memory_propose_connections` | Server-side candidate selection for the agent connection loop |
 | `memory_get_connections` | Traverse the relationship graph |
 | `memory_split` | Break compound memories into atomic parts |
-| `memory_classify` | Auto-classify memories with entity types |
+| `memory_classify` | List untyped memories so the calling agent can classify them |
 | `memory_list_entities` | Discover known entities |
 | `memory_list` | Browse by domain, type, or confidence |
-| `memory_list_domains` | List all domains |
+| `memory_list_domains` | List all domains with counts and registered/archived status |
 | `memory_set_permissions` | Per-agent access control |
 | `memory_scrub` | Detect and redact PII |
+| `memory_write_snippet` | Write a validated progress event |
+| `memory_query_progress` | Time-ranged snippet query by domain or goal |
+| `memory_progress_summary` | Roll up progress by domain, type, and goal |
+| `memory_register_domain` | Register a life-domain slug for snippet writes |
+| `memory_archive_domain` | Archive a domain so snippet writes are rejected until unarchived |
 | `memory_onboard` | Guided onboarding: scan tools, interview, seed memories |
 | `memory_interview` | Agent-driven cleanup and gap-fill |
-| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig |
+| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig, or plaintext |
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external docs (Drive, Notion, filesystem) |
 | `memory_index_status` | Check staleness of indexed documents |
 | `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works |
 
 ## Architecture
 
-- **Storage:** SQLite via better-sqlite3, local at `~/.lodis/lodis.db`
+- **Storage:** SQLite/libSQL via `@libsql/client`, local at `~/.lodis/lodis.db`
 - **Search:** FTS5 + sqlite-vec + Reciprocal Rank Fusion
 - **Embeddings:** all-MiniLM-L6-v2 via Transformers.js (local, no API calls)
-- **Entity extraction:** Claude Sonnet (requires API key, optional)
+- **Semantic interpretation:** caller-side agent reasoning; Lodis itself stays LLM-free on read/write paths
 - **Dashboard:** Next.js 15, Tailwind v4
 - **Transport:** MCP stdio protocol
 
@@ -162,54 +175,9 @@ Features:
 }
 ```
 
-### LLM Provider (optional)
+### Semantic Reasoning
 
-Entity extraction, correction, and splitting use an LLM. Bring your own API key:
-
-**Anthropic (auto-detected)**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-**OpenAI**
-```bash
-export OPENAI_API_KEY=sk-...
-export LODIS_LLM_PROVIDER=openai
-```
-
-**Ollama (local, free)**
-```bash
-ollama pull llama3.2
-export LODIS_LLM_PROVIDER=ollama
-```
-
-**Custom OpenAI-compatible endpoint**
-```bash
-export LODIS_LLM_PROVIDER=openai
-export LODIS_LLM_MODEL=mixtral-8x7b
-export LODIS_LLM_BASE_URL=https://api.together.xyz/v1
-export LODIS_API_KEY=...
-```
-
-Or configure via `~/.lodis/config.json`:
-```json
-{
-  "llm": {
-    "provider": "anthropic",
-    "apiKey": "sk-ant-...",
-    "models": {
-      "extraction": "claude-haiku-4-5-20251001",
-      "analysis": "claude-sonnet-4-5-20250514"
-    }
-  }
-}
-```
-
-Lodis uses two model tiers:
-- **Extraction** (runs on every write): entity classification, proactive split detection. A fast, cheap model is fine.
-- **Analysis** (user-initiated): correction, splitting, cleanup. Use a capable model for quality results.
-
-No LLM? No problem. Core features (search, store, connect, sync) work without one.
+Lodis does not call an LLM from its core read/write paths. It exposes structured tools and safe candidate sets; your AI client performs semantic tasks like classification, connection review, correction wording, and briefing synthesis, then writes the result back to Lodis. Core features (search, store, connect, sync) work without configuring any model provider inside Lodis.
 
 ## Data
 

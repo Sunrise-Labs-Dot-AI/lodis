@@ -30,7 +30,7 @@ export function Footer() {
         </a>
         {" · "}
         <a
-          href="https://npmjs.com/package/lodis"
+          href="https://npmjs.com/package/lodis-mcp"
           target="_blank"
           rel="noopener noreferrer"
           className="text-text-muted hover:text-text transition-colors"

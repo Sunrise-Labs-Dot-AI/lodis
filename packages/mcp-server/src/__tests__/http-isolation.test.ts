@@ -57,9 +57,12 @@ const SETUP_SQL = `
     corrected_count INTEGER NOT NULL DEFAULT 0,
     mistake_count INTEGER NOT NULL DEFAULT 0,
     used_count INTEGER NOT NULL DEFAULT 0,
+    referenced_count INTEGER NOT NULL DEFAULT 0,
+    noise_count INTEGER NOT NULL DEFAULT 0,
     learned_at TEXT,
     confirmed_at TEXT,
     last_used_at TEXT,
+    last_referenced_at TEXT,
     deleted_at TEXT,
     has_pii_flag INTEGER NOT NULL DEFAULT 0,
     entity_type TEXT,
@@ -70,7 +73,9 @@ const SETUP_SQL = `
     expires_at TEXT,
     archived_at TEXT,
     user_id TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    event_ts TEXT,
+    embedding_shape TEXT
   );
 
   CREATE TABLE IF NOT EXISTS memory_events (

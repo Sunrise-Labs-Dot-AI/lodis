@@ -1,16 +1,16 @@
 import Link from "next/link";
 
-export default function SignUpPage() {
+export default function NotAuthorizedPage() {
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="max-w-md w-full text-center space-y-6 px-4">
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-[var(--text)]">
-            Cloud accounts are by request
+            Access restricted
           </h1>
           <p className="text-[var(--text-muted)] text-sm leading-relaxed">
-            Lodis cloud is in private access. New accounts are provisioned
-            manually — email to request one.
+            This account does not have access to Lodis cloud. Cloud is in
+            private access — new accounts are provisioned manually.
           </p>
         </div>
 
@@ -22,24 +22,10 @@ export default function SignUpPage() {
         </a>
 
         <p className="text-[var(--text-dim)] text-xs">
-          Already have an account?{" "}
           <Link href="/sign-in" className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors underline underline-offset-2">
-            Sign in
+            Sign in with a different account
           </Link>
         </p>
-
-        <div className="pt-4 border-t border-[var(--border)]">
-          <p className="text-[var(--text-dim)] text-xs">
-            Prefer local?{" "}
-            <a
-              href="https://lodis.ai"
-              className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors underline underline-offset-2"
-            >
-              Run Lodis on your own machine
-            </a>{" "}
-            — free, open source, no account needed.
-          </p>
-        </div>
       </div>
     </div>
   );

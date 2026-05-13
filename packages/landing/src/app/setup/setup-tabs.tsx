@@ -8,7 +8,7 @@ const stdioConfig = `{
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }`;
@@ -100,15 +100,16 @@ export function SetupTabs() {
             <li className="flex items-start gap-2">
               <span className="font-mono text-glow shrink-0">1.</span>
               <span>
-                Sign up at{" "}
+                Sign in at{" "}
                 <a
-                  href="https://app.lodis.ai/sign-up"
+                  href="https://app.lodis.ai/sign-in"
                   className="text-glow hover:underline"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   app.lodis.ai
                 </a>
+                {" "}(cloud access is by request)
               </span>
             </li>
             <li className="flex items-start gap-2">

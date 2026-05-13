@@ -3,7 +3,7 @@
 ## Product Identity
 
 - **Name:** Lodis (from 'lode' — a vein of knowledge)
-- **npm:** `lodis` (unscoped, published); `@lodis/core`, `@lodis/dashboard`, `@lodis/landing` (workspace packages)
+- **npm:** `@sunriselabs/lodis` (published, v0.5.2); `@lodis/core`, `@lodis/dashboard`, `@lodis/landing` (workspace packages)
 - **Domain:** lodis.ai
 - **GitHub:** Sunrise-Labs-Dot-AI/lodis
 - **License:** MIT — Copyright (c) 2026 Sunrise Labs

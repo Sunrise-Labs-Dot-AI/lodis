@@ -15,7 +15,7 @@ const stdioConfig = `{
 
 const codexTomlConfig = `[mcp_servers.lodis]
 command = "npx"
-args = ["-y", "lodis-mcp"]`;
+args = ["-y", "@sunriselabs/lodis"]`;
 
 const clients = [
   {
@@ -23,7 +23,7 @@ const clients = [
     path: "~/.codex/config.toml",
     config: codexTomlConfig,
     note: "Codex shares this config between the CLI and IDE extension. Use /mcp in the TUI or codex mcp list to confirm Lodis is active.",
-    command: "codex mcp add lodis -- npx -y lodis-mcp",
+    command: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
     isCodex: true,
   },
   {

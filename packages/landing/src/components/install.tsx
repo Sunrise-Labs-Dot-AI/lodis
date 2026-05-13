@@ -1,7 +1,7 @@
 import { CodeBlock } from "./code-block";
 
 const clients = [
-  { name: "Codex", path: "codex mcp add lodis -- npx -y lodis-mcp" },
+  { name: "Codex", path: "codex mcp add lodis -- npx -y @sunriselabs/lodis" },
   { name: "Claude Code", path: "~/.claude.json" },
   {
     name: "Claude Desktop",

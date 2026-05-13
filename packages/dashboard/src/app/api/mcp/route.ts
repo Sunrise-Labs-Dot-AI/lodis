@@ -1,6 +1,6 @@
 import { validateApiToken } from "@/app/settings/token-actions";
 import { validateAccessToken } from "@/lib/oauth";
-import { handleMcpRequest, unauthorizedResponse } from "lodis-mcp/serverless";
+import { handleMcpRequest, unauthorizedResponse } from "@sunriselabs/lodis/serverless";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;

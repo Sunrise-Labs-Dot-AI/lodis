@@ -58,12 +58,12 @@ importers:
       '@lodis/shared-ui':
         specifier: workspace:*
         version: link:../shared-ui
+      '@sunriselabs/lodis':
+        specifier: workspace:*
+        version: link:../mcp-server
       clsx:
         specifier: ^2.1.0
         version: 2.1.1
-      lodis-mcp:
-        specifier: workspace:*
-        version: link:../mcp-server
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.5)

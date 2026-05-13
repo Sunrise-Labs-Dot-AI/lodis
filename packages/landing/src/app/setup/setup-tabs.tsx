@@ -8,14 +8,14 @@ const stdioConfig = `{
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }`;
 
 const codexTomlConfig = `[mcp_servers.lodis]
 command = "npx"
-args = ["-y", "lodis-mcp"]`;
+args = ["-y", "@sunriselabs/lodis"]`;
 
 const clients = [
   {
@@ -23,7 +23,7 @@ const clients = [
     path: "~/.codex/config.toml",
     config: codexTomlConfig,
     note: "Codex shares this config between the CLI and IDE extension. Use /mcp in the TUI or codex mcp list to confirm Lodis is active.",
-    command: "codex mcp add lodis -- npx -y lodis-mcp",
+    command: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
     isCodex: true,
   },
   {
@@ -100,15 +100,16 @@ export function SetupTabs() {
             <li className="flex items-start gap-2">
               <span className="font-mono text-glow shrink-0">1.</span>
               <span>
-                Sign up at{" "}
+                Sign in at{" "}
                 <a
-                  href="https://app.lodis.ai/sign-up"
+                  href="https://app.lodis.ai/sign-in"
                   className="text-glow hover:underline"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   app.lodis.ai
                 </a>
+                {" "}(cloud access is by request)
               </span>
             </li>
             <li className="flex items-start gap-2">

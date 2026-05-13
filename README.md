@@ -13,7 +13,7 @@ Add to your Claude Code config (`~/.claude.json`):
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -145,7 +145,7 @@ Lodis provides 39 MCP tools:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -157,7 +157,7 @@ Lodis provides 39 MCP tools:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -169,7 +169,7 @@ Lodis provides 39 MCP tools:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }

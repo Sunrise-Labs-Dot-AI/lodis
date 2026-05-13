@@ -1,7 +1,7 @@
 # Lodis
 
-[![npm version](https://img.shields.io/npm/v/lodis-mcp.svg)](https://www.npmjs.com/package/lodis-mcp)
-[![license](https://img.shields.io/npm/l/lodis-mcp.svg)](https://github.com/Sunrise-Labs-Dot-AI/lodis/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/@sunriselabs/lodis.svg)](https://www.npmjs.com/package/@sunriselabs/lodis)
+[![license](https://img.shields.io/npm/l/@sunriselabs/lodis.svg)](https://github.com/Sunrise-Labs-Dot-AI/lodis/blob/main/LICENSE)
 
 **Universal, portable memory layer for AI agents.**
 
@@ -16,7 +16,7 @@ Add to your MCP config and you're done:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -111,7 +111,7 @@ In `~/.claude.json` or your project's `.mcp.json`:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -126,7 +126,7 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or 
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -141,7 +141,7 @@ In `.cursor/mcp.json` in your project root:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }
@@ -156,7 +156,7 @@ In `~/.windsurf/mcp.json`:
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }

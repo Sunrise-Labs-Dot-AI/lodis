@@ -5,7 +5,7 @@ const installConfig = `{
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }`;

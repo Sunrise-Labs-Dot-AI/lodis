@@ -103,7 +103,7 @@ const jsonStdioConfig = `{
   "mcpServers": {
     "lodis": {
       "command": "npx",
-      "args": ["-y", "lodis-mcp"]
+      "args": ["-y", "@sunriselabs/lodis"]
     }
   }
 }`;
@@ -134,7 +134,7 @@ const jsonLocalHttpConfig = `{
 
 const codexLocalConfig = `[mcp_servers.lodis]
 command = "npx"
-args = ["-y", "lodis-mcp"]`;
+args = ["-y", "@sunriselabs/lodis"]`;
 
 const codexCloudConfig = `[mcp_servers.lodis]
 url = "https://app.lodis.ai/api/mcp"
@@ -212,7 +212,7 @@ function getInstallPlan(client: ClientId, storage: StorageId) {
         "Skip cloud and self-hosted HTTP until local memory works.",
       ],
       codeLabel: "Codex fast path",
-      code: "codex mcp add lodis -- npx -y lodis-mcp",
+      code: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
       fallbackLabel: "Most other MCP clients",
       fallbackCode: jsonStdioConfig,
     };
@@ -278,7 +278,7 @@ function getInstallPlan(client: ClientId, storage: StorageId) {
         "Add the Lodis memory policy to AGENTS.md so Codex uses it consistently.",
       ],
       codeLabel: "Fast path",
-      code: "codex mcp add lodis -- npx -y lodis-mcp",
+      code: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
       fallbackLabel: "~/.codex/config.toml",
       fallbackCode: codexLocalConfig,
     };

@@ -5,6 +5,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/not-invited(.*)",
+  "/not-authorized(.*)",
   "/api/health",
   "/api/mcp(.*)",
   "/api/migrate(.*)",
@@ -69,8 +70,6 @@ export default isHosted
             : null;
         if (!email || !allowlist.has(email)) {
           // Fail-secure: missing claim or unlisted email → bounce.
-          // Note: /not-invited is in the public-route list above, so this
-          // redirect doesn't loop.
           const notInvitedUrl = new URL("/not-invited", request.url);
           return NextResponse.redirect(notInvitedUrl);
         }

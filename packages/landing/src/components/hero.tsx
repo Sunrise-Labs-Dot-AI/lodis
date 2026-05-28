@@ -23,20 +23,20 @@ export function Hero() {
 
       <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
         <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-text leading-[1.1] mb-6">
-          Your AI&rsquo;s memory,{" "}
+          Portable memory{" "}
           <span className="bg-gradient-to-r from-glow to-violet bg-clip-text text-transparent">
-            made visible.
+            for AI agents.
           </span>
         </h1>
 
         <p className="text-lg sm:text-xl text-text-muted max-w-2xl mx-auto mb-10 leading-relaxed">
-          A universal memory layer for AI agents. Searchable, correctable, portable.
-          Install once, remember everywhere.
+          Open-source, runs locally, and syncs to your own cloud if you want it to.
+          Searchable, correctable, cross-tool memory with a real dashboard.
         </p>
 
         <div className="flex items-center justify-center gap-4 mb-12">
-          <a href="/setup" className="btn-glow text-base">
-            Get Started
+          <a href="#install" className="btn-glow text-base">
+            Install local
           </a>
           <a
             href="https://github.com/Sunrise-Labs-Dot-AI/lodis"
@@ -44,14 +44,14 @@ export function Hero() {
             rel="noopener noreferrer"
             className="btn-ghost text-base"
           >
-            View on GitHub
+            Star on GitHub
           </a>
         </div>
 
         <div className="max-w-lg mx-auto">
           <CodeBlock className="text-left text-sm">{installConfig}</CodeBlock>
           <p className="text-text-dim text-sm mt-3">
-            Setup guide includes Codex, Claude Code, Cursor, Windsurf, and other MCP clients.
+            Local MCP over stdio. Setup guide includes Codex, Claude Code, Cursor, Windsurf, and other MCP clients.
           </p>
         </div>
 

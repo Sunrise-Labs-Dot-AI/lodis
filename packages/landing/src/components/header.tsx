@@ -8,7 +8,7 @@ const navLinks = [
   { href: "https://github.com/Sunrise-Labs-Dot-AI/lodis", label: "GitHub", external: true },
   { href: "/setup", label: "Setup Guide", external: false },
   { href: "https://app.lodis.ai/sign-in", label: "Sign In", external: false },
-  { href: "mailto:james@sunriselabs.ai", label: "Request Access", external: true },
+  { href: "mailto:james@sunriselabs.ai", label: "Cloud Beta", external: true },
 ];
 
 export function Header() {

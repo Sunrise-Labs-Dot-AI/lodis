@@ -1,18 +1,18 @@
 import { Reveal } from "./reveal";
 
 const localFeatures = [
-  "SQLite on your machine — zero infrastructure",
-  "Stdio or HTTP transport — works with any MCP client",
+  "SQLite on your machine - zero infrastructure",
+  "Stdio MCP transport - works with any local MCP client",
   "No accounts, no cloud, no API keys required",
-  "API tokens for remote client access",
+  "In-process reranker - no hosted inference service",
   "Dashboard at localhost:3838",
 ];
 
 const cloudFeatures = [
-  "Turso cloud database — sync across devices",
-  "OAuth 2.1 — connect Claude.ai with one click",
+  "Private beta cloud database - sync across devices",
+  "OAuth 2.1 - connect remote clients with one click",
   "API tokens for remote MCP clients",
-  "Managed hosting — nothing to run",
+  "Managed hosting - nothing to run",
   "Dashboard at app.lodis.ai",
 ];
 
@@ -22,11 +22,11 @@ export function Deployment() {
       <div className="max-w-6xl mx-auto">
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4 tracking-tight">
-            Run it{" "}
-            <span className="text-glow">your way.</span>
+            Local is the default.{" "}
+            <span className="text-glow">Cloud is optional.</span>
           </h2>
           <p className="text-text-muted text-center mb-16 text-lg">
-            Start local with full privacy. Cloud is invite-only during beta.
+            Start with the open-source local install. Request cloud beta only if you need a hosted dashboard or remote MCP endpoint.
           </p>
         </Reveal>
 
@@ -40,7 +40,7 @@ export function Deployment() {
                 </svg>
                 <h3 className="text-xl font-semibold">Local</h3>
               </div>
-              <p className="text-text-dim text-sm mb-6">Free &middot; Open source &middot; MIT License</p>
+              <p className="text-text-dim text-sm mb-6">Recommended &middot; Open source &middot; MIT License</p>
 
               <ul className="space-y-3 mb-8 flex-1">
                 {localFeatures.map((f) => (
@@ -58,7 +58,7 @@ export function Deployment() {
               </p>
 
               <a href="#install" className="btn-ghost text-sm text-center w-full block">
-                Get Started
+                Install local
               </a>
             </div>
           </Reveal>
@@ -75,7 +75,7 @@ export function Deployment() {
                 </svg>
                 <h3 className="text-xl font-semibold">Cloud</h3>
               </div>
-              <p className="text-text-dim text-sm mb-6">Managed &middot; Multi-device &middot; AES-256-GCM encrypted</p>
+              <p className="text-text-dim text-sm mb-6">Optional &middot; Multi-device &middot; AES-256-GCM encrypted</p>
 
               <ul className="space-y-3 mb-8 flex-1">
                 {cloudFeatures.map((f) => (
@@ -96,7 +96,7 @@ export function Deployment() {
                 href="mailto:james@sunriselabs.ai"
                 className="btn-glow text-sm text-center w-full block"
               >
-                Request Access
+                Request cloud beta
               </a>
             </div>
           </Reveal>
@@ -104,9 +104,9 @@ export function Deployment() {
 
         <Reveal>
           <p className="text-text-dim text-sm text-center mt-10">
-            Start local, migrate anytime.{" "}
+            Start local, migrate later if beta access makes sense.{" "}
             <code className="font-mono text-text-muted">memory_migrate</code>{" "}
-            moves your memories to cloud in one command.
+            keeps the path reversible.
           </p>
         </Reveal>
       </div>

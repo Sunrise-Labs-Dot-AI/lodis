@@ -24,7 +24,7 @@ Add to your MCP config and you're done:
 
 That's it. Your AI agent now has persistent memory.
 
-> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis-mcp` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis-mcp` in your MCP config (`"args": ["-y", "lodis-mcp"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
+> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package is now `@sunriselabs/lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `@sunriselabs/lodis` in your MCP config (`"args": ["-y", "@sunriselabs/lodis"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
 
 ## Getting Started
 
@@ -99,6 +99,10 @@ Lodis provides 39 MCP tools:
 - **Document indexing** — Index external documents (Drive, Notion, filesystem) for unified search
 - **PII detection** — Regex-based pattern detection with `memory_scrub` for redaction
 - **Source attribution** — Every memory tracks which agent learned it and how
+
+Phase 3 adds temporal supersession for facts: memories can carry `valid_from`, `valid_to`, and `superseded_by`, and `memory_write` can resolve a contradiction with `resolution: "supersede"` deterministically. Current retrieval hides superseded facts by default, while `includeSuperseded: true` preserves the audit trail without putting an LLM on the write path.
+
+Phase 4 keeps noisy operational progress out of normal recall. `memory_search` and `memory_context` accept `scope: "default" | "all"`; default scope excludes snippets and rows in archived domains unless you explicitly filter for that entity type or domain. `memory_write_snippet` also accepts `connections[]`, so progress events can bridge into the durable graph for the people, organizations, or projects they concern.
 
 ## MCP Config Examples
 

@@ -13,9 +13,9 @@
 
 An open-source MCP server + localhost web dashboard that gives AI agents persistent, cross-tool memory with full user control. Any MCP-compatible tool (Claude Code, Cursor, Windsurf, Claude Desktop, Cline) connects to the same memory. Users browse, search, confirm, correct, and manage what their agents know through a real dashboard — not just chat commands.
 
-## Current State (April 2026)
+## Current State (May 2026)
 
-V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid search, 13 entity types, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
+V1–V4 feature complete. 39 MCP tools, 463 tests, hybrid search, 14 entity types, temporal supersession, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
 
 **Shipped:**
 - Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
@@ -24,7 +24,7 @@ V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid 
 - Landing page (`packages/landing`) + dashboard restyle (Pensieve design system)
 - Copyright cleanup (MIT license + metadata on all packages)
 - Pro tier: Clerk auth, BYOK config, API tokens, terms + privacy pages, API key encryption (AES-256-GCM + scrypt)
-- npm published (`lodis` on npm, v0.4.0)
+- npm package renamed to `@sunriselabs/lodis`; v0.6.0 release is prepared in repo and awaiting manual npm publish
 - Cloud migration tool (`memory_migrate`)
 - Memory permanence tiers: canonical (pinned), active, ephemeral (TTL), archived
 - Context-packed search (`memory_context`) — token-budget-aware retrieval
@@ -32,8 +32,8 @@ V1–V3 feature complete. 27 MCP tools, 105 tests (92 core + 13 server), hybrid 
 - Archive page + entity profile pages in dashboard
 - 13 entity types (expanded from 8)
 - Two-stage retrieval in `memory_context` — hybrid candidate set → cross-encoder rerank. `RerankerProvider` interface in `packages/core/src/reranker.ts` with two implementations: `LocalReranker` (in-process BGE-reranker-base via Transformers.js, for long-lived Node / CLI) and `HttpReranker` (POSTs to a configurable endpoint, for serverless hosts). `selectRerankerProvider()` picks based on `LODIS_RERANKER_URL`. Env vars: `LODIS_RERANKER_DISABLED=1` forces off (wins over enabled), `LODIS_RERANKER_ENABLED=1` forces on, `LODIS_RERANKER_URL` implies HTTP provider. Default on for long-lived Node, off on Vercel. Diagnostic fields on response `meta`: `rerankerEngaged` (bool) and `rerankerError` (string, on catch). Also logged to `context_retrievals` telemetry rows.
-- Modal reference rerank service at `modal/rerank_app.py` + `modal/README.md`. FastAPI endpoint with fail-closed bearer-token auth, `hmac.compare_digest`, input-size caps (200 candidates / 4000-char query / 8000-char text), no request-body logging. Production default model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (~5× faster than BGE on CPU for realistic-length 200-candidate payloads). Deploy via `modal deploy modal/rerank_app.py`; wire via `LODIS_RERANKER_URL` + `LODIS_RERANKER_API_KEY` on the dashboard host.
-- Hosted MCP deployed at `https://app.getengrams.com/api/mcp` (also aliased `app.lodis.ai`). Auth via Clerk. Production env vars: `LODIS_RERANKER_URL`, `LODIS_RERANKER_API_KEY`, `LODIS_RERANKER_TIMEOUT_MS` (set to 30000; the code default is 20000 but 200-candidate CPU rerank can push that with MiniLM's ~10s + cold-start overhead).
+- Modal reference rerank service at `modal/rerank_app.py` + `modal/README.md` is paused as of 2026-05-28. Local installs use the in-process `LocalReranker`; the Modal source remains as rollback reference.
+- Hosted MCP deployed at `https://app.getengrams.com/api/mcp` (also aliased `app.lodis.ai`). Auth via Clerk. Keep `/api/mcp` running until the Personal Assistant is moved local.
 - Retrieval-wave-1 hybrid-pipeline tuning (PRs #84, #86, April 2026) — three env-flagged interventions, all opt-in:
   - `LODIS_QUERY_EXTRACTION_ENABLED=1` → `hybridSearch` splits queries: FTS5 gets the original (BM25 tolerates length), vec gets the extracted short form (bi-encoder embeddings dilute on verbose input). Pure-JS stopword/rare-term extractor in `packages/core/src/query-extraction.ts`. `LODIS_QUERY_EXTRACTION_DISABLED=1` wins over ENABLED (matches reranker env semantics). `LODIS_QUERY_EXTRACTION_DEBUG=1` logs mode+token counts to stderr (NOT token values — PII-safe). Returned via `ContextMeta.queryExtraction: {mode, originalTokens}` (always present).
   - `LODIS_CONTEXTUAL_EMBEDDINGS_ENABLED=1` → `memory_write` / `memory_update` / `memory_index` / `memory_bulk_upload` generate embeddings from `[entity_name] [entity_type] [domain] [tags] content detail` instead of `content + " " + detail`. Shape recorded in new `memories.embedding_shape` column (NULL = legacy default, "v1-bracketed" = W1a shape). `LODIS_CONTEXTUAL_EMBEDDINGS_DISABLED=1` kill switch. Migration tool at `scripts/reembed-contextual.mjs` (direct Turso, dry-run by default, `--apply --i-have-backup` required, `--shape=legacy` for rollback).
@@ -175,9 +175,12 @@ By design, generic `memory_write` does **not** consult the `domains` registry an
 | `memory_correct` | LLM-powered semantic diff correction |
 | `memory_flag_mistake` | Degrade confidence (-0.15) |
 | `memory_remove` | Soft-delete with reason |
+| `memory_remove_bulk` | Bulk soft-delete scoped by domain, entity name, or explicit IDs; dry-run by default |
 | `memory_pin` | Pin as canonical (decay-immune, high confidence) |
 | `memory_archive` | Archive for reference (deprioritize in search, freeze confidence) |
 | `memory_connect` | Link memories with typed relationships |
+| `memory_propose_connections` | Server-side candidate selection for the agent-reviewed connection loop |
+| `memory_connect_batch` | Commit multiple typed relationship edges in one call |
 | `memory_get_connections` | Traverse the relationship graph |
 | `memory_split` | LLM-powered compound memory splitting (two-phase: propose → confirm) |
 | `memory_classify` | Auto-classify memories with entity types via LLM |
@@ -226,7 +229,7 @@ Memories have a `permanence` tier that controls decay and search behavior:
 - TTL expiry: ephemeral memories with `expires_at` are swept (soft-deleted) on decay cycle
 
 ### Dedup + Contradiction Resolution
-On `memory_write`: hybrid search (RRF > 0.7) + entity name/type match. If similar found, returns `similar_found` with 5 resolution options: update, correct, add_detail, keep_both, skip. Agent-in-the-loop, resolved in real-time.
+On `memory_write`: hybrid search (RRF > 0.7) + entity name/type match. If similar found, returns `similar_found` with resolution options: update, correct, supersede, add_detail, keep_both, skip. Agent-in-the-loop, resolved in real-time; supersede sets the prior fact's validity window without an LLM call.
 
 ## Search Architecture
 

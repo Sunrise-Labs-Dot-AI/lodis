@@ -21,7 +21,7 @@ Add to your Claude Code config (`~/.claude.json`):
 
 That's it. Your AI now has persistent memory.
 
-> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package was renamed to `lodis-mcp` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `lodis-mcp` in your MCP config (`"args": ["-y", "lodis-mcp"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
+> **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package is now `@sunriselabs/lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `@sunriselabs/lodis` in your MCP config (`"args": ["-y", "@sunriselabs/lodis"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
 
 ## Getting Started
 
@@ -59,6 +59,10 @@ The `memory_import` tool handles parsing and deduplication. Where semantic judgm
 - **Generates entity profiles.** On-demand summaries of known people, projects, and organizations via `memory_briefing`.
 - **Indexes external documents.** Pull in context from Google Drive, Notion, or local files for unified search.
 
+Phase 3 adds temporal supersession for facts: memories can carry `valid_from`, `valid_to`, and `superseded_by`, and `memory_write` can resolve a contradiction with `resolution: "supersede"` deterministically. Current retrieval hides superseded facts by default, while `includeSuperseded: true` preserves the audit trail without putting an LLM on the write path.
+
+Phase 4 partitions noisy progress data out of everyday retrieval. `memory_search` and `memory_context` accept `scope: "default" | "all"`; default scope excludes snippets and rows in archived domains unless you explicitly filter for that entity type or domain. `memory_write_snippet` also accepts `connections[]`, so progress events can link back to durable people, organizations, and projects instead of becoming graph-isolated noise.
+
 ## Dashboard
 
 Start the dashboard to browse, search, and manage memories:
@@ -78,7 +82,7 @@ Features:
 - Cleanup page for deduplication and maintenance
 - Archive page for browsing archived memories with restore actions
 - Entity profile pages with cached summaries and evidence memories
-- Settings page with database stats, export, sync, and API token management
+- Settings page with database stats, export, and API token management
 
 ## MCP Tools
 
@@ -123,7 +127,7 @@ Lodis provides 39 MCP tools:
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external docs (Drive, Notion, filesystem) |
 | `memory_index_status` | Check staleness of indexed documents |
-| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_migrate` | Legacy migration helper for existing deployments |
 | `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works |
 
 ## Architecture
@@ -177,7 +181,7 @@ Lodis provides 39 MCP tools:
 
 ### Semantic Reasoning
 
-Lodis does not call an LLM from its core read/write paths. It exposes structured tools and safe candidate sets; your AI client performs semantic tasks like classification, connection review, correction wording, and briefing synthesis, then writes the result back to Lodis. Core features (search, store, connect, sync) work without configuring any model provider inside Lodis.
+Lodis does not call an LLM from its core read/write paths. It exposes structured tools and safe candidate sets; your AI client performs semantic tasks like classification, connection review, correction wording, and briefing synthesis, then writes the result back to Lodis. Core features (search, store, connect, export) work without configuring any model provider inside Lodis.
 
 ## Data
 
@@ -185,7 +189,7 @@ All data lives locally at `~/.lodis/`:
 - `lodis.db` — SQLite database
 - `models/` — Cached embedding model (~22MB, downloaded on first search)
 
-No accounts, no cloud, no API keys required for core functionality.
+No accounts or API keys required for core functionality.
 
 ## Development
 

@@ -57,13 +57,6 @@ const clients = [
     config: stdioConfig,
     note: "Or add to .vscode/cline_mcp_settings.json in your project.",
   },
-  {
-    name: "Claude.ai",
-    path: null,
-    config: null,
-    note: null,
-    isOAuth: true,
-  },
 ];
 
 export function SetupTabs() {
@@ -91,41 +84,7 @@ export function SetupTabs() {
       </div>
 
       {/* Content */}
-      {client.isOAuth ? (
-        <div className="glass p-6">
-          <p className="text-text-muted mb-4">
-            Claude.ai connects via OAuth 2.1 — no config files needed.
-          </p>
-          <ol className="space-y-3 text-sm text-text-muted">
-            <li className="flex items-start gap-2">
-              <span className="font-mono text-glow shrink-0">1.</span>
-              <span>
-                Sign in at{" "}
-                <a
-                  href="https://app.lodis.ai/sign-in"
-                  className="text-glow hover:underline"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  app.lodis.ai
-                </a>
-                {" "}(cloud access is by request)
-              </span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="font-mono text-glow shrink-0">2.</span>
-              <span>In Claude.ai, go to Settings → Integrations → Add MCP Server</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="font-mono text-glow shrink-0">3.</span>
-              <span>Search for &ldquo;Lodis&rdquo; and authorize the connection</span>
-            </li>
-          </ol>
-          <p className="text-text-dim text-xs mt-4">
-            Uses OAuth 2.1 with PKCE. Your memories are stored encrypted in our cloud database.
-          </p>
-        </div>
-      ) : client.isCodex ? (
+      {client.isCodex ? (
         <div className="space-y-5">
           <div>
             <p className="text-text-muted text-sm mb-3">

@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Privacy Policy | Lodis",
-  description: "Privacy Policy for the Lodis AI memory platform.",
+  description: "Privacy Policy for the Lodis open-source local memory layer.",
 };
 
 export default function PrivacyPolicy() {
@@ -20,278 +20,98 @@ export default function PrivacyPolicy() {
         <h1 className="text-4xl font-bold mt-8 mb-2 text-glow">
           Privacy Policy
         </h1>
-        <p className="text-text-dim text-sm mb-12">Last updated: April 2026</p>
+        <p className="text-text-dim text-sm mb-12">Last updated: May 2026</p>
 
         <div className="space-y-10 text-text-muted leading-relaxed">
           <section>
             <p>
-              Lodis is built by Sunrise Labs (&quot;we&quot;, &quot;us&quot;,
-              &quot;our&quot;). We believe you should understand exactly what
-              happens with your data, so this policy is written to be read, not
-              just agreed to.
+              Lodis is built by Sunrise Labs. The public product path is
+              local-first: your AI memory lives on your machine, in your files,
+              under your control.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              1. Information We Collect
+              1. What We Collect
             </h2>
             <p>
-              What we collect depends entirely on which tier you use:
-            </p>
-
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Local Tier
-            </h3>
-            <p>
-              <span className="text-text font-medium">
-                We collect nothing.
-              </span>{" "}
-              The Local tier runs entirely on your machine. Your memories,
-              embeddings, configuration, and credentials never leave your
-              computer. There is no telemetry, no analytics, and no phone-home
-              behavior, except for services you explicitly configure or invoke
-              from your MCP client.
-            </p>
-
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Cloud Tier
-            </h3>
-            <p>When you create an account, we collect:</p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                <span className="text-text">Account information</span> &mdash;
-                Email address and authentication data, provided through Clerk
-                (our authentication provider).
-              </li>
-              <li>
-                <span className="text-text">Memory content</span> &mdash;
-                The memories your AI agents store, including content, details,
-                entity classifications, structured data, and metadata (timestamps,
-                confidence scores, agent identifiers).
-              </li>
-              <li>
-                <span className="text-text">Embedding vectors</span> &mdash;
-                384-dimensional float vectors generated from your memory content,
-                used for semantic search.
-              </li>
-              <li>
-                <span className="text-text">Relationship graph</span> &mdash;
-                Connections between your memories (e.g., &quot;works_at&quot;,
-                &quot;part_of&quot;).
-              </li>
-              <li>
-                <span className="text-text">Event history</span> &mdash;
-                An audit trail of actions taken on your memories (creation,
-                updates, confirmations, corrections).
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              2. How We Use Your Information
-            </h2>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                To provide the Service: storing, searching, and managing your AI
-                agent memories.
-              </li>
-              <li>
-                To authenticate you and secure your account.
-              </li>
-              <li>
-                To send you service-related communications (account security,
-                terms updates).
-              </li>
-            </ul>
-            <p className="mt-3">
-              We do not sell your data. We do not use your memory content to
-              train models. We do not serve ads.
+              The local Lodis install does not send us your memories,
+              embeddings, configuration, or credentials. We do not run product
+              analytics, telemetry, or phone-home collection from the local MCP
+              server or dashboard.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              3. Data Storage and Encryption
+              2. Where Your Data Lives
             </h2>
             <p>
-              We want to be transparent about our security model, including its
-              limitations.
-            </p>
-
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Encryption at Rest
-            </h3>
-            <p>
-              Your memory content is encrypted at rest using AES-256-GCM with
-              keys derived via scrypt. This means your data is encrypted when
-              stored on disk in our database (hosted on Turso, a cloud SQLite
-              platform).
-            </p>
-
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Important: This Is Not Zero-Knowledge
-            </h3>
-            <p>
-              During request processing, your memory content is decrypted in
-              server memory so we can perform operations like search, entity
-              extraction, and deduplication. This means our server has access to
-              your plaintext data while processing your requests. We do not log
-              or persist decrypted content outside of the request lifecycle, but
-              you should understand that this is a trust-based model, not a
-              zero-knowledge architecture.
-            </p>
-            <p className="mt-3">
-              If you require zero-knowledge encryption, the Local tier keeps all
-              data on your own machine under your full control.
-            </p>
-
-            <h3 className="text-lg font-medium text-text mt-5 mb-2">
-              Embedding Vectors
-            </h3>
-            <p>
-              Embedding vectors (384-dimensional float arrays) are stored
-              unencrypted in the database. This is necessary for vector
-              similarity search to function. Embeddings are mathematical
-              representations of your content &mdash; while they do not contain
-              readable text, they could theoretically be used to infer
-              information about the source content.
-            </p>
-
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              4. Third-Party Services
-            </h2>
-            <p>
-              The Cloud tiers rely on the following third-party services:
-            </p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                <span className="text-text">Clerk</span> &mdash; Authentication
-                and user management. Clerk receives your email address and
-                authentication credentials. See{" "}
-                <a
-                  href="https://clerk.com/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-glow hover:underline"
-                >
-                  Clerk&apos;s Privacy Policy
-                </a>
-                .
-              </li>
-              <li>
-                <span className="text-text">Turso</span> &mdash; Cloud database
-                hosting. Your encrypted memory data is stored on Turso
-                infrastructure. See{" "}
-                <a
-                  href="https://turso.tech/privacy-policy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-glow hover:underline"
-                >
-                  Turso&apos;s Privacy Policy
-                </a>
-                .
-              </li>
-              <li>
-                <span className="text-text">Vercel</span> &mdash; Hosting for
-                the web dashboard and landing page.
-              </li>
-            </ul>
-            <p className="mt-3">
-              On the Local tier, none of these services are involved unless you
-              explicitly configure or invoke them yourself.
+              Local Lodis stores memory data in{" "}
+              <code className="font-mono text-text">~/.lodis/lodis.db</code>{" "}
+              and cached embedding models under{" "}
+              <code className="font-mono text-text">~/.lodis/models/</code>.
+              Your device permissions, backups, and connected AI clients govern
+              who can access that data.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              5. Data Retention and Deletion
+              3. Model Calls and External Tools
             </h2>
             <p>
-              Memories are retained until you delete them. Lodis uses soft
-              deletes (marking memories as deleted rather than immediately
-              removing them), but soft-deleted data is excluded from all search
-              results and API responses. Permanently purging soft-deleted data
-              occurs during routine maintenance.
-            </p>
-            <p className="mt-3">
-              When you delete your account, all associated data &mdash;
-              memories, connections, events, API keys, and account information
-              &mdash; is permanently deleted from our systems. This action is
-              irreversible.
+              Lodis core read/write paths are LLM-free. If your AI client,
+              scripts, or configured tools call external model providers or
+              services, those calls are controlled by that client or tool, not
+              by Lodis itself.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              6. Your Rights
-            </h2>
-            <p>You have the right to:</p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                <span className="text-text">Export your data</span> &mdash;
-                Download all your memories as JSON at any time through the
-                dashboard settings.
-              </li>
-              <li>
-                <span className="text-text">Delete your data</span> &mdash;
-                Delete individual memories, or delete your entire account and all
-                associated data.
-              </li>
-              <li>
-                <span className="text-text">Revoke access tokens</span> &mdash;
-                Revoke any Personal Access Token (PAT) at any time to disconnect
-                MCP clients.
-              </li>
-              <li>
-                <span className="text-text">Access your data</span> &mdash;
-                View all memories, connections, events, and metadata through the
-                dashboard.
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              7. Children&apos;s Privacy
+              4. Exports and Deletion
             </h2>
             <p>
-              Lodis is not intended for use by anyone under the age of 13. We
-              do not knowingly collect personal information from children under
-              13. If you believe a child under 13 has provided us with personal
-              information, please contact us and we will delete it.
+              You can export Lodis data as portable JSON and delete local data
+              by removing the files under{" "}
+              <code className="font-mono text-text">~/.lodis/</code>. Lodis also
+              supports soft deletes inside the database so removed memories are
+              excluded from normal search and retrieval.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              8. Changes to This Policy
+              5. Security Notes
             </h2>
             <p>
-              We may update this Privacy Policy from time to time. We will notify
-              Cloud tier users of material changes via email. The &quot;Last
-              updated&quot; date at the top of this page indicates when the
-              policy was last revised.
+              Local-first does not mean risk-free. Anyone with access to your
+              machine or AI client configuration may be able to read or modify
+              your Lodis data. Use normal device security, filesystem
+              permissions, backups, and credential hygiene.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              9. Contact
+              6. Changes
             </h2>
             <p>
-              If you have questions about this Privacy Policy or how your data is
-              handled, contact us at{" "}
-              <a
-                href="mailto:privacy@lodis.ai"
-                className="text-glow hover:underline"
-              >
-                privacy@lodis.ai
+              We may update this policy as Lodis evolves. Material changes will
+              be reflected on this page.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text mb-3">
+              7. Contact
+            </h2>
+            <p>
+              Questions? Email{" "}
+              <a href="mailto:hello@sunriselabs.ai" className="text-glow hover:underline">
+                hello@sunriselabs.ai
               </a>
               .
             </p>

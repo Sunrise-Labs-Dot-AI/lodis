@@ -14,11 +14,10 @@ import {
 interface Props {
   userId: string;
   tokens: TokenInfo[];
-  isHosted?: boolean;
-  baseUrl?: string;
+  baseUrl: string;
 }
 
-export function ApiTokens({ userId, tokens, isHosted, baseUrl }: Props) {
+export function ApiTokens({ userId, tokens, baseUrl }: Props) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [newTokenName, setNewTokenName] = useState("Claude Desktop");
@@ -138,23 +137,11 @@ export function ApiTokens({ userId, tokens, isHosted, baseUrl }: Props) {
       {tokens.length > 0 && (
         <div className="mt-3 rounded border border-[var(--border)] bg-[var(--bg)] p-3">
           <h4 className="text-xs font-semibold mb-1.5">Connect a remote MCP client</h4>
-          {isHosted ? (
-            <>
-              <p className="text-[10px] text-[var(--text-dim)] mb-2">
-                Configure your MCP client with these environment variables:
-              </p>
-              <pre className="text-[10px] font-mono bg-black/20 rounded px-2 py-1.5 overflow-x-auto">{`LODIS_MCP_URL=${baseUrl}/api/mcp
+          <p className="text-[10px] text-[var(--text-dim)] mb-2">
+            Configure your MCP client with these environment variables:
+          </p>
+          <pre className="text-[10px] font-mono bg-black/20 rounded px-2 py-1.5 overflow-x-auto">{`LODIS_MCP_URL=${baseUrl}/api/mcp
 LODIS_API_KEY=<your-token>`}</pre>
-            </>
-          ) : (
-            <>
-              <p className="text-[10px] text-[var(--text-dim)] mb-2">
-                Start the server with <code className="font-mono">lodis --serve</code>, then configure your client:
-              </p>
-              <pre className="text-[10px] font-mono bg-black/20 rounded px-2 py-1.5 overflow-x-auto">{`LODIS_MCP_URL=http://<host>:3939/mcp
-LODIS_API_KEY=<your-token>`}</pre>
-            </>
-          )}
         </div>
       )}
 

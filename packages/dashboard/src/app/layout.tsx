@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Nav } from "@/components/nav";
+import { LocalFirstBanner } from "@/components/local-first-banner";
 import "@/globals.css";
 
 export const metadata: Metadata = {
@@ -34,6 +35,7 @@ export default function RootLayout({
             <Nav />
           </div>
         </header>
+        {isHosted && <LocalFirstBanner />}
         <main id="main" className="max-w-5xl mx-auto px-4 py-6">
           {children}
         </main>

@@ -7,7 +7,7 @@ const facts = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
       </svg>
     ),
-    text: "SQLite + FTS5 + native vector search. Local or cloud.",
+    text: "SQLite + FTS5 + native vector search in ~/.lodis/lodis.db.",
   },
   {
     icon: (
@@ -39,7 +39,7 @@ const facts = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" />
       </svg>
     ),
-    text: "Optional cloud sync (Pro). AES-256-GCM encrypted, zero-knowledge.",
+    text: "Local dashboard at localhost:3838 for review, correction, and export.",
   },
   {
     icon: (
@@ -58,17 +58,22 @@ export function Architecture() {
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-6 tracking-tight">
             Local-first.{" "}
-            <span className="text-glow">Zero config.</span>
+            <span className="text-glow">No account required.</span>
           </h2>
         </Reveal>
 
-        <Reveal className="flex justify-center mb-16">
-          <pre className="code-block text-center">
-            <code>
-              {"~/.lodis/lodis.db  "}
-              <span className="text-text-dim">&larr; Your memories live here. On your machine.</span>
-            </code>
-          </pre>
+        <Reveal className="mb-16">
+          <div className="glass p-5 max-w-3xl mx-auto">
+            <p className="text-xs font-semibold uppercase tracking-widest text-glow/70 mb-3">
+              Default path
+            </p>
+            <p className="font-mono text-sm text-text">
+              AI client -&gt; stdio MCP -&gt; ~/.lodis/lodis.db
+            </p>
+            <p className="text-sm text-text-muted mt-3">
+              Your agent talks to Lodis locally. Search, embeddings, rerank, and the dashboard run on your machine.
+            </p>
+          </div>
         </Reveal>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto">

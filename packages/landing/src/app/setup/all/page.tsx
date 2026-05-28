@@ -8,7 +8,7 @@ import { SetupTabs } from "../setup-tabs";
 export const metadata: Metadata = {
   title: "Complete Setup Reference | Lodis",
   description:
-    "All Lodis setup options in one place: local MCP, Codex, local HTTP, and memory instructions.",
+    "All Lodis setup options in one place: local MCP, Codex, and memory instructions.",
 };
 
 const systemPrompt = `Use Lodis MCP tools for all persistent memory. At the start of
@@ -74,23 +74,6 @@ single source of truth.
   all MCP-connected tools (Claude Code, Cursor, Windsurf, Claude Desktop)
 - When the user says "remember this," save immediately via \`memory_write\``;
 
-const localHttpJson = `{
-  "mcpServers": {
-    "lodis": {
-      "type": "streamable-http",
-      "url": "http://localhost:3939/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_TOKEN"
-      }
-    }
-  }
-}`;
-
-const localHttpCodex = `# ~/.codex/config.toml
-[mcp_servers.lodis]
-url = "http://localhost:3939/mcp"
-bearer_token_env_var = "LODIS_API_TOKEN"`;
-
 const promptLocations = [
   ["Codex", "~/.codex/AGENTS.md or project AGENTS.md"],
   ["Claude Code", "~/.claude/CLAUDE.md or project CLAUDE.md"],
@@ -145,11 +128,6 @@ export default function CompleteSetupReference() {
               <li>
                 <a href="#first-run" className="text-text-muted hover:text-glow transition-colors">
                   First run
-                </a>
-              </li>
-              <li>
-                <a href="#local-http" className="text-text-muted hover:text-glow transition-colors">
-                  Local HTTP mode
                 </a>
               </li>
             </ol>
@@ -220,23 +198,6 @@ export default function CompleteSetupReference() {
             </div>
           </section>
 
-          <section id="local-http" className="mb-12 scroll-mt-24">
-            <h2 className="text-2xl font-bold mb-2">Local HTTP Mode</h2>
-            <p className="text-text-muted mb-6">
-              Use this when remote clients need to reach a self-hosted Lodis server.
-            </p>
-            <CodeBlock className="text-xs mb-6">lodis --serve</CodeBlock>
-            <div className="space-y-6">
-              <div>
-                <p className="text-sm text-text-muted mb-3">Most MCP clients use JSON:</p>
-                <CodeBlock className="text-xs">{localHttpJson}</CodeBlock>
-              </div>
-              <div>
-                <p className="text-sm text-text-muted mb-3">Codex uses TOML:</p>
-                <CodeBlock className="text-xs">{localHttpCodex}</CodeBlock>
-              </div>
-            </div>
-          </section>
         </div>
       </main>
       <Footer />

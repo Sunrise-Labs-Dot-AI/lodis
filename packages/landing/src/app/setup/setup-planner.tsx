@@ -5,7 +5,6 @@ import clsx from "clsx";
 import { CodeBlock } from "@/components/code-block";
 
 type ClientId = "codex" | "claude-code" | "desktop" | "editor" | "unsure";
-type StorageId = "local" | "self-hosted" | "unsure";
 type StartId = "new" | "import" | "unsure";
 
 const clients: Array<{
@@ -40,28 +39,6 @@ const clients: Array<{
   },
 ];
 
-const storageModes: Array<{
-  id: StorageId;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: "local",
-    label: "Local on this machine",
-    description: "Best first install. SQLite data stays on your computer.",
-  },
-  {
-    id: "self-hosted",
-    label: "Self-hosted HTTP",
-    description: "For remote clients that need to reach your own Lodis server.",
-  },
-  {
-    id: "unsure",
-    label: "I'm not sure",
-    description: "Recommend the lowest-friction option.",
-  },
-];
-
 const starts: Array<{
   id: StartId;
   label: string;
@@ -93,25 +70,9 @@ const jsonStdioConfig = `{
   }
 }`;
 
-const jsonLocalHttpConfig = `{
-  "mcpServers": {
-    "lodis": {
-      "type": "streamable-http",
-      "url": "http://localhost:3939/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_TOKEN"
-      }
-    }
-  }
-}`;
-
 const codexLocalConfig = `[mcp_servers.lodis]
 command = "npx"
 args = ["-y", "@sunriselabs/lodis"]`;
-
-const codexLocalHttpConfig = `[mcp_servers.lodis]
-url = "http://localhost:3939/mcp"
-bearer_token_env_var = "LODIS_API_TOKEN"`;
 
 const promptSnippet = `Use Lodis MCP tools for all persistent memory. At the start of
 conversations, call memory_search with relevant terms to retrieve
@@ -167,38 +128,21 @@ function getInstructionTarget(client: ClientId) {
   }
 }
 
-function getInstallPlan(client: ClientId, storage: StorageId) {
-  if (client === "unsure" || storage === "unsure") {
+function getInstallPlan(client: ClientId) {
+  if (client === "unsure") {
     return {
       title: "Start with the safest local setup",
       intro:
-        "If you are not sure yet, start local. It avoids tokens and networking. Once Lodis works in one client, you can add more tools later.",
+        "If you are not sure yet, start with the AI tool you already use most often. Once Lodis works in one client, you can add more tools later.",
       steps: [
         "Pick the AI tool you already use most often.",
         "If it is Codex, use the Codex command. If it is Cursor, Windsurf, Cline, or Claude Desktop, use the JSON config.",
-        "Skip self-hosted HTTP until local memory works.",
+        "Add the Lodis memory policy to the client instructions.",
       ],
       codeLabel: "Codex fast path",
       code: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
       fallbackLabel: "Most other MCP clients",
       fallbackCode: jsonStdioConfig,
-    };
-  }
-
-  if (storage === "self-hosted") {
-    return {
-      title: client === "codex" ? "Point Codex at your local HTTP server" : "Point your client at your local HTTP server",
-      intro:
-        "Use this when the client cannot launch Lodis as a local process but can reach your machine over HTTP.",
-      steps: [
-        "Start Lodis HTTP mode with lodis --serve.",
-        "Create an API token in the Lodis dashboard at localhost:3838.",
-        client === "codex"
-          ? "Set LODIS_API_TOKEN in your shell, then add this TOML to Codex."
-          : "Paste this HTTP config into your MCP client.",
-      ],
-      codeLabel: client === "codex" ? "~/.codex/config.toml" : "MCP client JSON",
-      code: client === "codex" ? codexLocalHttpConfig : jsonLocalHttpConfig,
     };
   }
 
@@ -263,15 +207,11 @@ function getInstructionPrompt(client: ClientId) {
   return client === "claude-code" ? claudeCodePrompt : promptSnippet;
 }
 
-function getLimits(selectedClients: ClientId[], storage: StorageId, starts: StartId[]) {
+function getLimits(selectedClients: ClientId[], starts: StartId[]) {
   const limits = [
     "Lodis only helps tools that are connected through MCP and instructed to use it.",
     "Lodis will not automatically crawl private apps or files. You choose what to import or index.",
   ];
-
-  if (storage === "unsure") {
-    limits.push("If you are not sure where memory should live, do not start with self-hosted HTTP. Use local setup first.");
-  }
 
   if (selectedClients.includes("codex")) {
     limits.push("Codex uses TOML in ~/.codex/config.toml, not the JSON used by many MCP clients.");
@@ -309,25 +249,16 @@ function labelsFor<T extends string>(
 
 function AnswerSummary({
   selectedClientLabels,
-  selectedStorageLabel,
   selectedStartLabels,
-  hasStorage,
 }: {
   selectedClientLabels: string[];
-  selectedStorageLabel: string;
   selectedStartLabels: string[];
-  hasStorage: boolean;
 }) {
   const items = [
     {
       label: "Tools",
       value: selectedClientLabels.length > 0 ? selectedClientLabels.join(", ") : "Not selected",
       complete: selectedClientLabels.length > 0,
-    },
-    {
-      label: "Memory",
-      value: hasStorage ? selectedStorageLabel : "Not selected",
-      complete: hasStorage,
     },
     {
       label: "Start",
@@ -337,7 +268,7 @@ function AnswerSummary({
   ];
 
   return (
-    <div className="mt-5 grid gap-2 sm:grid-cols-3">
+    <div className="mt-5 grid gap-2 sm:grid-cols-2">
       {items.map((item) => (
         <div
           key={item.label}
@@ -361,53 +292,6 @@ function AnswerSummary({
           </p>
         </div>
       ))}
-    </div>
-  );
-}
-
-function ChoiceGroup<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T | null;
-  options: Array<{ id: T; label: string; description: string }>;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-widest text-text-dim mb-3">
-        {label}
-      </p>
-      <div className="grid gap-3">
-        {options.map((option) => {
-          const selected = value === option.id;
-
-          return (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onChange(option.id)}
-              className={clsx(
-                "text-left rounded-lg border p-4 transition-all duration-200",
-                selected
-                  ? "border-border-hover bg-[rgba(125,211,252,0.1)]"
-                  : "border-border bg-white/[0.02] hover:border-border-hover"
-              )}
-            >
-              <span className="block text-sm font-semibold text-text">
-                {option.label}
-              </span>
-              <span className="mt-1 block text-sm text-text-muted">
-                {option.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -475,24 +359,22 @@ function MultiChoiceGroup<T extends string>({
 
 export function SetupPlanner() {
   const [selectedClients, setSelectedClients] = useState<ClientId[]>([]);
-  const [storage, setStorage] = useState<StorageId | null>(null);
   const [selectedStarts, setSelectedStarts] = useState<StartId[]>([]);
   const [step, setStep] = useState(0);
   const questionRef = useRef<HTMLDivElement>(null);
   const previousStepRef = useRef(step);
-  const effectiveStorage = storage ?? "unsure";
 
   const installPlans = useMemo(
-    () => selectedClients.map((client) => ({ client, plan: getInstallPlan(client, effectiveStorage) })),
-    [selectedClients, effectiveStorage]
+    () => selectedClients.map((client) => ({ client, plan: getInstallPlan(client) })),
+    [selectedClients]
   );
   const startPlans = useMemo(
     () => selectedStarts.map((start) => getStartPlan(start)),
     [selectedStarts]
   );
   const limits = useMemo(
-    () => getLimits(selectedClients, effectiveStorage, selectedStarts),
-    [selectedClients, effectiveStorage, selectedStarts]
+    () => getLimits(selectedClients, selectedStarts),
+    [selectedClients, selectedStarts]
   );
   const selectedClientLabels = useMemo(
     () => labelsFor(selectedClients, clients),
@@ -502,21 +384,18 @@ export function SetupPlanner() {
     () => labelsFor(selectedStarts, starts),
     [selectedStarts]
   );
-  const selectedStorageLabel = storageModes.find((mode) => mode.id === effectiveStorage)?.label ?? effectiveStorage;
-  const isResultStep = step === 3;
+  const isResultStep = step === 2;
   const needsGuidance =
     selectedClients.includes("unsure") ||
-    selectedStarts.includes("unsure") ||
-    effectiveStorage === "unsure";
+    selectedStarts.includes("unsure");
   const canContinue =
     (step === 0 && selectedClients.length > 0) ||
-    (step === 1 && storage !== null) ||
-    (step === 2 && selectedStarts.length > 0);
-  const stepLabels = ["Tools", "Memory", "Starting point"];
+    (step === 1 && selectedStarts.length > 0);
+  const stepLabels = ["Tools", "Starting point"];
 
   const goNext = () => {
     if (!canContinue) return;
-    setStep((current) => Math.min(current + 1, 3));
+    setStep((current) => Math.min(current + 1, 2));
   };
   const goBack = () => setStep((current) => Math.max(current - 1, 0));
 
@@ -539,7 +418,7 @@ export function SetupPlanner() {
           Build the path that matches your agent.
         </h2>
         <p className="text-text-muted leading-relaxed">
-          Answer three questions and Lodis will give you the install command,
+          Answer two questions and Lodis will give you the install command,
           instruction location, first prompt, and the sharp edges to know up front.
         </p>
       </div>
@@ -548,13 +427,13 @@ export function SetupPlanner() {
         <div className="mb-6">
           <div className="flex items-center justify-between gap-4 text-xs font-semibold uppercase tracking-widest text-text-dim">
             <span aria-live="polite" aria-atomic="true">
-              {isResultStep ? "Your setup path" : `Question ${step + 1} of 3`}
+              {isResultStep ? "Your setup path" : `Question ${step + 1} of 2`}
             </span>
             <a href="/setup/all" className="text-text-muted hover:text-glow transition-colors">
               Skip to everything
             </a>
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-2" aria-hidden="true">
+          <div className="mt-4 grid grid-cols-2 gap-2" aria-hidden="true">
             {stepLabels.map((label, index) => (
               <div
                 key={label}
@@ -568,9 +447,7 @@ export function SetupPlanner() {
           {(step > 0 || isResultStep) && (
             <AnswerSummary
               selectedClientLabels={selectedClientLabels}
-              selectedStorageLabel={selectedStorageLabel}
               selectedStartLabels={selectedStartLabels}
-              hasStorage={storage !== null}
             />
           )}
         </div>
@@ -587,15 +464,6 @@ export function SetupPlanner() {
             )}
 
             {step === 1 && (
-              <ChoiceGroup
-                label="Where should memory live?"
-                value={storage}
-                options={storageModes}
-                onChange={setStorage}
-              />
-            )}
-
-            {step === 2 && (
               <MultiChoiceGroup
                 label="How are you starting?"
                 values={selectedStarts}
@@ -625,7 +493,7 @@ export function SetupPlanner() {
                   !canContinue && "pointer-events-none opacity-40"
                 )}
               >
-                {step === 2 ? "Show my setup path" : "Continue"}
+                {step === 1 ? "Show my setup path" : "Continue"}
               </button>
             </div>
           </div>
@@ -640,11 +508,11 @@ export function SetupPlanner() {
                   <h3 className="font-semibold mb-2">
                     {needsGuidance
                       ? "Start local, then add complexity later"
-                      : `${selectedClientLabels.join(", ")} with ${selectedStorageLabel.toLowerCase()}`}
+                      : selectedClientLabels.join(", ")}
                   </h3>
                   <p className="text-sm text-text-muted">
                     {needsGuidance
-                      ? "This path avoids self-hosted networking until Lodis is working in one client."
+                      ? "This path starts with one local MCP client before adding more tools."
                       : `Starting point: ${selectedStartLabels.join(", ")}.`}
                   </p>
                 </div>
@@ -737,7 +605,7 @@ export function SetupPlanner() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(1)}
                 className="btn-ghost justify-center text-center"
               >
                 Back

@@ -29,12 +29,6 @@ export default defineConfig([
     noExternal: ["@lodis/core"],
   },
   {
-    entry: ["src/serve.ts"],
-    format: ["esm"],
-    splitting: false,
-    noExternal: ["@lodis/core"],
-  },
-  {
     entry: ["src/serverless.ts"],
     format: ["esm"],
     splitting: false,

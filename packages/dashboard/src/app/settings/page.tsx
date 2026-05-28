@@ -54,16 +54,18 @@ export default async function SettingsPage() {
       </Card>
 
       {/* API Tokens */}
-      <Card className="p-4">
-        <ApiTokensSection userId={isHosted ? userId! : "local"} isHosted={isHosted} baseUrl={process.env.NEXT_PUBLIC_APP_URL || "https://app.lodis.ai"} />
-      </Card>
+      {isHosted && (
+        <Card className="p-4">
+          <ApiTokensSection userId={userId!} baseUrl={process.env.NEXT_PUBLIC_APP_URL || "https://app.lodis.ai"} />
+        </Card>
+      )}
 
       <SettingsActions />
     </div>
   );
 }
 
-async function ApiTokensSection({ userId, isHosted, baseUrl }: { userId: string; isHosted: boolean; baseUrl: string }) {
+async function ApiTokensSection({ userId, baseUrl }: { userId: string; baseUrl: string }) {
   const tokens = await listApiTokens(userId);
-  return <ApiTokens userId={userId} tokens={tokens} isHosted={isHosted} baseUrl={baseUrl} />;
+  return <ApiTokens userId={userId} tokens={tokens} baseUrl={baseUrl} />;
 }

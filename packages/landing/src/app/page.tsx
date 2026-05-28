@@ -2,7 +2,6 @@ import { Header } from "@/components/header";
 import { Hero } from "@/components/hero";
 import { Problem } from "@/components/problem";
 import { Solution } from "@/components/solution";
-import { WhatsNew } from "@/components/whats-new";
 import { Tools } from "@/components/tools";
 import { Architecture } from "@/components/architecture";
 import { Deployment } from "@/components/deployment";
@@ -19,8 +18,6 @@ export default function Home() {
         <Problem />
         <div className="section-divider" />
         <Solution />
-        <div className="section-divider" />
-        <WhatsNew />
         <div className="section-divider" />
         <Tools />
         <div className="section-divider" />

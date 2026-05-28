@@ -114,7 +114,7 @@ const toolGroups: { label: string; tools: Tool[] }[] = [
       },
       { name: "memory_index", desc: "Index external docs for unified search" },
       { name: "memory_index_status", desc: "Check staleness of indexed documents" },
-      { name: "memory_migrate", desc: "Migrate local memories to cloud (Pro)" },
+      { name: "memory_migrate", desc: "Legacy migration helper for existing deployments" },
     ],
   },
 ];

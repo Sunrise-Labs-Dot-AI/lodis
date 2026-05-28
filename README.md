@@ -82,7 +82,7 @@ Features:
 - Cleanup page for deduplication and maintenance
 - Archive page for browsing archived memories with restore actions
 - Entity profile pages with cached summaries and evidence memories
-- Settings page with database stats, export, sync, and API token management
+- Settings page with database stats, export, and API token management
 
 ## MCP Tools
 
@@ -127,7 +127,7 @@ Lodis provides 39 MCP tools:
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external docs (Drive, Notion, filesystem) |
 | `memory_index_status` | Check staleness of indexed documents |
-| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_migrate` | Legacy migration helper for existing deployments |
 | `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works |
 
 ## Architecture
@@ -181,7 +181,7 @@ Lodis provides 39 MCP tools:
 
 ### Semantic Reasoning
 
-Lodis does not call an LLM from its core read/write paths. It exposes structured tools and safe candidate sets; your AI client performs semantic tasks like classification, connection review, correction wording, and briefing synthesis, then writes the result back to Lodis. Core features (search, store, connect, sync) work without configuring any model provider inside Lodis.
+Lodis does not call an LLM from its core read/write paths. It exposes structured tools and safe candidate sets; your AI client performs semantic tasks like classification, connection review, correction wording, and briefing synthesis, then writes the result back to Lodis. Core features (search, store, connect, export) work without configuring any model provider inside Lodis.
 
 ## Data
 
@@ -189,7 +189,7 @@ All data lives locally at `~/.lodis/`:
 - `lodis.db` — SQLite database
 - `models/` — Cached embedding model (~22MB, downloaded on first search)
 
-No accounts, no cloud, no API keys required for core functionality.
+No accounts or API keys required for core functionality.
 
 ## Development
 

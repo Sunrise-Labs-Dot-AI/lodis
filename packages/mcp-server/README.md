@@ -83,7 +83,7 @@ Lodis provides 39 MCP tools:
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external docs (Drive, Notion, filesystem) |
 | `memory_index_status` | Check staleness of indexed documents |
-| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_migrate` | Legacy migration helper for existing deployments |
 | `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works |
 
 ### Key features
@@ -168,7 +168,7 @@ In `~/.windsurf/mcp.json`:
 
 ## How It Works
 
-- **Local-first**: All data stored in `~/.lodis/lodis.db` (SQLite). No accounts, no cloud, no API keys for core functionality.
+- **Local-first**: All data stored in `~/.lodis/lodis.db` (SQLite). No accounts or API keys for core functionality.
 - **Hybrid search**: FTS5 keyword search + sqlite-vec vector embeddings, merged with Reciprocal Rank Fusion (k=60). Confidence-weighted scoring and recency boost.
 - **Embeddings**: all-MiniLM-L6-v2 via Transformers.js — runs locally, no API calls, no cost. ~22MB model cached on first search.
 - **Confidence scoring**: Memories start with confidence based on source type (stated: 90%, observed: 75%, inferred: 65%). Confirmations boost to 99%, user-stated corrections promote confidence, mistakes degrade confidence, and unused memories decay over time.

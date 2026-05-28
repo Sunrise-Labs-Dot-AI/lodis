@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Terms of Service | Lodis",
-  description: "Terms of Service for the Lodis AI memory platform.",
+  description: "Terms of Service for the Lodis open-source local memory layer.",
 };
 
 export default function TermsOfService() {
@@ -20,101 +20,17 @@ export default function TermsOfService() {
         <h1 className="text-4xl font-bold mt-8 mb-2 text-glow">
           Terms of Service
         </h1>
-        <p className="text-text-dim text-sm mb-12">Last updated: April 2026</p>
+        <p className="text-text-dim text-sm mb-12">Last updated: May 2026</p>
 
         <div className="space-y-10 text-text-muted leading-relaxed">
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              1. Acceptance of Terms
+              1. Open-Source Software
             </h2>
             <p>
-              By accessing or using the Lodis platform (&quot;Service&quot;),
-              operated by Sunrise Labs (&quot;we&quot;, &quot;us&quot;,
-              &quot;our&quot;), you agree to be bound by these Terms of Service.
-              If you do not agree, do not use the Service.
-            </p>
-            <p className="mt-3">
-              These terms apply to both the open-source software and the hosted
-              service. The open-source MCP server and dashboard are available
-              under the MIT License, but your use of our hosted infrastructure
-              is governed by these terms.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              2. Description of Service
-            </h2>
-            <p>
-              Lodis is a universal memory layer for AI agents. It provides
-              persistent, searchable memory that works across MCP-compatible
-              tools. We offer multiple tiers:
-            </p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                <span className="text-text font-medium">Local</span> &mdash; A
-                local-only MCP server and dashboard. All data stays on your
-                machine. No cloud services are involved unless you explicitly
-                configure or invoke them from your MCP client.
-              </li>
-              <li>
-                <span className="text-text font-medium">Cloud</span> &mdash; A
-                cloud-hosted MCP server and dashboard. Your memories are stored
-                in our cloud database, encrypted at rest.
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              3. User Accounts and API Tokens
-            </h2>
-            <p>
-              Cloud tiers require an account, authenticated through
-              Clerk (our third-party authentication provider). You are
-              responsible for maintaining the security of your account
-              credentials.
-            </p>
-            <p className="mt-3">
-              MCP client connections are authenticated using Personal Access
-              Tokens (PATs). You are responsible for keeping your tokens secure.
-              Treat them like passwords. If you believe a token has been
-              compromised, revoke it immediately through the dashboard.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              4. Acceptable Use
-            </h2>
-            <p>You agree not to:</p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                Use the Service to store content that is illegal, harmful, or
-                violates the rights of others.
-              </li>
-              <li>
-                Attempt to gain unauthorized access to other users&apos; data or
-                our infrastructure.
-              </li>
-              <li>
-                Reverse-engineer, attack, or attempt to disrupt the hosted
-                service.
-              </li>
-              <li>
-                Resell or redistribute access to the hosted service without our
-                written permission.
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              5. Intellectual Property
-            </h2>
-            <p>
-              The Lodis open-source software (MCP server, dashboard, and core
-              libraries) is licensed under the{" "}
+              Lodis is an open-source, local-first memory layer for AI agents.
+              The MCP server, dashboard, and core libraries are licensed under
+              the{" "}
               <a
                 href="https://github.com/Sunrise-Labs-Dot-AI/lodis/blob/main/LICENSE"
                 target="_blank"
@@ -123,146 +39,88 @@ export default function TermsOfService() {
               >
                 MIT License
               </a>
-              . You are free to use, modify, and distribute it under those
-              terms.
-            </p>
-            <p className="mt-3">
-              The hosted service (infrastructure, deployment, and managed
-              operations) is a separate commercial offering. The MIT license
-              applies to the source code, not to our hosted infrastructure or
-              service availability.
-            </p>
-            <p className="mt-3">
-              You retain full ownership of all content you store in Lodis. We
-              do not claim any rights over your memories, data, or intellectual
-              property.
+              . Your use, modification, and distribution of the software are
+              governed by that license.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              6. Data and Privacy
+              2. Local Data
             </h2>
             <p>
-              Your privacy matters to us. Please review our{" "}
-              <Link href="/privacy" className="text-glow hover:underline">
-                Privacy Policy
-              </Link>{" "}
-              for detailed information about how we collect, use, and protect
-              your data across each tier.
-            </p>
-            <p className="mt-3">
-              In summary: the Local tier collects no data and makes no cloud
-              calls. The Cloud tiers store your data encrypted at rest in our cloud
-              infrastructure. You can export or delete your data at any time.
+              The recommended Lodis install runs on your machine and stores data
+              in <code className="font-mono text-text">~/.lodis/lodis.db</code>.
+              You are responsible for your local files, backups, device access,
+              and any AI client configuration you choose to connect.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              7. External Services
+              3. Acceptable Use
             </h2>
-            <p>
-              If you configure external services or credentials through your MCP
-              client, you are responsible for:
-            </p>
+            <p>You agree not to use Lodis to:</p>
             <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>
-                Ensuring your usage complies with the provider&apos;s terms
-                of service.
-              </li>
-              <li>
-                Any costs incurred through those credentials when used by the
-                Service.
-              </li>
-              <li>
-                Revoking keys if you suspect unauthorized use.
-              </li>
+              <li>Store content that is illegal, harmful, or violates others&apos; rights.</li>
+              <li>Bypass access controls in tools, files, or services you connect.</li>
+              <li>Attack, disrupt, or abuse infrastructure you do not own.</li>
             </ul>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              8. Disclaimers
+              4. External Services
             </h2>
             <p>
-              The Service is provided &quot;as is&quot; and &quot;as
-              available&quot; without warranties of any kind, either express or
-              implied, including but not limited to implied warranties of
-              merchantability, fitness for a particular purpose, and
-              non-infringement.
-            </p>
-            <p className="mt-3">
-              We do not warrant that the Service will be uninterrupted, secure,
-              or error-free. AI-generated entity extraction, memory
-              classification, and other automated features may produce inaccurate
-              results. You should verify important information independently.
+              If you configure Lodis or your AI client to call external services,
+              APIs, or model providers, you are responsible for those credentials,
+              costs, provider terms, and access decisions.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              9. Limitation of Liability
+              5. Disclaimers
             </h2>
             <p>
-              To the maximum extent permitted by law, Sunrise Labs shall not be
-              liable for any indirect, incidental, special, consequential, or
-              punitive damages, or any loss of profits or revenues, whether
-              incurred directly or indirectly, or any loss of data, use,
-              goodwill, or other intangible losses resulting from:
-            </p>
-            <ul className="list-disc list-inside mt-3 space-y-2 ml-2">
-              <li>Your use of or inability to use the Service.</li>
-              <li>
-                Any unauthorized access to or alteration of your data.
-              </li>
-              <li>
-                Any third-party conduct on the Service.
-              </li>
-              <li>Any other matter relating to the Service.</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold text-text mb-3">
-              10. Termination
-            </h2>
-            <p>
-              You may stop using the Service at any time. For Cloud tier accounts,
-              you can delete your account and all associated data through the
-              dashboard settings.
-            </p>
-            <p className="mt-3">
-              We may suspend or terminate your access if you violate these terms,
-              with notice where practicable. Upon termination, you may export
-              your data before your account and its contents are permanently
-              deleted.
+              Lodis is provided &quot;as is&quot; without warranties of any kind.
+              AI-generated memories, classifications, connections, and summaries
+              may be incomplete or incorrect. You should verify important
+              information independently.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              11. Changes to Terms
+              6. Limitation of Liability
             </h2>
             <p>
-              We may update these Terms of Service from time to time. We will
-              notify Cloud tier users of material changes via email. Continued use
-              of the Service after changes take effect constitutes acceptance of
-              the revised terms.
+              To the maximum extent permitted by law, Sunrise Labs is not liable
+              for indirect, incidental, special, consequential, or punitive
+              damages, or for loss of data, profits, goodwill, or use arising
+              from Lodis.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-text mb-3">
-              12. Contact
+              7. Changes
             </h2>
             <p>
-              If you have questions about these Terms of Service, contact us at{" "}
-              <a
-                href="mailto:support@lodis.ai"
-                className="text-glow hover:underline"
-              >
-                support@lodis.ai
+              We may update these terms as Lodis evolves. Material changes will
+              be reflected on this page.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text mb-3">
+              8. Contact
+            </h2>
+            <p>
+              Questions? Email{" "}
+              <a href="mailto:hello@sunriselabs.ai" className="text-glow hover:underline">
+                hello@sunriselabs.ai
               </a>
               .
             </p>

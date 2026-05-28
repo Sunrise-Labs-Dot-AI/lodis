@@ -3,17 +3,17 @@ import { Reveal } from "./reveal";
 const localFeatures = [
   "SQLite on your machine - zero infrastructure",
   "Stdio MCP transport - works with any local MCP client",
-  "No accounts, no cloud, no API keys required",
-  "In-process reranker - no hosted inference service",
+  "No accounts or API keys required",
+  "In-process reranker - no external inference service",
   "Dashboard at localhost:3838",
 ];
 
-const cloudFeatures = [
-  "Private beta cloud database - sync across devices",
-  "OAuth 2.1 - connect remote clients with one click",
-  "API tokens for remote MCP clients",
-  "Managed hosting - nothing to run",
-  "Dashboard at app.lodis.ai",
+const selfHostedFeatures = [
+  "Run lodis --serve when stdio is not enough",
+  "HTTP transport for clients that cannot launch local processes",
+  "API-token protection for your own server",
+  "Same local database and dashboard",
+  "You own the network boundary",
 ];
 
 export function Deployment() {
@@ -22,11 +22,11 @@ export function Deployment() {
       <div className="max-w-6xl mx-auto">
         <Reveal>
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4 tracking-tight">
-            Local is the default.{" "}
-            <span className="text-glow">Cloud is optional.</span>
+            Run it locally.{" "}
+            <span className="text-glow">Keep it portable.</span>
           </h2>
           <p className="text-text-muted text-center mb-16 text-lg">
-            Start with the open-source local install. Request cloud beta only if you need a hosted dashboard or remote MCP endpoint.
+            Start with stdio MCP. Use local HTTP only when a client cannot launch Lodis as a process.
           </p>
         </Reveal>
 
@@ -63,22 +63,22 @@ export function Deployment() {
             </div>
           </Reveal>
 
-          {/* Cloud card */}
+          {/* Self-hosted card */}
           <Reveal>
             <div className="relative glass p-8 h-full flex flex-col border-glow/20">
               <span className="absolute top-4 right-4 px-2.5 py-1 text-[11px] font-medium rounded-full bg-[rgba(125,211,252,0.12)] text-glow-soft border border-border-hover">
-                Invite-only
+                Advanced
               </span>
               <div className="flex items-center gap-3 mb-2">
                 <svg viewBox="0 0 24 24" className="w-6 h-6 text-violet" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h7.5m-7.5 3h7.5m-9 3.75h10.5A2.25 2.25 0 0019.5 11.25v-6A2.25 2.25 0 0017.25 3H6.75A2.25 2.25 0 004.5 5.25v6a2.25 2.25 0 002.25 2.25zM7.5 16.5h9" />
                 </svg>
-                <h3 className="text-xl font-semibold">Cloud</h3>
+                <h3 className="text-xl font-semibold">Local HTTP</h3>
               </div>
-              <p className="text-text-dim text-sm mb-6">Optional &middot; Multi-device &middot; AES-256-GCM encrypted</p>
+              <p className="text-text-dim text-sm mb-6">Self-hosted &middot; Token protected &middot; Still local-first</p>
 
               <ul className="space-y-3 mb-8 flex-1">
-                {cloudFeatures.map((f) => (
+                {selfHostedFeatures.map((f) => (
                   <li key={f} className="flex items-start gap-2.5">
                     <svg viewBox="0 0 20 20" className="w-5 h-5 text-violet shrink-0 mt-0.5" fill="currentColor">
                       <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
@@ -89,14 +89,14 @@ export function Deployment() {
               </ul>
 
               <p className="text-text-dim text-xs mb-5 italic">
-                Same memory, everywhere you work.
+                Use only after stdio is working.
               </p>
 
               <a
-                href="mailto:james@sunriselabs.ai"
-                className="btn-glow text-sm text-center w-full block"
+                href="/setup/all#local-http"
+                className="btn-ghost text-sm text-center w-full block"
               >
-                Request cloud beta
+                View HTTP setup
               </a>
             </div>
           </Reveal>
@@ -104,9 +104,9 @@ export function Deployment() {
 
         <Reveal>
           <p className="text-text-dim text-sm text-center mt-10">
-            Start local, migrate later if beta access makes sense.{" "}
-            <code className="font-mono text-text-muted">memory_migrate</code>{" "}
-            keeps the path reversible.
+            Your data stays in{" "}
+            <code className="font-mono text-text-muted">~/.lodis/lodis.db</code>{" "}
+            and exports as portable JSON.
           </p>
         </Reveal>
       </div>

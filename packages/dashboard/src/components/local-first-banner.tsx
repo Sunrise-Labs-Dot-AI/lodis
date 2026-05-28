@@ -32,8 +32,7 @@ export function LocalFirstBanner() {
           against{" "}
           <code className="px-1.5 py-0.5 rounded bg-[var(--bg-soft)] text-[var(--accent-strong)] font-mono text-[0.9em]">
             ~/.lodis/lodis.db
-          </code>
-          . This hosted dashboard remains available as a private beta.
+          </code>.
         </div>
         <Link
           href="https://github.com/Sunrise-Labs-Dot-AI/lodis"

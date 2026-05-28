@@ -23,9 +23,9 @@ V1–V4 feature complete. 39 MCP tools, 463 tests, hybrid search, 14 entity type
 - Permission enforcement (checkPermission on all read/write paths, interactive dashboard agents page)
 - Landing page (`packages/landing`) + dashboard restyle (Pensieve design system)
 - Copyright cleanup (MIT license + metadata on all packages)
-- Pro tier: Clerk auth, BYOK config, API tokens, terms + privacy pages, API key encryption (AES-256-GCM + scrypt)
+- Hosted private-beta auth, BYOK config, API tokens, terms + privacy pages, API key encryption (AES-256-GCM + scrypt)
 - npm package renamed to `@sunriselabs/lodis`; v0.6.0 release is prepared in repo and awaiting manual npm publish
-- Cloud migration tool (`memory_migrate`)
+- Legacy migration tool (`memory_migrate`)
 - Memory permanence tiers: canonical (pinned), active, ephemeral (TTL), archived
 - Context-packed search (`memory_context`) — token-budget-aware retrieval
 - Entity profiles (`memory_briefing`) — LLM-generated summaries with 24h cache
@@ -40,8 +40,8 @@ V1–V4 feature complete. 39 MCP tools, 463 tests, hybrid search, 14 entity type
   - `LODIS_RERANK_TOPK=<N>` → overrides the reranker's `topK` output (default 60, clamped 1-200, invalid values fall back to default). Affects how many memories land in `primary`/`references` for context-packing.
   - Measured outcome on MRCR: all flag combinations benchmark-neutral at 15/18 = 83.3% recall@10 (3 ceiling misses are cross-encoder-ordering cliffs, not hybrid-pool or embedding issues). Production defaults reverted to pre-flag behavior: `LODIS_RERANK_TOPK=40` pinned, other flags unset. `mrcr-bench` domain retained at `v1-bracketed` for future experiments. Next frontier: Wave 2 (PPR reranker post-pass over `memory_connections`).
 
-**Deferred (handoffs written, not dispatched):**
-- Pro tier remaining: cloud sync (Turso), hosted dashboard Vercel deployment (`handoff-pro-tier.md`)
+**Current cloud posture:**
+- Local is the recommended product path. Hosted MCP/dashboard stays up only for existing private-beta users, rollback, and the Personal Assistant dependency until PA moves local.
 
 ## Tech Stack
 
@@ -84,7 +84,7 @@ All runtime data lives in `~/.lodis/`:
 ~/.lodis/
 ├── lodis.db           # SQLite database (auto-created on first run)
 ├── config.json          # LLM provider config, user preferences
-├── credentials.json     # Device ID, salt (mode 0600) — Pro: + Turso creds
+├── credentials.json     # Device ID, salt (mode 0600) — legacy hosted mode may include Turso creds
 └── models/              # Cached embedding model (~22MB)
     └── all-MiniLM-L6-v2/
 ```
@@ -200,7 +200,7 @@ By design, generic `memory_write` does **not** consult the `domains` registry an
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external documents (Drive, Notion, filesystem) for unified search |
 | `memory_index_status` | Check staleness of indexed documents |
-| `memory_migrate` | Migrate local memories to cloud (Pro tier) |
+| `memory_migrate` | Legacy migration helper for existing deployments |
 | `memory_tutorial` | Interactive chapter-by-chapter tutorial for how Lodis works (no-ACL, static — bundled content, skips `checkPermission` but retains `getUserId` for pattern preservation) |
 
 ## Memory Permanence
@@ -257,7 +257,7 @@ Output validation: `validateExtraction()`, `validateSplit()`, `validateCorrectio
 
 ## Dashboard
 
-Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mode) or Turso (hosted mode). Server actions handle mutations. Clerk auth in hosted mode (conditional on `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`).
+Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mode) or Turso for existing hosted private-beta users. Server actions handle mutations. Clerk auth is conditional on `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
 
 ### Routes
 | Route | Purpose |
@@ -268,8 +268,8 @@ Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mo
 | `/archive` | Archived memories browser with restore actions |
 | `/cleanup` | Health score, dedup, merge, split, contradiction, PII detection + inline actions |
 | `/entities/[name]` | Entity profile page (summary, related memories, connections) |
-| `/settings` | DB stats, export, LLM provider config, sync config (Pro) |
-| `/sign-in`, `/sign-up` | Clerk authentication (hosted mode only) |
+| `/settings` | DB stats, export, LLM provider config, and API token management |
+| `/sign-in`, `/sign-up` | Clerk authentication for existing hosted private-beta users |
 | `/api/export` | Memory export API |
 
 ## Design System (Pensieve)

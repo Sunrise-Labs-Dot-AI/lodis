@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { CodeBlock } from "@/components/code-block";
 
-type ClientId = "codex" | "claude-code" | "desktop" | "editor" | "claude-ai" | "unsure";
-type StorageId = "local" | "cloud" | "self-hosted" | "unsure";
-type StartId = "new" | "import" | "migrate" | "unsure";
+type ClientId = "codex" | "claude-code" | "desktop" | "editor" | "unsure";
+type StorageId = "local" | "self-hosted" | "unsure";
+type StartId = "new" | "import" | "unsure";
 
 const clients: Array<{
   id: ClientId;
@@ -22,11 +22,6 @@ const clients: Array<{
     id: "desktop",
     label: "Claude Desktop",
     description: "A local desktop MCP client.",
-  },
-  {
-    id: "claude-ai",
-    label: "Claude.ai",
-    description: "Browser-based use with hosted OAuth.",
   },
   {
     id: "codex",
@@ -56,11 +51,6 @@ const storageModes: Array<{
     description: "Best first install. SQLite data stays on your computer.",
   },
   {
-    id: "cloud",
-    label: "Cloud beta, invite required",
-    description: "For cross-device memory after you request access from James.",
-  },
-  {
     id: "self-hosted",
     label: "Self-hosted HTTP",
     description: "For remote clients that need to reach your own Lodis server.",
@@ -88,11 +78,6 @@ const starts: Array<{
     description: "Bring in Claude memories, ChatGPT exports, rules, or git config.",
   },
   {
-    id: "migrate",
-    label: "Move local to cloud",
-    description: "Use when you already dogfood Lodis locally.",
-  },
-  {
     id: "unsure",
     label: "I'm not sure",
     description: "Start with the guided setup prompt.",
@@ -104,18 +89,6 @@ const jsonStdioConfig = `{
     "lodis": {
       "command": "npx",
       "args": ["-y", "@sunriselabs/lodis"]
-    }
-  }
-}`;
-
-const jsonCloudConfig = `{
-  "mcpServers": {
-    "lodis": {
-      "type": "streamable-http",
-      "url": "https://app.lodis.ai/api/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_TOKEN"
-      }
     }
   }
 }`;
@@ -135,10 +108,6 @@ const jsonLocalHttpConfig = `{
 const codexLocalConfig = `[mcp_servers.lodis]
 command = "npx"
 args = ["-y", "@sunriselabs/lodis"]`;
-
-const codexCloudConfig = `[mcp_servers.lodis]
-url = "https://app.lodis.ai/api/mcp"
-bearer_token_env_var = "LODIS_API_TOKEN"`;
 
 const codexLocalHttpConfig = `[mcp_servers.lodis]
 url = "http://localhost:3939/mcp"
@@ -195,8 +164,6 @@ function getInstructionTarget(client: ClientId) {
       return "Claude Desktop system prompt";
     case "editor":
       return "Cursor rules, Windsurf system prompt, or Cline custom instructions";
-    case "claude-ai":
-      return "Claude.ai custom instructions or project instructions";
   }
 }
 
@@ -205,48 +172,16 @@ function getInstallPlan(client: ClientId, storage: StorageId) {
     return {
       title: "Start with the safest local setup",
       intro:
-        "If you are not sure yet, start local. It avoids cloud access, tokens, and networking. Once Lodis works in one client, you can add more tools later.",
+        "If you are not sure yet, start local. It avoids tokens and networking. Once Lodis works in one client, you can add more tools later.",
       steps: [
         "Pick the AI tool you already use most often.",
         "If it is Codex, use the Codex command. If it is Cursor, Windsurf, Cline, or Claude Desktop, use the JSON config.",
-        "Skip cloud and self-hosted HTTP until local memory works.",
+        "Skip self-hosted HTTP until local memory works.",
       ],
       codeLabel: "Codex fast path",
       code: "codex mcp add lodis -- npx -y @sunriselabs/lodis",
       fallbackLabel: "Most other MCP clients",
       fallbackCode: jsonStdioConfig,
-    };
-  }
-
-  if (client === "claude-ai") {
-    return {
-      title: "Connect Lodis from Claude.ai",
-      intro:
-        "Claude.ai is the hosted path. Use OAuth instead of editing local config files.",
-      steps: [
-        "Sign up or sign in at app.lodis.ai.",
-        "In Claude.ai, open Settings -> Integrations and add Lodis as an MCP server.",
-        "Authorize the connection through app.lodis.ai.",
-      ],
-      codeLabel: null,
-      code: null,
-    };
-  }
-
-  if (storage === "cloud") {
-    return {
-      title: client === "codex" ? "Add hosted Lodis to Codex" : "Add hosted Lodis to your MCP client",
-      intro:
-        "Cloud mode is invite-only. Request access from James first, then create an API token. Codex reads the token from your environment; most other clients paste it into JSON.",
-      steps: [
-        "Email james@sunriselabs.ai to request beta access, then create an account at app.lodis.ai.",
-        "Generate an API token in Settings -> API Tokens.",
-        client === "codex"
-          ? "Set LODIS_API_TOKEN in your shell, then add this TOML to Codex."
-          : "Paste this JSON into your MCP client config.",
-      ],
-      codeLabel: client === "codex" ? "~/.codex/config.toml" : "MCP client JSON",
-      code: client === "codex" ? codexCloudConfig : jsonCloudConfig,
     };
   }
 
@@ -314,13 +249,6 @@ function getStartPlan(start: StartId) {
         detail:
           "Good sources include Claude memories, ChatGPT memory exports, .cursorrules, Windsurf rules, git config, and plaintext notes you explicitly choose.",
       };
-    case "migrate":
-      return {
-        title: "Move existing local Lodis data",
-        prompt: "Migrate my local Lodis memories to cloud",
-        detail:
-          "Use this after cloud access is active. Review the migrated memories in the dashboard before relying on them across tools.",
-      };
     case "new":
       return {
         title: "Let Lodis interview you",
@@ -341,17 +269,8 @@ function getLimits(selectedClients: ClientId[], storage: StorageId, starts: Star
     "Lodis will not automatically crawl private apps or files. You choose what to import or index.",
   ];
 
-  if (storage === "cloud") {
-    limits.push("Cloud access is invite-only during beta.");
-  }
-
   if (storage === "unsure") {
-    limits.push("If you are not sure where memory should live, do not start with cloud or self-hosted HTTP. Use local setup first.");
-  }
-
-  if (selectedClients.includes("claude-ai")) {
-    limits.push("Claude.ai uses hosted OAuth; local stdio config does not apply there.");
-    limits.push("The local and self-hosted choices are for local MCP clients, not the browser-based Claude.ai connector.");
+    limits.push("If you are not sure where memory should live, do not start with self-hosted HTTP. Use local setup first.");
   }
 
   if (selectedClients.includes("codex")) {
@@ -725,7 +644,7 @@ export function SetupPlanner() {
                   </h3>
                   <p className="text-sm text-text-muted">
                     {needsGuidance
-                      ? "This path avoids invite-only cloud setup and self-hosted networking until Lodis is working in one client."
+                      ? "This path avoids self-hosted networking until Lodis is working in one client."
                       : `Starting point: ${selectedStartLabels.join(", ")}.`}
                   </p>
                 </div>

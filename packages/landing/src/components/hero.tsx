@@ -30,7 +30,7 @@ export function Hero() {
         </h1>
 
         <p className="text-lg sm:text-xl text-text-muted max-w-2xl mx-auto mb-10 leading-relaxed">
-          Open-source, runs locally, and syncs to your own cloud if you want it to.
+          Open-source, runs locally, and keeps your agent memory on your machine.
           Searchable, correctable, cross-tool memory with a real dashboard.
         </p>
 

@@ -8,7 +8,7 @@ import { SetupTabs } from "../setup-tabs";
 export const metadata: Metadata = {
   title: "Complete Setup Reference | Lodis",
   description:
-    "All Lodis setup options in one place: local MCP, Codex, cloud beta, local HTTP, and memory instructions.",
+    "All Lodis setup options in one place: local MCP, Codex, local HTTP, and memory instructions.",
 };
 
 const systemPrompt = `Use Lodis MCP tools for all persistent memory. At the start of
@@ -73,23 +73,6 @@ single source of truth.
 - Treat Lodis memories as the persistent record — they survive across
   all MCP-connected tools (Claude Code, Cursor, Windsurf, Claude Desktop)
 - When the user says "remember this," save immediately via \`memory_write\``;
-
-const cloudJson = `{
-  "mcpServers": {
-    "lodis": {
-      "type": "streamable-http",
-      "url": "https://app.lodis.ai/api/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_TOKEN"
-      }
-    }
-  }
-}`;
-
-const cloudCodex = `# ~/.codex/config.toml
-[mcp_servers.lodis]
-url = "https://app.lodis.ai/api/mcp"
-bearer_token_env_var = "LODIS_API_TOKEN"`;
 
 const localHttpJson = `{
   "mcpServers": {
@@ -165,11 +148,6 @@ export default function CompleteSetupReference() {
                 </a>
               </li>
               <li>
-                <a href="#cloud-beta" className="text-text-muted hover:text-glow transition-colors">
-                  Cloud beta
-                </a>
-              </li>
-              <li>
                 <a href="#local-http" className="text-text-muted hover:text-glow transition-colors">
                   Local HTTP mode
                 </a>
@@ -239,29 +217,6 @@ export default function CompleteSetupReference() {
                   <code className="text-xs font-mono text-text-dim">{prompt}</code>
                 </div>
               ))}
-            </div>
-          </section>
-
-          <section id="cloud-beta" className="mb-20 scroll-mt-24">
-            <h2 className="text-2xl font-bold mb-2">Cloud Beta</h2>
-            <p className="text-text-muted mb-6">
-              Cloud mode syncs memories across devices, but access is invite-only during beta. Email{" "}
-              <a href="mailto:james@sunriselabs.ai" className="text-glow hover:underline">
-                james@sunriselabs.ai
-              </a>{" "}
-              before trying to configure a cloud client.
-            </p>
-            <div className="space-y-6">
-              <div>
-                <p className="text-sm text-text-muted mb-3">Most MCP clients use JSON:</p>
-                <CodeBlock className="text-xs">{cloudJson}</CodeBlock>
-              </div>
-              <div>
-                <p className="text-sm text-text-muted mb-3">
-                  Codex uses TOML and reads the token from your environment:
-                </p>
-                <CodeBlock className="text-xs">{cloudCodex}</CodeBlock>
-              </div>
             </div>
           </section>
 

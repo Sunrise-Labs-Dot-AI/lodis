@@ -52,7 +52,7 @@ export async function applyConfidenceDecay(client: Client, userId?: string | nul
     sql: `SELECT id, confidence, used_count, confirmed_count, corrected_count, last_used_at, confirmed_at, learned_at,
                  permanence, entity_type, content, detail
           FROM memories
-          WHERE deleted_at IS NULL AND confidence > ?${userId ? ' AND user_id = ?' : ''}`,
+          WHERE deleted_at IS NULL AND valid_to IS NULL AND confidence > ?${userId ? ' AND user_id = ?' : ''}`,
     args: userId ? [MIN_CONFIDENCE, userId] : [MIN_CONFIDENCE],
   });
 
@@ -167,6 +167,7 @@ export async function applyTemporalDecay(client: Client, userId?: string | null)
     sql: `SELECT id, content, detail, confidence, learned_at
           FROM memories
           WHERE deleted_at IS NULL
+          AND valid_to IS NULL
           AND confidence > 0.5
           AND learned_at < ?${userId ? ' AND user_id = ?' : ''}`,
     args: userId ? [fourteenDaysAgo, userId] : [fourteenDaysAgo],

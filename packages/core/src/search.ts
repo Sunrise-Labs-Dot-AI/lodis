@@ -136,6 +136,7 @@ export async function expandConnections(
              JOIN memories m ON m.id = mc.target_memory_id
              WHERE mc.source_memory_id = ?
                AND m.deleted_at IS NULL
+               AND m.valid_to IS NULL
                AND m.has_pii_flag IS NOT 1
                AND m.embedding IS NOT NULL
                AND vector_distance_cos(m.embedding, vector(?)) <= ?${userId ? ' AND m.user_id = ?' : ''}`,
@@ -151,6 +152,7 @@ export async function expandConnections(
              JOIN memories m ON m.id = mc.source_memory_id
              WHERE mc.target_memory_id = ?
                AND m.deleted_at IS NULL
+               AND m.valid_to IS NULL
                AND m.has_pii_flag IS NOT 1
                AND m.embedding IS NOT NULL
                AND vector_distance_cos(m.embedding, vector(?)) <= ?${userId ? ' AND m.user_id = ?' : ''}`,
@@ -218,6 +220,15 @@ export async function hybridSearch(
     expand?: boolean;
     maxDepth?: number;
     similarityThreshold?: number;
+    /** Include superseded (valid_to NOT NULL) rows. Default false — current facts only. */
+    includeSuperseded?: boolean;
+    /**
+     * Retrieval scope. "default" (the default) hides progress snippets
+     * (entity_type='snippet') and rows in archived domains from the general
+     * pool. "all" includes them. An explicit entityType / domain filter
+     * overrides the matching exclusion so targeted lookups always work.
+     */
+    scope?: "default" | "all";
   } = {},
 ): Promise<{ results: ExpandedResult[]; cached: boolean; extraction: HybridSearchExtractionSummary }> {
   const userId = options.userId ?? null;
@@ -226,6 +237,14 @@ export async function hybridSearch(
   const maxDepth = options.maxDepth ?? 3;
   const similarityThreshold = options.similarityThreshold ?? 0.5;
   const fetchLimit = limit * 3;
+
+  // Default scope partitions high-volume, low-signal rows out of the general
+  // pool: progress snippets (read via memory_query_progress instead) and rows
+  // in archived domains (e.g. imported contacts). An explicit entityType /
+  // domain filter opts back into the matching class. scope:"all" disables both.
+  const scope = options.scope ?? "default";
+  const excludeSnippets = scope === "default" && options.entityType !== "snippet";
+  const excludeArchivedDomains = scope === "default" && !options.domain;
 
   // --- Query preprocessing ---
   // Long natural-language questions (e.g. MRCR needle questions) flood FTS5
@@ -265,6 +284,8 @@ export async function hybridSearch(
     expand,
     maxDepth,
     similarityThreshold,
+    includeSuperseded: options.includeSuperseded ?? false,
+    scope,
   });
   const currentLastModifiedResult = await client.execute({
     sql: `SELECT value FROM lodis_meta WHERE key = 'last_modified'`,
@@ -275,6 +296,18 @@ export async function hybridSearch(
   const cachedEntry = resultCache.get(cacheKey);
   if (cachedEntry && cachedEntry.lastModified === currentLastModified?.value) {
     return { results: cachedEntry.results, cached: true, extraction: extractionSummary };
+  }
+
+  // Resolve the archived-domain exclusion list once, on the cache-miss path
+  // only. Domain archive/unarchive bumps last_modified, so the cached result
+  // above can never serve a stale exclusion set.
+  let archivedDomains: string[] = [];
+  if (excludeArchivedDomains) {
+    const archivedResult = await client.execute({
+      sql: `SELECT name FROM domains WHERE archived = 1 AND IFNULL(user_id, '') = IFNULL(?, '')`,
+      args: [userId],
+    });
+    archivedDomains = archivedResult.rows.map((r) => r.name as string);
   }
 
   // 1. FTS5 keyword search -> resolve rowids to memory IDs.
@@ -431,7 +464,7 @@ export async function hybridSearch(
 
   // When filters are present, fetch more candidates so post-filter results
   // aren't starved by higher-ranked results from other domains/types
-  const hasFilters = !!(options.domain || options.entityType || options.entityName || options.minConfidence !== undefined);
+  const hasFilters = !!(options.domain || options.entityType || options.entityName || options.minConfidence !== undefined || excludeSnippets || (excludeArchivedDomains && archivedDomains.length > 0));
   const candidateLimit = hasFilters ? rankedIds.length : limit;
   const topIds = rankedIds.slice(0, candidateLimit);
   if (topIds.length === 0) {
@@ -441,6 +474,24 @@ export async function hybridSearch(
   const placeholders = topIds.map(() => "?").join(",");
   let sql = `SELECT * FROM memories WHERE id IN (${placeholders}) AND deleted_at IS NULL`;
   const params: unknown[] = [...topIds];
+
+  // Phase 3: current facts only unless the caller explicitly asks for history.
+  if (!options.includeSuperseded) {
+    sql += ` AND valid_to IS NULL`;
+  }
+
+  // Phase 4: default scope keeps progress snippets and archived-domain rows out
+  // of the general pool. NULL entity_type rows (most memories) must survive, so
+  // the snippet check is NULL-safe. Both exclusions are pre-disabled above when
+  // the caller passes an explicit entityType / domain filter.
+  if (excludeSnippets) {
+    sql += ` AND (entity_type IS NULL OR entity_type != 'snippet')`;
+  }
+  if (excludeArchivedDomains && archivedDomains.length > 0) {
+    const archivedPh = archivedDomains.map(() => "?").join(",");
+    sql += ` AND domain NOT IN (${archivedPh})`;
+    params.push(...archivedDomains);
+  }
 
   if (userId) {
     sql += ` AND user_id = ?`;
@@ -480,6 +531,25 @@ export async function hybridSearch(
       score: scores.get(id)!,
       memory: rowMap.get(id)!,
     }));
+
+  // Phase 3: annotate each current memory with how many prior versions it
+  // superseded — surfaces awareness of history without pulling stale rows into
+  // the ranking. One batched query over the indexed superseded_by column.
+  if (searchResults.length > 0) {
+    const histIds = searchResults.map((r) => r.id);
+    const histPh = histIds.map(() => "?").join(",");
+    const histResult = await client.execute({
+      sql: `SELECT superseded_by AS sid, COUNT(*) AS n FROM memories
+            WHERE superseded_by IN (${histPh})${userId ? ' AND user_id = ?' : ''}
+            GROUP BY superseded_by`,
+      args: (userId ? [...histIds, userId] : histIds) as Array<string | number | null>,
+    });
+    const histCounts = new Map(histResult.rows.map((r) => [r.sid as string, Number(r.n)]));
+    for (const r of searchResults) {
+      const c = histCounts.get(r.id);
+      if (c && c > 0) (r.memory as Record<string, unknown>)._supersededCount = c;
+    }
+  }
 
   // 6. Graph expansion
   let expandedResults: ExpandedResult[];

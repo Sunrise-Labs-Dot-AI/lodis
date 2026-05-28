@@ -23,7 +23,8 @@ export type Relationship =
   | "about"
   | "informed_by"
   | "uses"
-  | "references";
+  | "references"
+  | "supersedes";
 export type EventType =
   | "created"
   | "confirmed"

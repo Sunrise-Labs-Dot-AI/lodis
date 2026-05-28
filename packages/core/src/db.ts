@@ -654,6 +654,26 @@ async function runMigrations(client: Client, isRemote: boolean): Promise<void> {
       );
     }
   });
+
+  // Phase 3 — bi-temporal supersession. Deterministic / zero-LLM: columns are
+  // written only by the agent-chosen `supersede` resolution on memory_write.
+  await runMigration(client, "add_temporal_supersession_columns", async () => {
+    await client.executeMultiple(`
+      ALTER TABLE memories ADD COLUMN valid_from TEXT;
+      ALTER TABLE memories ADD COLUMN valid_to TEXT;
+      ALTER TABLE memories ADD COLUMN superseded_by TEXT;
+    `);
+    // Backfill: every existing fact is currently valid, effective from when it was learned.
+    await client.execute({
+      sql: `UPDATE memories SET valid_from = COALESCE(learned_at, updated_at, datetime('now')) WHERE valid_from IS NULL`,
+      args: [],
+    });
+    // Index the supersession pointer for fast history lookups (WHERE superseded_by = ?).
+    await client.execute({
+      sql: `CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by) WHERE superseded_by IS NOT NULL`,
+      args: [],
+    });
+  });
 }
 
 export async function createDatabase(config?: {

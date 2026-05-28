@@ -44,6 +44,16 @@ export const memories = sqliteTable("memories", {
    *  buildEmbedText with metadata prefix. Used by the migration script to
    *  skip already-migrated rows and by rollback tooling to revert shape. */
   embeddingShape: text("embedding_shape"),
+  // --- Phase 3: bi-temporal supersession (Graphiti-style, deterministic / zero-LLM) ---
+  /** When this fact became valid. Backfilled to `learned_at` on existing rows. */
+  validFrom: text("valid_from"),
+  /** When this fact stopped being current. NULL = currently valid. Set to the
+   *  supersession timestamp when a `supersede` resolution replaces this fact.
+   *  Rows with valid_to NOT NULL are excluded from default retrieval + decay. */
+  validTo: text("valid_to"),
+  /** Memory id of the successor that superseded this fact (NULL = not superseded).
+   *  Set together with valid_to on the `supersede` write path. */
+  supersededBy: text("superseded_by"),
 });
 
 export const domains = sqliteTable("domains", {

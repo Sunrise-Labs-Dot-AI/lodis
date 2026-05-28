@@ -3,7 +3,7 @@
 ## Product Identity
 
 - **Name:** Lodis (from 'lode' — a vein of knowledge)
-- **npm:** `@sunriselabs/lodis` (published, v0.5.2); `@lodis/core`, `@lodis/dashboard`, `@lodis/landing` (workspace packages)
+- **npm:** `lodis` (unscoped, published); `@lodis/core`, `@lodis/dashboard`, `@lodis/landing` (workspace packages)
 - **Domain:** lodis.ai
 - **GitHub:** Sunrise-Labs-Dot-AI/lodis
 - **License:** MIT — Copyright (c) 2026 Sunrise Labs
@@ -11,7 +11,7 @@
 
 ## What Lodis Is
 
-An open-source MCP server + localhost web dashboard that gives AI agents persistent, cross-tool memory with full user control. Any MCP-compatible tool (Claude Code, Cursor, Windsurf, Claude Desktop, Cline) connects to the same memory. Users browse, search, confirm, correct, and manage what their agents know through a real dashboard — not just chat commands.
+An open-source MCP server + localhost web dashboard that gives AI agents persistent, cross-tool memory with full user control. Any MCP-compatible tool (Codex, Cursor, Windsurf, Codex Desktop, Cline) connects to the same memory. Users browse, search, confirm, correct, and manage what their agents know through a real dashboard — not just chat commands.
 
 ## Current State (April 2026)
 
@@ -73,7 +73,7 @@ lodis/
 ├── package.json          # pnpm workspace root
 ├── pnpm-workspace.yaml
 ├── turbo.json
-└── CLAUDE.md             # This file
+└── AGENTS.md             # This file
 ```
 
 ## Data Directory
@@ -91,7 +91,7 @@ All runtime data lives in `~/.lodis/`:
 
 ### Dashboard deeplinks
 
-MCP tool responses include a `url` field on every memory record so clients (Claude, Cursor, etc.) can link users directly to the dashboard detail page. The base URL is resolved in this order: `LODIS_DASHBOARD_URL` → `NEXT_PUBLIC_APP_URL` → `http://localhost:3838`. Set `LODIS_DASHBOARD_URL` in the MCP server's environment to point deeplinks at a non-default host (e.g. `https://app.lodis.ai` for hosted mode). Entity-shaped responses (`memory_list_entities`, `memory_briefing`) get `/entities/<name>` URLs.
+MCP tool responses include a `url` field on every memory record so clients (Codex, Cursor, etc.) can link users directly to the dashboard detail page. The base URL is resolved in this order: `LODIS_DASHBOARD_URL` → `NEXT_PUBLIC_APP_URL` → `http://localhost:3838`. Set `LODIS_DASHBOARD_URL` in the MCP server's environment to point deeplinks at a non-default host (e.g. `https://app.lodis.ai` for hosted mode). Entity-shaped responses (`memory_list_entities`, `memory_briefing`) get `/entities/<name>` URLs.
 
 ## Database Schema
 
@@ -155,11 +155,7 @@ Rate-limit: 500 writes per `(source_agent_id, life_domain)` per hour, unconditio
 
 By design, generic `memory_write` does **not** consult the `domains` registry and does **not** lowercase the `domain` param. This means an agent writing `domain: "Fitness"` via generic `memory_write` is stored as an **orphan** (unregistered) row, distinct from the registered `fitness`. `memory_list_domains` surfaces this drift with `registered: false`. Only `memory_write_snippet` enforces the registry.
 
-**Ownership rule (Phase 4 — write-side partition).** Since snippets are now PARTITIONED OUT of default search (see Retrieval scope below), the memory-vs-snippet write choice decides visibility, so keep the line sharp: a **snippet = "an event happened at time T"** (ephemeral, queried via `memory_query_progress` / `memory_progress_summary`); a **durable fact / lesson / decision / entity = `memory_write`** (default-searchable). If one observation contains both, write both. `memory_write_snippet` accepts an optional `connections[]` array (same L1 caller-supplied mechanism as `memory_write`, zero server-side LLM) to link a progress event to the durable entities it concerns (person / org / project) — without it, snippets are graph-isolated and a partitioned snippet has no path back from the entity it's about (use `relationship: "about"` for the entity the event concerns).
-
-**Retrieval scope (Phase 4 — read-side partition).** `memory_search` / `memory_context` take a `scope` param: `"default"` (omitted) excludes `entity_type='snippet'` rows and rows in **archived domains** (e.g. the imported `contacts` domain, archived 2026-05-27 — bare Google-contact pointers; 81 enriched contacts promoted to the `people` domain); `"all"` includes everything. An explicit `entityType` or `domain` filter overrides the matching exclusion. The partition applies to **primary** retrieval; graph-expansion neighbors are not yet scope-filtered (immaterial today — snippets are graph-isolated and no archived row has a live edge). Archiving a domain now actually removes it from default search (previously `memory_archive_domain` was a no-op for retrieval) — `domains.archived` is consulted in `hybridSearch`.
-
-## MCP Tools (39)
+## MCP Tools (35)
 
 | Tool | Description |
 |------|-------------|
@@ -193,7 +189,7 @@ By design, generic `memory_write` does **not** consult the `domains` registry an
 | `memory_scrub` | Detect and redact PII patterns |
 | `memory_onboard` | Guided onboarding: scan connected tools → informed interview → seed |
 | `memory_interview` | Agent-driven cleanup + gap-fill: analyzes health, generates targeted question plan |
-| `memory_import` | Batch import from Claude, ChatGPT, Cursor, gitconfig, plaintext |
+| `memory_import` | Batch import from Codex, ChatGPT, Cursor, gitconfig, plaintext |
 | `memory_export` | Export memories as portable JSON |
 | `memory_index` | Index external documents (Drive, Notion, filesystem) for unified search |
 | `memory_index_status` | Check staleness of indexed documents |

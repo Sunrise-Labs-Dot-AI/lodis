@@ -116,7 +116,7 @@ describe("snippet entityType plumbing", () => {
     });
   });
 
-  it("memory_search without an entityType filter still returns snippets alongside other types", async () => {
+  it("memory_search hides snippets at default scope but scope:'all' returns them alongside other types", async () => {
     await withServer(dbPath, async (client, dbUrl) => {
       const db = createClient({ url: dbUrl });
       const ts = new Date().toISOString();
@@ -134,14 +134,21 @@ describe("snippet entityType plumbing", () => {
       });
       db.close();
 
-      const raw = await client.callTool({
-        name: "memory_search",
-        arguments: { query: "widget" },
-      });
-      const out = parseResult<{ memories: Array<{ id: string; entity_type: string | null }> }>(raw);
-      const types = new Set(out.memories.map((m) => m.entity_type));
-      expect(types.has("snippet")).toBe(true);
-      expect(types.has("fact")).toBe(true);
+      // Phase 4: default scope partitions snippets out of the general pool.
+      const defOut = parseResult<{ memories: Array<{ id: string; entity_type: string | null }> }>(
+        await client.callTool({ name: "memory_search", arguments: { query: "widget" } }),
+      );
+      const defTypes = new Set(defOut.memories.map((m) => m.entity_type));
+      expect(defTypes.has("snippet")).toBe(false);
+      expect(defTypes.has("fact")).toBe(true);
+
+      // scope:'all' brings snippets back alongside other types.
+      const allOut = parseResult<{ memories: Array<{ id: string; entity_type: string | null }> }>(
+        await client.callTool({ name: "memory_search", arguments: { query: "widget", scope: "all" } }),
+      );
+      const allTypes = new Set(allOut.memories.map((m) => m.entity_type));
+      expect(allTypes.has("snippet")).toBe(true);
+      expect(allTypes.has("fact")).toBe(true);
     });
   });
 });

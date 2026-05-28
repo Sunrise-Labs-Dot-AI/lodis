@@ -75,7 +75,10 @@ const SETUP_SQL = `
     user_id TEXT,
     updated_at TEXT,
     event_ts TEXT,
-    embedding_shape TEXT
+    embedding_shape TEXT,
+    valid_from TEXT,
+    valid_to TEXT,
+    superseded_by TEXT
   );
 
   CREATE TABLE IF NOT EXISTS memory_events (

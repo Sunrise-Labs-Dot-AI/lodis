@@ -673,6 +673,9 @@ export async function contextSearch(
     entityName?: string;
     minConfidence?: number;
     includeArchived?: boolean;
+    includeSuperseded?: boolean;
+    /** See hybridSearch: "default" hides snippets + archived-domain rows; "all" includes them. */
+    scope?: "default" | "all";
   } = {},
 ): Promise<ContextPackedResult> {
   const tokenBudget = options.tokenBudget ?? 6000;
@@ -710,6 +713,8 @@ export async function contextSearch(
     entityType: options.entityType,
     entityName: options.entityName,
     minConfidence: options.minConfidence,
+    includeSuperseded: options.includeSuperseded,
+    scope: options.scope,
     limit: stage1Limit,
     expand: !rerankerEnabled,
     maxDepth: 2,

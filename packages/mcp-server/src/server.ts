@@ -75,7 +75,7 @@ import type {
 const RELATIONSHIP_VALUES = [
   "influences", "supports", "contradicts", "related", "learned-together",
   "works_at", "involves", "located_at", "part_of", "about", "informed_by",
-  "uses", "references",
+  "uses", "references", "supersedes",
 ] as const;
 
 function generateId(): string {
@@ -350,7 +350,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
       permanence: z.enum(["canonical", "active", "ephemeral"]).optional().describe("Memory permanence tier. canonical = permanent/decay-immune. ephemeral = auto-expires. active = default."),
       ttl: z.string().optional().describe("Time-to-live for ephemeral memories (e.g. '1h', '24h', '7d', '30d'). Auto-sets permanence to 'ephemeral'."),
       force: z.boolean().optional().describe("Deprecated — use resolution: 'keep_both' instead"),
-      resolution: z.enum(["update", "correct", "add_detail", "keep_both", "skip"]).optional().describe("How to resolve a similarity match"),
+      resolution: z.enum(["update", "correct", "supersede", "add_detail", "keep_both", "skip"]).optional().describe("How to resolve a similarity match"),
       existingMemoryId: z.string().optional().describe("ID of existing memory to act on (required for update/correct/add_detail)"),
       // Wave 2.5 L1: caller-supplied connections (typically populated from
       // memories the calling agent already has loaded in context, e.g. from a
@@ -512,6 +512,84 @@ Organize memories by life domain: general, work, health, finance, relationships,
             newDetail,
           });
         }
+
+        if (params.resolution === "supersede") {
+          // Phase 3 — bi-temporal supersession. The caller decided the world
+          // changed (a state transition), so preserve the prior fact with a
+          // validity window and store the new fact as current. Deterministic —
+          // no LLM on the path. Distinct from `correct` (prior fact was *wrong*
+          // and is overwritten); supersede keeps the prior fact as history.
+          const newId = generateId();
+          const newConfidence = getInitialConfidence(params.sourceType as SourceType);
+
+          // 1. Insert the new (current) fact.
+          await db.insert(memories).values({
+            id: newId,
+            content: params.content,
+            detail: params.detail ?? null,
+            domain: params.domain ?? existing.domain,
+            sourceAgentId: params.sourceAgentId,
+            sourceAgentName: params.sourceAgentName,
+            sourceType: params.sourceType,
+            sourceDescription: params.sourceDescription ?? null,
+            confidence: newConfidence,
+            learnedAt: timestamp,
+            validFrom: timestamp,
+            entityType: params.entityType ?? existing.entityType,
+            entityName: params.entityName ?? existing.entityName,
+            structuredData: params.structuredData ? JSON.stringify(params.structuredData) : existing.structuredData,
+            permanence: existing.permanence,
+            userId: userId ?? null,
+          }).run();
+
+          // 2. Embed the new fact (mirror the update/correct re-embed path).
+          if (vecAvailable) {
+            try {
+              const embeddingText = params.content + (params.detail ? " " + params.detail : "");
+              const embedding = await generateEmbedding(embeddingText);
+              await insertEmbedding(client, newId, embedding);
+            } catch { /* non-fatal */ }
+          }
+
+          // 3. Mark the prior fact superseded — kept for audit, excluded from
+          //    active retrieval, and frozen against decay.
+          await db.update(memories)
+            .set({ validTo: timestamp, supersededBy: newId })
+            .where(eq(memories.id, params.existingMemoryId))
+            .run();
+
+          // 4. Typed history edge (new --supersedes--> old) for graph traversal.
+          try {
+            await db.insert(memoryConnections).values({
+              sourceMemoryId: newId,
+              targetMemoryId: params.existingMemoryId,
+              relationship: "supersedes",
+              userId: userId ?? null,
+              updatedAt: timestamp,
+            }).run();
+          } catch { /* best-effort visibility, not correctness-critical */ }
+
+          // 5. Audit event on the prior fact.
+          await db.insert(memoryEvents).values({
+            id: generateId(),
+            memoryId: params.existingMemoryId,
+            eventType: "superseded",
+            agentId: params.sourceAgentId,
+            agentName: params.sourceAgentName,
+            oldValue: JSON.stringify({ content: existing.content }),
+            newValue: JSON.stringify({ supersededBy: newId, content: params.content }),
+            timestamp,
+          }).run();
+
+          await bumpLastModified(client);
+
+          return textResult({
+            status: "superseded",
+            supersededId: params.existingMemoryId,
+            id: newId,
+            message: `Prior fact ${params.existingMemoryId} marked superseded (valid_to set); new current fact stored as ${newId}.`,
+          });
+        }
       }
 
       // --- Phase 1: Similarity check (unless keep_both or force) ---
@@ -561,6 +639,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
                   options: [
                     "update — replace the existing memory's content with the new content",
                     "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                    "supersede — the world changed (role/status/value/etc.); preserve the old fact (valid_to + superseded_by) and store the new one as current",
                     "add_detail — append new content to the existing memory's detail field",
                     "keep_both — store as a new memory (not a duplicate)",
                     "skip — existing memory is already accurate, don't write anything",
@@ -604,6 +683,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
                   options: [
                     "update — replace the existing memory's content with the new content",
                     "correct — existing was wrong; update it and boost confidence to min(max(existing, 0.85), 0.99)",
+                    "supersede — the world changed (role/status/value/etc.); preserve the old fact (valid_to + superseded_by) and store the new one as current",
                     "add_detail — append new content to the existing memory's detail field",
                     "keep_both — store as a new memory (not a duplicate)",
                     "skip — existing memory is already accurate, don't write anything",
@@ -699,6 +779,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
           sourceDescription: params.sourceDescription ?? null,
           confidence,
           learnedAt: timestamp,
+          validFrom: timestamp,
           hasPiiFlag: hasPii ? 1 : 0,
           entityType: params.entityType ?? null,
           entityName: params.entityName ?? null,
@@ -1052,7 +1133,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
 
   server.tool(
     "memory_write_snippet",
-    "Write a high-frequency progress event (shipped/advanced/started/stalled/blocked) against a registered life domain. Use this — not memory_write — for structured progress capture from Notion, GitHub, Gmail, calendar pollers, or manual check-ins. Defaults: entityType='snippet', permanence='ephemeral', ttl=60d, confidence=1.0. Auto-pins goal-linked ships (active+180d) and meta.milestone=true (canonical). Dedups on (source_system, source_id, event_timestamp) when source_id is supplied. Rate-limited to 500 per (agent, life_domain) per hour. Call memory_register_domain first if the life_domain is new.\n\nExample: memory_write_snippet({ snippet_type: 'shipped', life_domain: 'work', content: 'Shipped PR #42 adding Foo', source_system: 'github', event_timestamp: '2026-04-24T16:00:00Z', linked_goal_id: 'T4', source_id: 'pr-42', sourceAgentId: 'capture-task', sourceAgentName: 'Progress Capture' })",
+    "Write a high-frequency progress EVENT (shipped/advanced/started/stalled/blocked) against a registered life domain. A snippet records that something HAPPENED at a point in time — it is NOT a durable fact, and snippets are PARTITIONED OUT of default memory_search/memory_context (queried instead via memory_query_progress / memory_progress_summary). So: if the event also taught you a durable fact, lesson, or decision, write THAT separately via memory_write, or it won't surface in normal search. Pass `connections` to link this event to the durable entities it concerns (the person, org, or project) so progress stays reachable from the graph. Use this — not memory_write — for structured progress capture from Notion, GitHub, Gmail, calendar pollers, or manual check-ins. Defaults: entityType='snippet', permanence='ephemeral', ttl=60d, confidence=1.0. Auto-pins goal-linked ships (active+180d) and meta.milestone=true (canonical). Dedups on (source_system, source_id, event_timestamp) when source_id is supplied. Rate-limited to 500 per (agent, life_domain) per hour. Call memory_register_domain first if the life_domain is new.\n\nExample: memory_write_snippet({ snippet_type: 'shipped', life_domain: 'work', content: 'Shipped PR #42 adding Foo', source_system: 'github', event_timestamp: '2026-04-24T16:00:00Z', linked_goal_id: 'T4', source_id: 'pr-42', connections: [{ targetEntityName: 'Acme Corp', relationship: 'about' }], sourceAgentId: 'capture-task', sourceAgentName: 'Progress Capture' })",
     {
       // Explicit string bounds prevent a caller from filling the DB with
       // megabyte-scale blobs via the high-frequency snippet path.
@@ -1069,6 +1150,16 @@ Organize memories by life domain: general, work, health, finance, relationships,
       meta: z.object({}).passthrough().optional().describe("Free-form extension field (max 4KB JSON-stringified). Set meta.milestone=true to force canonical pin."),
       sourceAgentId: z.string().max(100).describe("Your agent ID"),
       sourceAgentName: z.string().max(100).describe("Your agent name"),
+      // Phase 4: snippets are partitioned out of default search, so without
+      // explicit links a progress event has no path to the durable entity it
+      // concerns. These bridge the snippet into the searchable graph. Same L1
+      // mechanism as memory_write — zero server-side LLM; the caller supplies
+      // the targets from entities already in its context. Cap 50 (DoS bound).
+      connections: z.array(z.object({
+        targetMemoryId: z.string().optional().describe("ID of the related memory (preferred over targetEntityName)"),
+        targetEntityName: z.string().optional().describe("Entity name to resolve (case-insensitive, user-scoped) — e.g. the person or company this event is about"),
+        relationship: z.enum(RELATIONSHIP_VALUES).describe("Relationship type"),
+      })).max(50).optional().describe("Optional links (up to 50) to the durable entities this event concerns (person, org, project) so progress is reachable from the graph. Best populated from memories already loaded in the caller's context."),
     },
     async (params, extra) => {
       const userId = getUserId(extra as Record<string, unknown>);
@@ -1265,6 +1356,28 @@ Organize memories by life domain: general, work, health, finance, relationships,
         }).run();
       }
 
+      // Phase 4 L1: caller-supplied connections bridge the snippet into the
+      // durable graph (snippets are otherwise partitioned out of default search).
+      // Same mechanism as memory_write; no server-side LLM. Non-fatal — the
+      // snippet already persisted, so a connection failure must not error the write.
+      let connectionsResult: ConnectionsResult | undefined;
+      if (params.connections && params.connections.length > 0) {
+        try {
+          connectionsResult = await applyCallerSuppliedConnections(
+            client,
+            id,
+            params.connections as ConnectionInput[],
+            userId ?? null,
+          );
+        } catch (err) {
+          process.stderr.write(`[lodis] snippet L1 connections failed for ${id}: ${(err as Error)?.message ?? String(err)}\n`);
+          connectionsResult = {
+            applied: 0,
+            dropped: (params.connections as ConnectionInput[]).map((c) => ({ ...c, reason: "transient_error" as const })),
+          };
+        }
+      }
+
       await bumpLastModified(client);
 
       return textResult({
@@ -1274,6 +1387,7 @@ Organize memories by life domain: general, work, health, finance, relationships,
         permanence: finalPermanence,
         expires_at: finalExpiresAt,
         autoPin: action,
+        ...(connectionsResult ? { connections_result: connectionsResult } : {}),
       });
     },
   );
@@ -1775,6 +1889,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
       similarityThreshold: z.number().optional().describe("Min similarity for connected memories (default 0.5)"),
       permanence: z.enum(["canonical", "active", "ephemeral", "archived"]).optional().describe("Filter by permanence tier"),
       includeArchived: z.boolean().optional().describe("Include archived memories in results (default false)"),
+      includeSuperseded: z.boolean().optional().describe("Include superseded (historical) memories replaced via a 'supersede' write (default false — current facts only)"),
+      scope: z.enum(["default", "all"]).optional().describe("Retrieval scope. 'default' (the default) keeps progress snippets and archived-domain rows (e.g. imported contacts) out of results. 'all' includes them. An explicit entityType or domain filter always surfaces that class regardless of scope."),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params, extra) => {
@@ -1792,6 +1908,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
         expand: params.expand,
         maxDepth: params.maxDepth,
         similarityThreshold: params.similarityThreshold,
+        includeSuperseded: params.includeSuperseded,
+        scope: params.scope,
       });
 
       // Filter by read permissions
@@ -1877,6 +1995,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
       entityName: z.string().optional().describe("Filter by entity name"),
       minConfidence: z.number().optional().describe("Minimum confidence threshold"),
       includeArchived: z.boolean().optional().describe("Include archived memories (default false)"),
+      includeSuperseded: z.boolean().optional().describe("Include superseded (historical) memories replaced via a 'supersede' write (default false — current facts only)"),
+      scope: z.enum(["default", "all"]).optional().describe("Retrieval scope. 'default' (the default) keeps progress snippets and archived-domain rows (e.g. imported contacts) out of results. 'all' includes them. An explicit entityType or domain filter always surfaces that class regardless of scope."),
       agentId: z.string().optional().describe("Your agent ID (for permission filtering)"),
     },
     async (params, extra) => {
@@ -1907,6 +2027,8 @@ Organize memories by life domain: general, work, health, finance, relationships,
         entityName: params.entityName,
         minConfidence: params.minConfidence,
         includeArchived: params.includeArchived,
+        includeSuperseded: params.includeSuperseded,
+        scope: params.scope,
       });
 
       // --- Retrieval telemetry + per-memory used_count bump, in ONE transaction ---

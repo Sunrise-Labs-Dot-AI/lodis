@@ -2,6 +2,8 @@
 
 Reference deployment for the HTTP-backed cross-encoder reranker. Keeps Stage 2 of `memory_context` alive on Vercel-style serverless deploys where in-process `onnxruntime-node` has unacceptable cold-start.
 
+Service paused 2026-05-28 — local installs use the in-process `LocalReranker`; this file is retained as a rollback reference.
+
 ## Deploy
 
 ```bash

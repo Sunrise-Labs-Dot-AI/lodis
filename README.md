@@ -23,6 +23,26 @@ That's it. Your AI now has persistent memory.
 
 > **Migrating from `engrams`?** This project was published as `engrams` on npm prior to v0.6.0. The package is now `@sunriselabs/lodis` — same code, same data directory (`~/.lodis/`), same MCP tools. To migrate, swap `engrams` for `@sunriselabs/lodis` in your MCP config (`"args": ["-y", "@sunriselabs/lodis"]`) and reinstall. The old `engrams` package on npm is frozen at v0.5.1 and will not receive further updates.
 
+## Claude Code Plugin
+
+Prefer a one-step install that brings the MCP server **and** the memory skills together? Lodis ships as a Claude Code plugin:
+
+```
+/plugin marketplace add Sunrise-Labs-Dot-AI/lodis
+/plugin install lodis@lodis-official
+```
+
+Installing the plugin registers the `lodis` MCP server (no manual config edit) and adds four skills that teach the agent to use memory well:
+
+| Skill | What it does |
+|-------|--------------|
+| `/lodis:memory-retrieval` | Drive `memory_context` at session start with adaptive budgets, then rate the retrieval |
+| `/lodis:memory-capture` | Write discipline — durable fact vs. progress snippet, dedup resolution, entity typing, connections |
+| `/lodis:onboarding` | First-run setup: configure the agent to prefer Lodis, scan tools, interview, seed memories |
+| `/lodis:session-wrap` | End-of-session distillation into durable memory before context is lost |
+
+The plugin manifest lives in [`.claude-plugin/`](.claude-plugin/); the skills are in [`skills/`](skills/).
+
 ## Getting Started
 
 After installing, tell your AI assistant:

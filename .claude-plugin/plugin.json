@@ -1,0 +1,23 @@
+{
+  "name": "lodis",
+  "version": "0.6.0",
+  "description": "Universal, portable memory layer for AI agents. Bundles the Lodis MCP server plus skills that teach agents to retrieve context, capture durable facts, onboard a new user, and wrap a session into memory.",
+  "author": {
+    "name": "Sunrise Labs",
+    "url": "https://lodis.ai"
+  },
+  "homepage": "https://lodis.ai",
+  "repository": "https://github.com/Sunrise-Labs-Dot-AI/lodis",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "agents", "knowledge-graph", "context", "ai"],
+  "mcpServers": {
+    "lodis": {
+      "command": "npx",
+      "args": ["-y", "@sunriselabs/lodis"],
+      "env": {
+        "LODIS_DASHBOARD_URL": "http://localhost:3838"
+      }
+    }
+  },
+  "skills": "./skills/"
+}

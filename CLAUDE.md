@@ -48,7 +48,7 @@ V1–V4 feature complete. 39 MCP tools, 463 tests, hybrid search, 14 entity type
 | Layer | Technology |
 |-------|-----------|
 | MCP Server | `@modelcontextprotocol/sdk`, TypeScript, Node.js, stdio transport |
-| Database | `better-sqlite3`, Drizzle ORM (SQLite dialect), FTS5, sqlite-vec |
+| Database | `@libsql/client` (SQLite — local file mode + Turso for hosted), Drizzle ORM (SQLite dialect), FTS5, sqlite-vec |
 | Embeddings | `all-MiniLM-L6-v2` via Transformers.js (local, no API calls), 384 dims |
 | LLM | Abstracted `LLMProvider` interface — Anthropic (lazy import), OpenAI, Ollama (raw fetch). Per-task model routing: extraction (cheap) vs analysis (capable) |
 | Dashboard | Next.js 15 (App Router), React 19, Tailwind v4, custom UI components |
@@ -257,7 +257,7 @@ Output validation: `validateExtraction()`, `validateSplit()`, `validateCorrectio
 
 ## Dashboard
 
-Next.js 15 on localhost:3838. Reads SQLite directly via better-sqlite3 (local mode) or Turso for existing hosted private-beta users. Server actions handle mutations. Clerk auth is conditional on `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+Next.js 15 on localhost:3838. Reads SQLite directly via `@libsql/client` (local file mode) or Turso for existing hosted private-beta users. Server actions handle mutations. Clerk auth is conditional on `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
 
 ### Routes
 | Route | Purpose |

@@ -42,12 +42,13 @@ The assistant will scan your connected tools (calendar, email, GitHub), ask a fe
 
 ## What You Get
 
-Lodis provides 39 MCP tools:
+Lodis provides 40 MCP tools:
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with filters |
 | `memory_get` | Fetch one or many memories by ID (up to 50, deduplicated) |
+| `memory_find` | Resolve a partial ID prefix or content substring to candidate summary rows |
 | `memory_context` | Token-budget-aware context retrieval |
 | `memory_rate_context` | Close the feedback loop on a prior `memory_context` retrieval |
 | `memory_briefing` | Cached entity profiles, or source memories for the calling agent to summarize |

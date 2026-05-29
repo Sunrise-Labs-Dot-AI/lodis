@@ -3562,6 +3562,124 @@ migration). Self-references return 'self_reference'.`,
   );
 
   server.tool(
+    "memory_find",
+    "Resolve a PARTIAL memory ID (prefix) or a content substring to candidate memories. Use this when you have a fragment of an ID — e.g. from a handoff note, a log line, or a truncated reference — that memory_get would reject (memory_get requires the full 32-char hex). Returns lightweight SUMMARY rows (id, snippet, entity, domain) — not full content; follow up with memory_get on the resolved id for the complete record. Honours the same per-tenant and per-agent ACL as every other read path.",
+    {
+      idPrefix: z.string().optional().describe("A partial memory ID — 1 to 32 lowercase hex chars. Matched as a left-anchored prefix."),
+      contentSubstring: z.string().optional().describe("A substring (min 3 chars) matched case-insensitively against memory content. Combine with idPrefix to narrow."),
+      domain: z.string().optional().describe("Restrict to a single domain"),
+      entityType: z.enum(["person", "organization", "place", "project", "preference", "event", "goal", "fact", "lesson", "routine", "skill", "resource", "decision", "snippet"]).optional().describe("Restrict to an entity type"),
+      limit: z.number().optional().describe("Max matches to return (default 10, max 50)"),
+      includeArchived: z.boolean().optional().describe("Include archived memories (default false — matches memory_get / memory_search)"),
+      agentId: z.string().optional().describe("Your agent ID. Caller-supplied/advisory: omitting it does NOT bypass ACLs; permissions are checked against the user_id resolved from the auth context."),
+    },
+    async (params, extra) => {
+      const extraRec = extra as Record<string, unknown>;
+      const userId = getUserId(extraRec);
+
+      // --- Input validation (runs BEFORE the hosted-mode auth gate, same as
+      // memory_get) ---
+      const idPrefix = typeof params.idPrefix === "string" ? params.idPrefix.trim().toLowerCase() : undefined;
+      const contentSubstring = typeof params.contentSubstring === "string" ? params.contentSubstring.trim() : undefined;
+      const hasPrefix = !!idPrefix && idPrefix.length > 0;
+      const hasSubstring = !!contentSubstring && contentSubstring.length > 0;
+
+      if (!hasPrefix && !hasSubstring) {
+        return textResult({ error: "memory_find requires either `idPrefix` or `contentSubstring`" });
+      }
+      // Validate the prefix against a 1–32 char lowercase hex shape — a strict
+      // subset of the full-ID regex memory_get enforces. Defence-in-depth even
+      // though the LIKE below is parametric.
+      if (hasPrefix && !/^[0-9a-f]{1,32}$/.test(idPrefix as string)) {
+        return textResult({ error: `Invalid idPrefix — must be 1 to 32 lowercase hex chars, got: ${(idPrefix as string).slice(0, 40)}` });
+      }
+      // A 1–2 char substring would scan the whole corpus; require a meaningful
+      // fragment so this stays a resolver, not a bulk dump.
+      if (hasSubstring && (contentSubstring as string).length < 3) {
+        return textResult({ error: "contentSubstring must be at least 3 characters" });
+      }
+
+      const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+
+      // Hosted-mode safety: authInfo envelope present but no resolvable userId →
+      // empty result rather than a cross-tenant scan. Mirrors memory_get.
+      const hasAuthEnvelope = extraRec && typeof extraRec.authInfo !== "undefined" && extraRec.authInfo !== null;
+      if (hasAuthEnvelope && !userId) {
+        return textResult({ matches: [], count: 0, truncated: false });
+      }
+
+      await maybeRunDecay(userId);
+
+      // Build the finder query. Return SUMMARY columns only — never full content
+      // or detail — so this resolver can't be turned into a bulk PII-exfil path.
+      // applyReadFilter folds in user_id scoping AND per-agent read ACL at the
+      // SQL layer, exactly as in memory_get / memory_list.
+      let sql = `SELECT id, domain, entity_type, entity_name, substr(content, 1, 160) AS snippet, permanence, learned_at FROM memories WHERE deleted_at IS NULL`;
+      let args: unknown[] = [];
+
+      if (hasPrefix) {
+        // Escape LIKE metacharacters in the (hex-validated) prefix defensively
+        // and anchor left. Hex can't contain % or _, but keep the ESCAPE clause
+        // so the pattern is unambiguous.
+        sql += ` AND id LIKE ? ESCAPE '\\'`;
+        args.push(`${idPrefix}%`);
+      }
+      if (hasSubstring) {
+        const escaped = (contentSubstring as string).replace(/[\\%_]/g, (c) => `\\${c}`);
+        sql += ` AND content LIKE ? ESCAPE '\\'`;
+        args.push(`%${escaped}%`);
+      }
+      if (params.domain) {
+        sql += ` AND domain = ?`;
+        args.push(params.domain);
+      }
+      if (params.entityType) {
+        sql += ` AND entity_type = ?`;
+        args.push(params.entityType);
+      }
+      const includeArchived = params.includeArchived ?? false;
+      if (!includeArchived) {
+        sql += ` AND IFNULL(permanence, '') != 'archived'`;
+      }
+
+      ({ query: sql, params: args } = await applyReadFilter(sql, args, params.agentId, userId));
+
+      sql += ` ORDER BY learned_at DESC LIMIT ?`;
+      args.push(limit);
+
+      const rows = (await client.execute({
+        sql,
+        args: args as (string | number | null)[],
+      })).rows as unknown as Array<{
+        id: string;
+        domain: string;
+        entity_type: string | null;
+        entity_name: string | null;
+        snippet: string | null;
+        permanence: string | null;
+        learned_at: string | null;
+      }>;
+
+      // memory_find does NOT auto-track usage — these are unconfirmed candidate
+      // matches, not records the caller has actually consulted. Usage is tracked
+      // when the caller follows up with memory_get on the real id.
+      return textResult({
+        matches: rows.map((r) => withUrl({
+          id: r.id,
+          domain: r.domain,
+          entity_type: r.entity_type,
+          entity_name: r.entity_name,
+          snippet: r.snippet,
+          permanence: r.permanence,
+          learned_at: r.learned_at,
+        })),
+        count: rows.length,
+        truncated: rows.length === limit,
+      });
+    },
+  );
+
+  server.tool(
     "memory_export",
     "Export memories as JSON for migration to another Lodis instance. Returns paginated results — call repeatedly with increasing offset until hasMore is false. Use with memory_import (source_type: 'lodis') on the destination server to complete migration.",
     {

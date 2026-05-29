@@ -15,7 +15,7 @@ An open-source MCP server + localhost web dashboard that gives AI agents persist
 
 ## Current State (May 2026)
 
-V1–V4 feature complete. 39 MCP tools, 463 tests, hybrid search, 14 entity types, temporal supersession, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
+V1–V4 feature complete. 40 MCP tools, 463 tests, hybrid search, 14 entity types, temporal supersession, knowledge graph, confidence decay, dedup, PII detection, memory permanence tiers, context-packed search, entity profiles, and a full Next.js dashboard.
 
 **Shipped:**
 - Onboarding flow (`memory_onboard`, `memory_import`, dashboard empty state + review queue)
@@ -159,12 +159,13 @@ By design, generic `memory_write` does **not** consult the `domains` registry an
 
 **Retrieval scope (Phase 4 — read-side partition).** `memory_search` / `memory_context` take a `scope` param: `"default"` (omitted) excludes `entity_type='snippet'` rows and rows in **archived domains** (e.g. the imported `contacts` domain, archived 2026-05-27 — bare Google-contact pointers; 81 enriched contacts promoted to the `people` domain); `"all"` includes everything. An explicit `entityType` or `domain` filter overrides the matching exclusion. The partition applies to **primary** retrieval; graph-expansion neighbors are not yet scope-filtered (immaterial today — snippets are graph-isolated and no archived row has a live edge). Archiving a domain now actually removes it from default search (previously `memory_archive_domain` was a no-op for retrieval) — `domains.archived` is consulted in `hybridSearch`.
 
-## MCP Tools (39)
+## MCP Tools (40)
 
 | Tool | Description |
 |------|-------------|
 | `memory_search` | Hybrid semantic + keyword search with domain/confidence/entity filters |
-| `memory_get` | Direct fetch by 32-char hex ID (single or batch up to 50, deduplicated). Returns full record contents — including PII — only for rows the caller's user_id and agent ACL allow. Non-returnable cases (missing / cross-tenant / blocked / archived / soft-deleted) collapse into a single opaque `not_found` array to prevent existence oracling. Auto-tracks usage only on returned rows. For graph traversal use `memory_get_connections`. |
+| `memory_get` | Direct fetch by 32-char hex ID (single or batch up to 50, deduplicated). Returns full record contents — including PII — only for rows the caller's user_id and agent ACL allow. Non-returnable cases (missing / cross-tenant / blocked / archived / soft-deleted) collapse into a single opaque `not_found` array to prevent existence oracling. Auto-tracks usage only on returned rows. For partial IDs use `memory_find`; for graph traversal use `memory_get_connections`. |
+| `memory_find` | Resolve a PARTIAL memory ID (prefix, 1–32 hex) or a content substring (≥3 chars) to candidate memories — the finder `memory_get` is not (memory_get requires the full 32-char ID). Returns lightweight summary rows (id, 160-char snippet, entity, domain, deeplink), ACL- and tenant-scoped, archived excluded by default. Does not auto-track usage; follow up with `memory_get` on the resolved id for the full record. |
 | `memory_context` | Token-budget-aware context search (hierarchical or narrative output); returns `retrievalId` + saturation + suggested follow-ups for the feedback loop |
 | `memory_rate_context` | Close the loop on a prior `memory_context` retrieval — reports `referenced` (cited) and `noise` (filtered) IDs; drives the +0.02 used-bump and optional utility ranking |
 | `memory_briefing` | Pre-computed entity profile summaries with 24h cache |

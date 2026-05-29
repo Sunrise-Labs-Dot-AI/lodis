@@ -43,6 +43,10 @@ Installing the plugin registers the `lodis` MCP server (no manual config edit) a
 
 The plugin manifest lives in [`.claude-plugin/`](.claude-plugin/); the skills are in [`skills/`](skills/).
 
+### Using Codex, Cursor, Cline, or another MCP client?
+
+The plugin is Claude-Code-only, but the MCP server and all 40 tools work everywhere. To give those agents the same memory know-how the skills provide, connect the server (e.g. Codex: `codex mcp add lodis -- npx -y @sunriselabs/lodis`) and paste the [**Lodis memory policy**](docs/memory-policy.md) into your client's instruction file (`AGENTS.md`, `.cursor/rules`, Cline custom instructions, etc.).
+
 ## Getting Started
 
 After installing, tell your AI assistant:
